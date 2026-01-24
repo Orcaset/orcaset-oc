@@ -1,0 +1,3 @@
+(library
+ (name balance_tests)
+ (libraries orcaset alcotest calendar))

@@ -1,0 +1,4 @@
+(executable
+ (name main)
+ (public_name income2)
+ (libraries orcaset))

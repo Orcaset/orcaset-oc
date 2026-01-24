@@ -1,0 +1,64 @@
+# OCaml
+*.cmi
+*.cmo
+*.cma
+*.cmx
+*.cmxa
+*.cmxs
+*.annot
+*.o
+*.a
+*.so
+*.exe
+*.run
+
+# Files containing detailed information about the compilation (generated
+# by `ocamlc`/`ocamlopt` when invoked using the option `-bin-annot`).
+# These files are typically useful for code inspection tools
+# (e.g. Merlin).
+*.cmt
+*.cmti
+
+# Local OPAM switch
+_opam/
+
+# OPAM
+*.opam
+.opam/
+.opam-switch/
+
+# ocamlbuild and Dune default working directory
+_build/
+
+# ocamlbuild targets
+*.byte
+*.native
+
+# oasis generated files
+setup.data
+setup.log
+
+# Dune generated files
+*.install
+
+# Dune
+dune-project
+dune-workspace
+
+# Merlin
+.merlin
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local configuration
+*.local
+.env
