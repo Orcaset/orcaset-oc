@@ -9,7 +9,7 @@ financial_model
 │   │   ├── revenue: Initial value 1000.0, growing at 5% annually
 │   │   └── cogs: 30% of revenue
 │   ├── opex: Fixed 200.0 per month
-│   ├── [depreciation: 10% of beginning ppe_net / 12 (straight line)]
+│   ├── depreciation: 10% of beginning period ppe_net / 12 (straight line)
 │   ├── tax: 20% of (gross_profit - opex - depreciation)
 │   └── net_income: gross_profit - opex - depreciation - tax
 ├── cash_flow_statement

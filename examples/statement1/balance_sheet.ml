@@ -36,29 +36,35 @@ let make ~start_date ~freq ~initial_cash ~initial_ppe ~common_stock_amount
             let balance = Balance.make ~date ~amount:(lazy new_cash) in
             Some (balance, (new_cash, cf_seq, rest_periods)))
       (initial_cash, Seq.empty, periods)
+    |> Seq.memoize
   in
 
   let ppe_net =
-    Seq.unfold
-      (fun (prev_ppe, periods_seq) ->
-        match periods_seq () with
-        | Seq.Nil -> None
-        | Seq.Cons (period, rest_periods) ->
-            let date = period.Period.end_date in
-            let capex_change =
-              Accrual.accrue period.Period.start_date period.Period.end_date (Lazy.force capex_memo)
-            in
-            let depreciation_change =
-              Accrual.accrue period.Period.start_date period.Period.end_date
-                (Lazy.force depreciation_memo)
-            in
-            let new_ppe = prev_ppe -. capex_change +. depreciation_change in
-            let balance = Balance.make ~date ~amount:(lazy new_ppe) in
-            Some (balance, (new_ppe, rest_periods)))
-      (initial_ppe, periods)
+    let initial_balance = Balance.make ~date:start_date ~amount:(lazy initial_ppe) in
+    let rest =
+      Seq.unfold
+        (fun (prev_ppe, periods_seq) ->
+          match periods_seq () with
+          | Seq.Nil -> None
+          | Seq.Cons (period, rest_periods) ->
+              let date = period.Period.end_date in
+              let capex_change =
+                Accrual.accrue period.Period.start_date period.Period.end_date
+                  (Lazy.force capex_memo)
+              in
+              let depreciation_change =
+                Accrual.accrue period.Period.start_date period.Period.end_date
+                  (Lazy.force depreciation_memo)
+              in
+              let new_ppe = prev_ppe -. capex_change +. depreciation_change in
+              let balance = Balance.make ~date ~amount:(lazy new_ppe) in
+              Some (balance, (new_ppe, rest_periods)))
+        (initial_ppe, periods)
+    in
+    Seq.cons initial_balance rest |> Seq.memoize
   in
 
-  let total_assets = Balance.combine_seq ( +. ) cash ppe_net in
+  let total_assets = Balance.combine_seq ( +. ) cash ppe_net |> Seq.memoize in
 
   let common_stock =
     Seq.unfold
@@ -70,6 +76,7 @@ let make ~start_date ~freq ~initial_cash ~initial_ppe ~common_stock_amount
             let balance = Balance.make ~date ~amount:(lazy common_stock_amount) in
             Some (balance, rest_periods))
       periods
+    |> Seq.memoize
   in
 
   let retained_earnings =
@@ -87,11 +94,16 @@ let make ~start_date ~freq ~initial_cash ~initial_ppe ~common_stock_amount
             let balance = Balance.make ~date ~amount:(lazy new_re) in
             Some (balance, (new_re, rest_periods)))
       (initial_retained_earnings, periods)
+    |> Seq.memoize
   in
 
-  let total_liabilities_equity = Balance.combine_seq ( +. ) common_stock retained_earnings in
+  let total_liabilities_equity =
+    Balance.combine_seq ( +. ) common_stock retained_earnings |> Seq.memoize
+  in
 
-  let balance_check = Balance.combine_seq ( -. ) total_assets total_liabilities_equity in
+  let balance_check =
+    Balance.combine_seq ( -. ) total_assets total_liabilities_equity |> Seq.memoize
+  in
 
   {
     cash;

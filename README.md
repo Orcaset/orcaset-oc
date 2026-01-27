@@ -17,7 +17,7 @@ opam pin add orcaset https://github.com/orcaset/orcaset.git
 
 ## Getting Started
 
-*See the `examples/` directory for sample models and usage instructions.*
+*See the `/examples` directory for sample models and usage instructions.*
 
 ## License
 

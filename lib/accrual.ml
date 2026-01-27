@@ -163,15 +163,12 @@ let const_annual_growth_seq ~start_date ~initial_value ~rate ~(freq : Period.off
     let period = Period.make ~start_date ~end_date:initial_end_date in
     make ~period ~value:(lazy initial_value) ~split_fn:default_split_fn
   in
-  Seq.unfold
-    (fun accrual ->
-      let next_period = Period.add_offset freq accrual.period in
-      let growth_factor = 1. +. (rate *. yf accrual.period.start_date accrual.period.end_date) in
-      let next_value = Lazy.force accrual.value *. growth_factor in
-      let next_accrual =
-        make ~period:next_period ~value:(lazy next_value) ~split_fn:default_split_fn
-      in
-      Some (accrual, next_accrual))
+  Seq.iterate
+    (fun prior_accrual ->
+      let next_period = Period.add_offset freq prior_accrual.period in
+      let growth_factor = 1. +. (rate *. yf next_period.start_date next_period.end_date) in
+      let next_value = Lazy.force prior_accrual.value *. growth_factor in
+      make ~period:next_period ~value:(lazy next_value) ~split_fn:default_split_fn)
     initial_accrual
 
 (** Get the accruals in a sequence after a given date. Prepends a zero-value accrual for any stub

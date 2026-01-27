@@ -250,3 +250,18 @@ let stmt =
 - `to_list stmt` - Flatten to `(label, seq option) list` including groups
 
 The module provides only structural operations. Users handle their own iteration and printing based on sequence types.
+
+
+## Performance Optimizations
+
+Since sequences are O(n) to traverse, accessing distant periods repeated can be costly. Traversals may be explicit (e.g., iterating over a sequence) or implicit (e.g., calling `Accrual.accrue` which scans the sequence).
+
+Use `Seq.memoize` to cache computed elements of a sequence for faster repeated access:
+
+```ocaml
+let memoized_seq = Seq.memoize original_seq
+```
+
+> Note: Sequences with side effects (e.g., printing during construction) should not be memoized, as memoization will skip re-evaluation of side effects.
+
+If execution of a model is slow or hangs, try to identify and memoize frequently accessed sequences.

@@ -18,7 +18,7 @@ let initial_retained_earnings = initial_cash +. initial_ppe -. common_stock_amou
 let rec income_stmt_lazy =
   lazy
     (Income_statement.make ~start_date ~freq ~yf ~revenue_initial ~revenue_growth ~cogs_pct
-       ~opex_monthly ~tax_rate ~depreciation_rate ~initial_ppe ~ppe_net_lazy)
+       ~opex_monthly ~tax_rate ~depreciation_rate ~ppe_net_lazy)
 
 and cash_flow_lazy = lazy (Cash_flow.make ~start_date ~freq ~income_stmt_lazy ~capex_pct)
 
@@ -27,13 +27,13 @@ and balance_sheet_lazy =
     (Balance_sheet.make ~start_date ~freq ~initial_cash ~initial_ppe ~common_stock_amount
        ~initial_retained_earnings ~cash_flow_lazy ~income_stmt_lazy)
 
-and ppe_net_lazy = lazy (Seq.memoize (Lazy.force balance_sheet_lazy).Balance_sheet.ppe_net)
+and ppe_net_lazy = lazy (Lazy.force balance_sheet_lazy).Balance_sheet.ppe_net
 
 let income_stmt = Lazy.force income_stmt_lazy
 let cash_flow = Lazy.force cash_flow_lazy
 let balance_sheet = Lazy.force balance_sheet_lazy
-let output_freq = Period.make_offset ~quarters:1 ()
-let periods = Period.make_seq ~start_date ~offset:output_freq |> Seq.take 5 |> List.of_seq
+let output_freq = Period.make_offset ~months:1 ()
+let periods = Period.make_seq ~start_date ~offset:output_freq |> Seq.take 12 |> List.of_seq
 
 let income_statement =
   let open Statement in
@@ -115,7 +115,6 @@ let print_balance_statement stmt =
   let indent = ref 0 in
   Statement.iter stmt
     ~line_fn:(fun label seq ->
-      let seq = Seq.memoize seq in
       let values =
         List.map
           (fun p ->
@@ -135,7 +134,6 @@ let print_balance_statement stmt =
       | `Exit ->
           (match total with
           | Some seq ->
-              let seq = Seq.memoize seq in
               let values =
                 List.map
                   (fun p ->
