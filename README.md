@@ -13,7 +13,7 @@ Orcaset is a programmatic financial modeling framework designed to safely orches
 Add to an existing `opam` switch with:
 
 ```sh
-opam pin add orcaset https://github.com/orcaset/orcaset.git
+opam pin add orcaset https://github.com/Orcaset/orcaset-oc.git
 ```
 
 ## Getting Started
@@ -197,7 +197,7 @@ Statement.iter stmt
 
 ### Next Steps
 
-See the `/examples` directory for complete working models.
+See the [`/examples`](./examples) directory for complete working models.
 
 ## License
 
