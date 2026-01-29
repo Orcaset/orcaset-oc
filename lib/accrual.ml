@@ -1,19 +1,9 @@
 type split_fn = period:Period.t -> split_date:CalendarLib.Date.t -> value:float -> float * float
-(** Function type for splitting an accrual value at a given date within a period. Returns a tuple of
-    (value_before, value_after) the split date. *)
-
 type t = { period : Period.t; value : float Lazy.t; split_fn : split_fn }
-(** An accrual represents a value spread over a time period with a customizable split function. The
-    value is lazily evaluated to allow mutual dependencies between accrual sequences. *)
 
-(** Force and return the lazy value of an accrual. *)
 let force_value accrual = Lazy.force accrual.value
-
-(** Helper function to compute days difference between two dates *)
 let diff_days d1 d2 = CalendarLib.Date.sub d1 d2 |> CalendarLib.Date.Period.nb_days
 
-(** Default split function that distributes value proportionally based on the number of days before
-    and after the split date. *)
 let default_split_fn ~period ~split_date ~value =
   let total_days = Period.days period |> float_of_int in
   let days_before = diff_days split_date period.start_date |> float_of_int in
@@ -22,22 +12,16 @@ let default_split_fn ~period ~split_date ~value =
   let value_after = value -. value_before in
   (value_before, value_after)
 
-(** Create an accrual from a period, lazy value, and split function. *)
 let make ~period ~value ~split_fn = { period; value; split_fn }
 
-(** Create an accrual from start/end dates, lazy value, and split function. *)
 let make_from_dates ~start_date ~end_date ~value ~split_fn =
   let period = Period.make ~start_date ~end_date in
   { period; value; split_fn }
 
-(** Apply a function to transform the accrual's value. The transformation is applied lazily. *)
 let map f accrual =
   let { period; value; split_fn } = accrual in
   { period; value = lazy (f (Lazy.force value)); split_fn }
 
-(** Split an accrual at the given date, returning two accruals: one for before and one for after. If
-    the split date is outside the accrual's period, a zero-value stub is created for the portion
-    outside the period. The split values are computed lazily. *)
 let split accrual split_date =
   let { period; value; split_fn } = accrual in
   if CalendarLib.Date.compare split_date period.start_date <= 0 then
@@ -66,14 +50,11 @@ let split accrual split_date =
     ( { period = period_before; value = value_before; split_fn },
       { period = period_after; value = value_after; split_fn } )
 
-(** Clip an accrual to the given date range, returning only the portion within the start and end
-    dates. *)
 let clip accrual ~start_date ~end_date =
   let _, after_start = split accrual start_date in
   let before_end, _ = split after_start end_date in
   before_end
 
-(** Print an accrual's period and value to stdout for debugging. Forces the lazy value. *)
 let print { period; value; _ } =
   Printf.printf "Accrual { period = %s to %s; value = %f }\n"
     (CalendarLib.Printer.Date.sprint "%Y-%m-%d" period.start_date)
@@ -93,7 +74,6 @@ let combine_matching_accruals op acc1 acc2 =
   (* This should never be reached. If the caller passes non-equal periods something went wrong. *)
     else failwith "combine_matching_accruals called with non-equal periods"
 
-(** Private helper function for combining sequences of accruals. *)
 let rec combine_seq op seq1 seq2 () =
   match (seq1 (), seq2 ()) with
   | Seq.Nil, Seq.Nil -> Seq.Nil
@@ -128,23 +108,11 @@ let rec combine_seq op seq1 seq2 () =
           ( combine_matching_accruals op acc1_before acc2,
             combine_seq op (Seq.cons acc1_after rest1) rest2 )
 
-(** Sum two sequences of accruals element-wise with automatic period alignment. *)
 let sum_seq = combine_seq ( +. )
-
-(** Subtract two sequences of accruals element-wise with automatic period alignment. *)
 let sub_seq = combine_seq ( -. )
-
-(** Sum two accruals together. Returns a contiguous sequence of one or more accruals that span the
-    entire date range. Any gap periods have zero value. Partial period overlap is automatically
-    interpolated. *)
 let sum acc1 acc2 = sum_seq (Seq.return acc1) (Seq.return acc2)
-
-(** Subtract the second accrual from the first. Returns a contiguous sequence of one or more
-    accruals that span the entire date range. Any gap periods have zero value. Partial period
-    overlap is automatically interpolated. *)
 let sub acc1 acc2 = sub_seq (Seq.return acc1) (Seq.return acc2)
 
-(** Create an accrual sequence with values that growth at a constant annual growth rate. *)
 let const_annual_growth_seq ~start_date ~initial_value ~rate ~(freq : Period.offset)
     ~(yf : CalendarLib.Date.t -> CalendarLib.Date.t -> float) =
   let total_days = freq.days + (freq.weeks * 7) in
@@ -171,9 +139,6 @@ let const_annual_growth_seq ~start_date ~initial_value ~rate ~(freq : Period.off
       make ~period:next_period ~value:(lazy next_value) ~split_fn:default_split_fn)
     initial_accrual
 
-(** Get the accruals in a sequence after a given date. Prepends a zero-value accrual for any stub
-    periods from the date to the series start, if applicable. Interpolates a partial stub period if
-    the split date falls within a period. *)
 let after date seq =
   let rec aux seq () =
     match seq () with
@@ -192,7 +157,6 @@ let after date seq =
   in
   aux seq
 
-(** Accumulate accrual between two dates over a sequence of accruals. Forces lazy values. *)
 let accrue start_date end_date seq =
   let rec aux acc seq =
     match seq () with
@@ -206,9 +170,6 @@ let accrue start_date end_date seq =
   in
   aux 0.0 seq
 
-(** Accumulate accrual values for a list of periods in a single pass through the accrual sequence.
-    Returns a list of floats corresponding to each input period. Assumes periods are sorted
-    chronologically and non-overlapping for optimal performance. Forces lazy values. *)
 let accrue_periods periods accrual_seq =
   let rec aux current_seq periods acc =
     match periods with
