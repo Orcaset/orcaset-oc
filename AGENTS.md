@@ -39,7 +39,7 @@ let revenue : Accrual.t Seq.t =
   Seq.unfold
     (fun start ->
       (* Build period from current start date *)
-      let end_date = Timedesc.Date.add_months 1 start in
+      let end_date = CalendarLib.Date.add start (CalendarLib.Date.Period.month 1) in
       let period = Period.make ~start_date:start ~end_date in
       let accrual = Accrual.make ~period ~value:5000.0 ~split_fn:Accrual.default_split_fn in
       (* Return (element, next_state); None would terminate the sequence *)
@@ -56,8 +56,8 @@ Periods are simply a (start_date, end_date) pair.
 ```ocaml
 (* Single period *)
 let period = Period.make 
-  ~start_date:(Timedesc.Date.of_iso8601_exn "2025-01-01")
-  ~end_date:(Timedesc.Date.of_iso8601_exn "2025-02-01")
+  ~start_date:(CalendarLib.Date.make 2025 1 1)
+  ~end_date:(CalendarLib.Date.make 2025 2 1)
 
 (* Offset for stepping through time *)
 let monthly = Period.make_offset ~months:1 ()
