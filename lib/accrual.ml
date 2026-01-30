@@ -64,9 +64,27 @@ let print { period; value; _ } =
 (* Private helper functions for combining accruals with matching periods. Caller's responsibility to ensure periods match. *)
 let combine_matching_accruals op acc1 acc2 =
   if Period.equal acc1.period acc2.period then
+    let original_period = acc1.period in
     let split_fn ~period ~split_date ~value:_ =
-      let v1_before, v1_after = acc1.split_fn ~period ~split_date ~value:(Lazy.force acc1.value) in
-      let v2_before, v2_after = acc2.split_fn ~period ~split_date ~value:(Lazy.force acc2.value) in
+      (* Compute what portion of each original accrual corresponds to the current sub-period
+         by splitting at the sub-period boundaries, then split that portion at split_date. *)
+      let get_value_for_subperiod acc_split_fn acc_value =
+        if Period.equal period original_period then Lazy.force acc_value
+        else
+          let total = Lazy.force acc_value in
+          let before_start, _ =
+            acc_split_fn ~period:original_period ~split_date:period.Period.start_date ~value:total
+          in
+          let _, after_end =
+            acc_split_fn ~period:original_period ~split_date:period.Period.end_date ~value:total
+          in
+          total -. before_start -. after_end
+      in
+      let v1_for_period = get_value_for_subperiod acc1.split_fn acc1.value in
+      let v2_for_period = get_value_for_subperiod acc2.split_fn acc2.value in
+      (* Now split these sub-period values at split_date *)
+      let v1_before, v1_after = acc1.split_fn ~period ~split_date ~value:v1_for_period in
+      let v2_before, v2_after = acc2.split_fn ~period ~split_date ~value:v2_for_period in
       (op v1_before v2_before, op v1_after v2_after)
     in
     let combined_value = lazy (op (Lazy.force acc1.value) (Lazy.force acc2.value)) in
@@ -178,15 +196,11 @@ let accrue_periods periods accrual_seq =
         let start_date = period.Period.start_date in
         let end_date = period.Period.end_date in
         (* Skip accruals that end before the current period starts *)
-        let rec skip seq =
-          match seq () with
-          | Seq.Nil -> Seq.empty
-          | Seq.Cons (accrual, rest)
-            when CalendarLib.Date.compare accrual.period.end_date start_date <= 0 ->
-              skip rest
-          | node -> fun () -> node
+        let relevant_seq =
+          Seq.drop_while
+            (fun accrual -> CalendarLib.Date.compare accrual.period.end_date start_date <= 0)
+            current_seq
         in
-        let relevant_seq = skip current_seq in
         (* Accumulate value for this period *)
         let rec accum value seq =
           match seq () with
@@ -196,7 +210,10 @@ let accrue_periods periods accrual_seq =
               (value, seq)
           | Seq.Cons (accrual, rest) ->
               let clipped = clip accrual ~start_date ~end_date in
-              accum (value +. Lazy.force clipped.value) rest
+              let new_value = value +. Lazy.force clipped.value in
+              (* If accrual extends past this period, keep it for the next period *)
+              if CalendarLib.Date.compare accrual.period.end_date end_date > 0 then (new_value, seq)
+              else accum new_value rest
         in
         let period_value, next_seq = accum 0.0 relevant_seq in
         aux next_seq rest_periods (period_value :: acc)
