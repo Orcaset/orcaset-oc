@@ -166,11 +166,11 @@ let rec lazy_revenue =
   let initial_accrual =
     Accrual.make ~period:start_period ~value:(lazy 1000.0) ~split_fn:Accrual.default_split_fn
   in
-  let step last_accrual =
-    let last_period = Accrual.period last_accrual in
-    let next_period = Period.add_offset (Period.make_offset ~months:1 ()) last_period in
+  let step prior_accrual =
+    let prior_period = Accrual.period prior_accrual in
+    let next_period = Period.add_offset (Period.make_offset ~months:1 ()) prior_period in
     let next_value =
-      lazy (Accrual.accrue last_period.start_date last_period.end_date (Lazy.force lazy_expenses)
+      lazy (Accrual.accrue prior_period.start_date prior_period.end_date (Lazy.force lazy_expenses)
             *. -2.5)
     in
     let next_accrual = Accrual.make ~period:next_period ~value:next_value ~split_fn:Accrual.default_split_fn in
