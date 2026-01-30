@@ -2,19 +2,27 @@ type split_fn = period:Period.t -> split_date:CalendarLib.Date.t -> value:float 
 (** Function type for splitting an accrual value at a given date within a period. Returns a tuple of
     (value_before, value_after) the split date. *)
 
-type t = { period : Period.t; value : float Lazy.t; split_fn : split_fn }
+type t
 (** An accrual represents a value spread over a time period with a customizable split function. The
-    value is lazily evaluated to allow mutual dependencies between accrual sequences. *)
+    value is lazily evaluated to allow mutual dependencies between accrual sequences. Can be a
+    Simple accrual or a Combined accrual that tracks the lineage of combined values. *)
 
 val default_split_fn : split_fn
 (** Default split function that distributes value proportionally based on the number of days before
     and after the split date. *)
 
+val period : t -> Period.t
+(** Get the period of an accrual. For Combined accruals, returns the period of the left operand. *)
+
+val value : t -> float
+(** Get the value of an accrual, forcing any lazy computations. For Combined accruals, recursively
+    combines the values of the left and right operands. *)
+
 val force_value : t -> float
-(** Force and return the lazy value of an accrual. *)
+(** Alias for [value]. Force and return the lazy value of an accrual. *)
 
 val make : period:Period.t -> value:float Lazy.t -> split_fn:split_fn -> t
-(** Create an accrual from a period, lazy value, and split function. *)
+(** Create a Simple accrual from a period, lazy value, and split function. *)
 
 val make_from_dates :
   start_date:CalendarLib.Date.t ->
@@ -22,10 +30,11 @@ val make_from_dates :
   value:float Lazy.t ->
   split_fn:split_fn ->
   t
-(** Create an accrual from start/end dates, lazy value, and split function. *)
+(** Create a Simple accrual from start/end dates, lazy value, and split function. *)
 
 val map : (float -> float) -> t -> t
-(** Apply a function to transform the accrual's value. The transformation is applied lazily. *)
+(** Apply a function to transform the accrual's value. Returns a Simple accrual, losing any lineage
+    information. The transformation is applied lazily. *)
 
 val split : t -> CalendarLib.Date.t -> t * t
 (** Split an accrual at the given date, returning two accruals: one for before and one for after. If
@@ -38,6 +47,10 @@ val clip : t -> start_date:CalendarLib.Date.t -> end_date:CalendarLib.Date.t -> 
 
 val print : t -> unit
 (** Print an accrual's period and value to stdout for debugging. *)
+
+val combine : (float -> float -> float) -> t -> t -> t
+(** Combine two accruals using an operation. Raises if the periods don't match. Returns a Combined
+    accrual that tracks the lineage of the combination. *)
 
 val sum_seq : t Seq.t -> t Seq.t -> t Seq.t
 (** Sum two sequences of accruals element-wise with automatic period alignment. *)
