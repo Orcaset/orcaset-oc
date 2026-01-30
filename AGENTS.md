@@ -26,10 +26,11 @@ Key principles:
 
 ### Line Items as Accrual Sequences
 
-A line item is an `Accrual.t Seq.t` - a lazy sequence of accruals. Each accrual has:
-- A `period` (start and end dates)
-- A `value` (the amount accrued over that period)
-- A `split_fn` (how to allocate value when splitting at arbitrary dates)
+A line item is an `Accrual.t Seq.t` - a lazy sequence of accruals. Each accrual is either:
+- A **Simple** accrual with a `period`, lazy `value`, and `split_fn`
+- A **Combined** accrual that tracks the lineage of combined values (created via `Accrual.combine` or arithmetic operations)
+
+The `Accrual.t` type is abstract—use accessor functions `Accrual.period` and `Accrual.value` to retrieve properties.
 
 A line item is fundamentally just a sequence. You can construct one manually with `Seq.unfold` to see the mechanics:
 
@@ -41,7 +42,7 @@ let revenue : Accrual.t Seq.t =
       (* Build period from current start date *)
       let end_date = CalendarLib.Date.add start (CalendarLib.Date.Period.month 1) in
       let period = Period.make ~start_date:start ~end_date in
-      let accrual = Accrual.make ~period ~value:5000.0 ~split_fn:Accrual.default_split_fn in
+      let accrual = Accrual.make ~period ~value:(lazy 5000.0) ~split_fn:Accrual.default_split_fn in
       (* Return (element, next_state); None would terminate the sequence *)
       Some (accrual, end_date))
     start_date
@@ -74,7 +75,7 @@ let periods = Period.make_seq ~start_date ~offset:monthly
 (* Single accrual *)
 let accrual = Accrual.make 
   ~period 
-  ~value:1000.0 
+  ~value:(lazy 1000.0) 
   ~split_fn:Accrual.default_split_fn
 
 (* Growing sequence (infinite) *)
@@ -84,7 +85,7 @@ let growing = Accrual.const_annual_growth_seq
 (* Manual sequence construction from a sequence of periods *)
 let custom_seq = 
   Seq.map 
-    (fun period -> Accrual.make ~period ~value:500.0 ~split_fn:Accrual.default_split_fn)
+    (fun period -> Accrual.make ~period ~value:(lazy 500.0) ~split_fn:Accrual.default_split_fn)
     (Period.make_seq ~start_date ~offset:monthly)
 
 (* Convenience function for creating a sequence that grows at a constant annual rate (uses an actual/360 day count internally) *)
@@ -93,6 +94,8 @@ let const_growth_seq = Accrual.const_annual_growth_seq
 ```
 
 The `default_split_fn` allocates value evenly across days in the period. You can define custom split functions for more complex allocation logic (e.g. actual/360 day count, 30/360 day count, evenly across calendar months, etc.).
+
+**Note on Combined accruals:** When accruals are combined via `sum_seq`, `sub_seq`, or `combine`, the result is a `Combined` accrual that preserves lineage. When split, each operand is split recursively, preserving correct value allocation. Use `Accrual.map` if you need to collapse a `Combined` accrual back to a `Simple` one (this loses lineage information).
 
 ---
 
@@ -142,9 +145,9 @@ When two line items depend on each other (e.g. revenue depends on expenses and e
 let rec lazy_a =
   lazy (
     let initial = ... in
-    let step last =
+    let step last ->
       (* access lazy_b for PREVIOUS period only *)
-      let next_value = compute_from (Lazy.force lazy_b) last.period in
+      let next_value = compute_from (Lazy.force lazy_b) (Accrual.period last) in
       Some (make_element next_value, ...)
     in
     Seq.cons initial (Seq.unfold step initial)
@@ -161,13 +164,13 @@ Revenue[N] = Expenses[N-1] * -2.5, where Expenses = Revenue[N] * -0.5
 ```ocaml
 let rec lazy_revenue =
   let initial_accrual =
-    Accrual.make_eager ~period:start_period ~value:1000.0 ~split_fn:Accrual.default_split_fn
+    Accrual.make ~period:start_period ~value:(lazy 1000.0) ~split_fn:Accrual.default_split_fn
   in
   let step last_accrual =
-    let next_period = Period.add_offset (Period.make_offset ~months:1 ()) last_accrual.period in
-    let prev_period = last_accrual.period in
+    let last_period = Accrual.period last_accrual in
+    let next_period = Period.add_offset (Period.make_offset ~months:1 ()) last_period in
     let next_value =
-      lazy (Accrual.accrue prev_period.start_date prev_period.end_date (Lazy.force lazy_expenses)
+      lazy (Accrual.accrue last_period.start_date last_period.end_date (Lazy.force lazy_expenses)
             *. -2.5)
     in
     let next_accrual = Accrual.make ~period:next_period ~value:next_value ~split_fn:Accrual.default_split_fn in
