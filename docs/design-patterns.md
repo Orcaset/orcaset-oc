@@ -1,6 +1,6 @@
 # Orcaset Financial Modeling Design Patterns
 
-A technical guide for building financial models with the orcaset library.
+A technical guide for building financial models with the Orcaset library.
 
 ## Philosophy
 
@@ -17,12 +17,13 @@ Key principles:
 
 ### Line Items as Accrual Sequences
 
-A line item is an `Accrual.t Seq.t` - a lazy sequence of accruals. Each accrual has:
-- A `period` (start and end dates)
-- A `value` (the amount accrued over that period)
-- A `split_fn` (how to allocate value when splitting at arbitrary dates)
+A line item is an `Accrual.t Seq.t` - a lazy sequence of accruals. Each accrual is one of two variants:
+- A **Simple** accrual with a `period`, lazy `value`, and `split_fn`
+- A **Combined** accrual that tracks the lineage of combined values (created when you use `Accrual.combine` or arithmetic operations like `sum_seq`)
 
-A line item is fundamentally just a sequence. You can construct one manually with `Seq.unfold` to see the mechanics:
+The `Accrual.t` type is abstract, so you'll use accessor functions like `Accrual.period` and `Accrual.value` to retrieve properties.
+
+A line item is fundamentally just a sequence. You can construct one manually with `Seq.unfold` to understand the mechanics:
 
 ```ocaml
 (* Manual line item construction with Seq.unfold. Creates a sequence of monthly accruals of 5000.0. *)
@@ -30,15 +31,15 @@ let revenue : Accrual.t Seq.t =
   Seq.unfold
     (fun start ->
       (* Build period from current start date *)
-      let end_date = Timedesc.Date.add_months 1 start in
+      let end_date = CalendarLib.Date.add start (CalendarLib.Date.Period.month 1) in
       let period = Period.make ~start_date:start ~end_date in
-      let accrual = Accrual.make ~period ~value:5000.0 ~split_fn:Accrual.default_split_fn in
+      let accrual = Accrual.make ~period ~value:(lazy 5000.0) ~split_fn:Accrual.default_split_fn in
       (* Return (element, next_state); None would terminate the sequence *)
       Some (accrual, end_date))
     start_date
 ```
 
-**Invariant: Accrual periods in a sequence must be non-overlapping, and strictly increasing.** This is the fundamental assumption of the library. Always produce well-formed sequences. Functions may not produce correct results if this expectation is violated.
+**Important invariant:** Accrual periods in a sequence must be non-overlapping and strictly increasing. This is the fundamental assumption of the library. Always produce well-formed sequences, as functions may not produce correct results if this expectation is violated.
 
 ### Creating Periods
 
@@ -47,8 +48,8 @@ Periods are simply a (start_date, end_date) pair.
 ```ocaml
 (* Single period *)
 let period = Period.make 
-  ~start_date:(Timedesc.Date.of_iso8601_exn "2025-01-01")
-  ~end_date:(Timedesc.Date.of_iso8601_exn "2025-02-01")
+  ~start_date:(CalendarLib.Date.make 2025 1 1)
+  ~end_date:(CalendarLib.Date.make 2025 2 1)
 
 (* Offset for stepping through time *)
 let monthly = Period.make_offset ~months:1 ()
@@ -65,7 +66,7 @@ let periods = Period.make_seq ~start_date ~offset:monthly
 (* Single accrual *)
 let accrual = Accrual.make 
   ~period 
-  ~value:1000.0 
+  ~value:(lazy 1000.0) 
   ~split_fn:Accrual.default_split_fn
 
 (* Growing sequence (infinite) *)
@@ -75,7 +76,7 @@ let growing = Accrual.const_annual_growth_seq
 (* Manual sequence construction from a sequence of periods *)
 let custom_seq = 
   Seq.map 
-    (fun period -> Accrual.make ~period ~value:500.0 ~split_fn:Accrual.default_split_fn)
+    (fun period -> Accrual.make ~period ~value:(lazy 500.0) ~split_fn:Accrual.default_split_fn)
     (Period.make_seq ~start_date ~offset:monthly)
 
 (* Convenience function for creating a sequence that grows at a constant annual rate (uses an actual/360 day count internally) *)
@@ -84,6 +85,8 @@ let const_growth_seq = Accrual.const_annual_growth_seq
 ```
 
 The `default_split_fn` allocates value evenly across days in the period. You can define custom split functions for more complex allocation logic (e.g. actual/360 day count, 30/360 day count, evenly across calendar months, etc.).
+
+**A note on Combined accruals:** When accruals are combined via `sum_seq`, `sub_seq`, or `combine`, the result is a `Combined` accrual that preserves lineage. When split, each operand is split recursively, preserving correct value allocation. If you need to collapse a `Combined` accrual back to a `Simple` one (losing lineage information), use `Accrual.map`.
 
 ---
 
@@ -133,9 +136,9 @@ When two line items depend on each other (e.g. revenue depends on expenses and e
 let rec lazy_a =
   lazy (
     let initial = ... in
-    let step last =
+    let step last ->
       (* access lazy_b for PREVIOUS period only *)
-      let next_value = compute_from (Lazy.force lazy_b) last.period in
+      let next_value = compute_from (Lazy.force lazy_b) (Accrual.period last) in
       Some (make_element next_value, ...)
     in
     Seq.cons initial (Seq.unfold step initial)
@@ -152,13 +155,13 @@ Revenue[N] = Expenses[N-1] * -2.5, where Expenses = Revenue[N] * -0.5
 ```ocaml
 let rec lazy_revenue =
   let initial_accrual =
-    Accrual.make_eager ~period:start_period ~value:1000.0 ~split_fn:Accrual.default_split_fn
+    Accrual.make ~period:start_period ~value:(lazy 1000.0) ~split_fn:Accrual.default_split_fn
   in
-  let step last_accrual =
-    let next_period = Period.add_offset (Period.make_offset ~months:1 ()) last_accrual.period in
-    let prev_period = last_accrual.period in
+  let step prior_accrual =
+    let prior_period = Accrual.period prior_accrual in
+    let next_period = Period.add_offset (Period.make_offset ~months:1 ()) prior_period in
     let next_value =
-      lazy (Accrual.accrue prev_period.start_date prev_period.end_date (Lazy.force lazy_expenses)
+      lazy (Accrual.accrue prior_period.start_date prior_period.end_date (Lazy.force lazy_expenses)
             *. -2.5)
     in
     let next_accrual = Accrual.make ~period:next_period ~value:next_value ~split_fn:Accrual.default_split_fn in
@@ -201,3 +204,59 @@ end
 3. **Dependencies as parameters** - Pass cross-module dependencies through `make` rather than referencing globals
 4. **Lazy for circular deps** - Use `lazy` wrappers when modules have circular dependencies
 5. **Only pass required sequences** - Generally, prefer passing only the (lazy) sequence dependencies rather than entire modules to minimize coupling. Mutually dependent modules should be tied together at the top or parent level using `let rec ... and ...` with lazy wrappers.
+
+---
+
+## Structuring Output with Statement
+
+The `Statement` module provides an optional layer for organizing line items into a presentable hierarchy. While modules group line items for *computation*, `Statement` groups them for *output*—defining how a financial statement should be displayed.
+
+This separation keeps calculation logic independent from presentation. You can create multiple statement views (e.g., a summary vs. detailed breakdown) from the same underlying model data.
+
+### Statement Structure
+
+A statement is a polymorphic tree of items (`'a item`), allowing you to mix different sequence types (e.g. Accrual, Balance, Transaction) in the same statement:
+- **Line** - A labeled sequence (a single row in the output)
+- **Group** - A labeled collection of items with an optional total
+
+```ocaml
+let stmt =
+  let open Statement in
+  group "Income Statement"
+    [
+      line "Revenue" revenue_seq;
+      group ~total:opex.total "Operating Expenses"
+        [
+          line "COGS" opex.cogs;
+          line "Salaries" opex.salaries;
+        ];
+      line "Net Income" net_income_seq;
+    ]
+```
+
+### Core Functions
+
+- `line label seq` - Create a line item
+- `group ?total label items` - Create a group with optional total
+- `fold ~line_fn ~group_fn stmt` - Fold over the statement tree
+- `iter ~line_fn ~group_fn stmt` - Iterate over the statement tree
+- `lines stmt` - Extract all line items as `(label, seq) list`
+- `to_list stmt` - Flatten to `(label, seq option) list` including groups
+
+The module provides only structural operations. You handle your own iteration and printing based on sequence types.
+
+---
+
+## Performance Considerations
+
+Since sequences are O(n) to traverse, accessing distant periods repeatedly can be costly. Traversals may be explicit (e.g., iterating over a sequence) or implicit (e.g., calling `Accrual.accrue` which scans the sequence).
+
+Use `Seq.memoize` to cache computed elements of a sequence for faster repeated access:
+
+```ocaml
+let memoized_seq = Seq.memoize original_seq
+```
+
+Note that sequences with side effects (e.g., printing during construction) should not be memoized, as memoization will skip re-evaluation of side effects.
+
+If your model runs slowly or hangs, try to identify and memoize frequently accessed sequences.
