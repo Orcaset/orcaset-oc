@@ -10,6 +10,7 @@ This project includes a library for creating financial statement models in OCaml
 - Always check work by running `opam exec -- dune build` to make sure outputs compile.
 - Use `ocamlformat` for consistent code formatting. Run `opam exec -- dune fmt --auto` to format code automatically.
 - Write *minimal* comments only when necessary to explain non-obvious logic. Prefer clear, self-explanatory code.
+- Logical groupings of line items should be encapsulated in OCaml modules (where `module.t` is lazily created and passed to other modules if there are mutual dependencies between line item groups).
 
 ## Orcaset Philosophy
 
@@ -24,15 +25,22 @@ Key principles:
 
 ## Core Concepts
 
-### Line Items as Accrual Sequences
+Line items are generally represented as sequences of values over time.
 
-A line item is an `Accrual.t Seq.t` - a lazy sequence of accruals. Each accrual is either:
+- Line items for flows over a period of time (e.g. revenue accruals, expense accruals) - `Accrual.t Seq.t`
+- Line items for point in time flows (e.g. cash received on a specific date) - `Transaction.t Seq.t`
+- Line items for balances at a point in time (e.g. cash balance, asset value) - `Balance.t Seq.t`
+  - NOTE: Balance line items are generally modeled as `Balance_series.t` and materialized on specific dates using `Balance_series.on`, `Balance_series.at_dates`, `Balance_series.at_periods`, etc.
+
+### Accrual Line Item
+
+An accrual line item is an `Accrual.t Seq.t` - a lazy sequence of accruals. Each accrual is either:
 - A **Simple** accrual with a `period`, lazy `value`, and `split_fn`
 - A **Combined** accrual that tracks the lineage of combined values (created via `Accrual.combine` or arithmetic operations)
 
-The `Accrual.t` type is abstract—use accessor functions `Accrual.period` and `Accrual.value` to retrieve properties.
+Use accessor functions `Accrual.period` and `Accrual.value` to retrieve properties.
 
-A line item is fundamentally just a sequence. You can construct one manually with `Seq.unfold` to see the mechanics:
+An accrual line item is fundamentally just a sequence. You can construct one manually with `Seq.unfold` to see the mechanics:
 
 ```ocaml
 (* Manual line item construction with Seq.unfold. Creates a sequence of monthly accruals of 5000.0. *)
@@ -95,11 +103,56 @@ let const_growth_seq = Accrual.const_annual_growth_seq
 
 The `default_split_fn` allocates value evenly across days in the period. You can define custom split functions for more complex allocation logic (e.g. actual/360 day count, 30/360 day count, evenly across calendar months, etc.).
 
-**Note on Combined accruals:** When accruals are combined via `sum_seq`, `sub_seq`, or `combine`, the result is a `Combined` accrual that preserves lineage. When split, each operand is split recursively, preserving correct value allocation. Use `Accrual.map` if you need to collapse a `Combined` accrual back to a `Simple` one (this loses lineage information).
+### Working with Balances
+
+Balances are point-in-time snapshots.
+
+```ocaml
+(* Single balance *)
+let balance = Balance.make 
+  ~date:(CalendarLib.Date.make 2025 1 1)
+  ~amount:(lazy 10000.0)
+```
+
+Create time series of balances that derive from accruals or transactions using `Balance_series.from_accruals` or `Balance_series.from_transactions`. DO NOT MANUALLY CONSTRUCT SEQUENCES OF BALANCES SINCE SEQUENCES WOULD NEED TO BE TOO DENSE TO CAPTURE ALL POSSIBLE QUERY DATES.
+
+```ocaml
+(* Create balance series from accrual sequence. 
+    Starts at 1000 on 2025-01-01 and changes based on `const_growth_seq` thereafter. *)
+let const_growth_seq = Accrual.const_annual_growth_seq
+  ~start_date ~initial_value:2000.0 ~rate:0.05 ~freq:quarterly
+
+let balance_from_accruals = 
+  Balance_series.from_accruals 
+    ~initial_date:(CalendarLib.Date.make 2025 1 1)
+    ~initial_amount:(lazy 1000.0)
+    const_growth_seq
+
+(* Create balance series from transaction sequence. 
+    Starts at 500 on 2025-01-01 and changes based on transactions thereafter. *)
+let txn_seq = Seq.of_list [
+  Transaction.make 
+    ~date:(CalendarLib.Date.make 2025 2 1)
+    ~amount:(lazy 300.0);
+  Transaction.make 
+    ~date:(CalendarLib.Date.make 2025 3 15)
+    ~amount:(lazy -100.0);
+]
+
+let balance_from_txns = 
+  Balance_series.from_transactions 
+    ~initial_date:(CalendarLib.Date.make 2025 1 1)
+    ~initial_amount:(lazy 500.0)
+    txn_seq
+```
+
+Create balance series from other types of inputs using `Balance_series.from_flow`.
+
+Combine balance series using `Balance_series.combine` or arithmetic operations.
 
 ---
 
-## Creating Line Item Sequences
+## Creating Line Items
 
 ### Independent Composition
 
