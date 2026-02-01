@@ -48,6 +48,7 @@ let sum_over seq ~start_date ~end_date =
     | Seq.Nil -> acc
     | Seq.Cons (txn, rest) ->
         if CalendarLib.Date.compare txn.date end_date > 0 then acc
+        else if CalendarLib.Date.compare txn.date end_date = 0 then acc +. Lazy.force txn.value
         else if CalendarLib.Date.compare txn.date start_date >= 0 then
           aux (acc +. Lazy.force txn.value) rest
         else aux acc rest

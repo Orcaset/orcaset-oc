@@ -28,8 +28,11 @@ let rec on balance query_date =
   match balance with
   | Constant amount -> Balance.{ date = query_date; value = amount }
   | Base { initial_date; initial_amount; sum_between } ->
-      let delta = sum_between ~start_date:initial_date ~end_date:query_date in
-      Balance.{ date = query_date; value = lazy (Lazy.force initial_amount +. delta) }
+      if CalendarLib.Date.compare query_date initial_date = 0 then
+        Balance.{ date = query_date; value = initial_amount }
+      else
+        let delta = sum_between ~start_date:initial_date ~end_date:query_date in
+        Balance.{ date = query_date; value = lazy (Lazy.force initial_amount +. delta) }
   | Combined { op; left; right } ->
       let left_balance = on left query_date in
       let right_balance = on right query_date in
