@@ -2,4 +2,12 @@
  (name orcaset)
  (public_name orcaset)
  (libraries calendar)
- (modules orcaset period accrual balanceSeries transaction yf statement))
+ (modules
+  orcaset
+  period
+  accrual
+  balance
+  balance_series
+  transaction
+  yf
+  statement))

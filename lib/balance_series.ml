@@ -1,5 +1,3 @@
-type point = { date : CalendarLib.Date.t; amount : float Lazy.t }
-
 type t =
   | Base of {
       initial_date : CalendarLib.Date.t;
@@ -28,24 +26,21 @@ let constant amount = Constant amount
 
 let rec on balance query_date =
   match balance with
-  | Constant amount -> { date = query_date; amount }
+  | Constant amount -> Balance.{ date = query_date; value = amount }
   | Base { initial_date; initial_amount; sum_between } ->
       let delta = sum_between ~start_date:initial_date ~end_date:query_date in
-      { date = query_date; amount = lazy (Lazy.force initial_amount +. delta) }
+      Balance.{ date = query_date; value = lazy (Lazy.force initial_amount +. delta) }
   | Combined { op; left; right } ->
-      let left_pt = on left query_date in
-      let right_pt = on right query_date in
-      {
-        date = query_date;
-        amount = lazy (op (Lazy.force left_pt.amount) (Lazy.force right_pt.amount));
-      }
+      let left_balance = on left query_date in
+      let right_balance = on right query_date in
+      Balance.
+        {
+          date = query_date;
+          value = lazy (op (Lazy.force left_balance.value) (Lazy.force right_balance.value));
+        }
 
 let combine op left right = Combined { op; left; right }
 let sum a b = combine ( +. ) a b
 let sub a b = combine ( -. ) a b
 let at_dates balance dates = Seq.map (fun d -> on balance d) dates
 let at_periods balance periods = Seq.map (fun p -> on balance p.Period.end_date) periods
-
-let point_to_string pt =
-  let date_str = CalendarLib.Printer.Date.sprint "%Y-%m-%d" pt.date in
-  Printf.sprintf "Date: %s, Amount: %.2f" date_str (Lazy.force pt.amount)

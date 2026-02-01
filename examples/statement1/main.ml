@@ -107,7 +107,7 @@ let print_balance_statement ~output_periods item =
   let fmt v = Printf.sprintf "%14.2f" v in
   let print_row label seq =
     let values =
-      List.map (fun p -> Lazy.force (BalanceSeries.on seq p.Period.end_date).amount) output_periods
+      List.map (fun p -> Lazy.force (Balance_series.on seq p.Period.end_date).value) output_periods
     in
     Printf.printf "%-30s%s\n" label (String.concat "" (List.map fmt values))
   in

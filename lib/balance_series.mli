@@ -8,9 +8,6 @@
     underlying flow has annual periods) return correct pro-rata values rather than stale snapshots.
 *)
 
-type point = { date : CalendarLib.Date.t; amount : float Lazy.t }
-(** A point-in-time balance snapshot. Used for materialized output. *)
-
 type t
 (** A queryable balance series. Abstract to ensure balances are constructed with proper flow
     information. *)
@@ -40,7 +37,7 @@ val from_flow :
 val constant : float Lazy.t -> t
 (** Create a balance series with a constant value at all dates. *)
 
-val on : t -> CalendarLib.Date.t -> point
+val on : t -> CalendarLib.Date.t -> Balance.t
 (** Query the balance at a specific date. Returns a point with the computed balance. *)
 
 val combine : (float -> float -> float) -> t -> t -> t
@@ -54,13 +51,10 @@ val sum : t -> t -> t
 val sub : t -> t -> t
 (** [sub a b] is equivalent to [combine ( -. ) a b]. *)
 
-val at_dates : t -> CalendarLib.Date.t Seq.t -> point Seq.t
+val at_dates : t -> CalendarLib.Date.t Seq.t -> Balance.t Seq.t
 (** Materialize the balance series at a sequence of dates. Returns a sequence of point snapshots,
     one for each input date. *)
 
-val at_periods : t -> Period.t Seq.t -> point Seq.t
+val at_periods : t -> Period.t Seq.t -> Balance.t Seq.t
 (** Materialize the balance series at the end date of each period. Convenience function equivalent
     to [at_dates t (Seq.map (fun p -> p.Period.end_date) periods)]. *)
-
-val point_to_string : point -> string
-(** Convert a point to a human-readable string representation. *)
