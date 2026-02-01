@@ -43,24 +43,23 @@ let make ~loan_amount ~annual_rate ~term_months ~start_date ~yf =
            let bal = Orcaset.Balance_series.on (Lazy.force lazy_balance_seq) beg_date in
            let days_frac = yf beg_date end_date in
            let interest_value =
-             -.Lazy.force bal.Orcaset.Balance.value *. (annual_rate /. 360.0) *. days_frac
+             -.Lazy.force bal.Orcaset.Balance.value *. annual_rate *. days_frac
            in
            Orcaset.Transaction.make ~date:end_date ~value:(lazy interest_value))
-         interest_periods)
+         interest_periods
+      |> Seq.memoize)
   and lazy_total_payment =
     lazy
       (Seq.map
          (fun period ->
-           Printf.printf "Processing period: %s to %s\n"
-             (CalendarLib.Printer.Date.to_string period.Orcaset.Period.start_date)
-             (CalendarLib.Printer.Date.to_string period.Orcaset.Period.end_date);
            Orcaset.Transaction.make ~date:period.Orcaset.Period.end_date
              ~value:(lazy (-.monthly_payment)))
          interest_periods)
   and lazy_amort =
     lazy
       (Orcaset.Transaction.combine_seq ( -. ) (Lazy.force lazy_total_payment)
-         (Lazy.force lazy_interest_seq))
+         (Lazy.force lazy_interest_seq)
+      |> Seq.memoize)
   in
   let interest_pmt = Lazy.force lazy_interest_seq in
   let amort = Lazy.force lazy_amort in
