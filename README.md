@@ -22,7 +22,9 @@ Orcaset models can be built incrementally. They can start as ad-hoc scripts and 
 
 ### Create a Line Item
 
-Orcaset models are built around sequences of data over time representing financial line items. They are analogous to rows in a financial statement. Orcaset uses OCaml's standard `Seq` module to represent these sequences, which may be infinite and are evaluated lazily.
+Orcaset models are built around series of data over time representing financial line items. They are analogous to rows in a financial statement. The series are lazy evaluated and may be infinite.
+
+The most basic way to create a series of values is by using OCaml's built-in `Seq` module.
 
 ```ocaml
 (* Infinite sequence starting at 1000 and growing by 10% each period *)
@@ -86,7 +88,37 @@ module Income = struct
 end
 ```
 
-### Working with Co-Dependent Line Items
+**Note on Balance Types**
+
+While you *could* represent series of balances using the `Seq` module like we did for accruals, they would be hard to work with reliably. You would either have to create dense (i.e. daily) sequences or guarantee that the program only queries balances on dates that exist in the sequence. Instead, Orcaset provide the `Balance_series` module for working with series of balances. It allows users to define series of balances based on a starting value and a series of flows that determine how the balance changes over time. It automatically handles calculating balances for arbitrary dates when queried.
+
+```ocaml
+(* Constant 50.0 increase each month. *)
+let interest = Seq.map
+  (fun period -> 
+    Accrual.make
+      ~period
+      ~value:(lazy 50.0)
+      ~split_fn:Accrual.default_split_fn)
+  (Period.make_seq
+    ~start_date:(Date.make 2025 1 1)
+    ~offset:(Period.make_offset ~months:1 ()))
+
+(* Account balance starts at 1000.0 and grows by `interest` *)
+let balance = Balance_series.from_flow
+  ~initial_date:(Date.make 2025 1 1)
+  ~initial_value:(lazy 1000.0)
+  ~sum_between:(fun ~start_date ~end_date -> Accrual.accrue start_date end_date interest)
+```
+
+We can query `balance` for any future date, and it will calculate the interpolated balance including accrued interest to that date.
+
+```ocaml
+Balance_series.on balance (CalendarLib.Date.make 2026 12 31) |> Balance.to_string
+(* "Date: 2026-12-31, Amount: 2198.39" *)
+```
+
+### Working with Mutually-Dependent Line Items
 
 Orcaset uses lazy evaluation to handle mutually dependent sequences. For example, suppose revenue starts at 100 and grows based on the prior period's marketing costs, while marketing costs are a percentage of current period revenue:
 
@@ -122,40 +154,35 @@ For mutually dependent sequences to resolve correctly, there must be a starting 
 
 ### Memoizing Sequences
 
-There may be a mismatch between timing of events in related sequences. For example, interest on a revolving credit facility might accrue on a quarterly basis, while the outstanding balance might change on any given day. A natural way to model interest would be `interest_rate * (average balance over the past quarter)`. In code, this looks like:
+Consider a report where we want to show the total transaction value for sales on a quarterly basis. A sale could occur on any given day. In code, this looks like:
 
 ```ocaml
 let start_date = CalendarLib.Date.make 2025 1 1
-let interest_rate = 0.05
-let balances = List.to_seq [ (* ... balances ... *) ]
+let sale_transactions = Seq.unfold ... (* sequence of sales transactions *)
 
-let interest =
-  let interest_periods = Period.make_seq ~start_date ~offset:(Period.make_offset ~months:3 ()) in
-  Seq.map
-    (fun period ->
-      let avg_balance = Balance.avg Yf.actual_360 period.Period.start_date period.Period.end_date balances in
-      Accrual.make ~period
-        ~value: (lazy (avg_balance *. interest_rate *. Yf.actual_360 period.start_date period.end_date))
-        ~split_fn:Accrual.default_split_fn)
-    interest_periods
+let quarterly_periods = Period.make_seq
+  ~start_date
+  ~offset:(Period.make_offset ~months:3 ())
+
+let quarterly_sales = Seq.map
+  (fun period ->
+    let total_sales = Transaction.sum_over sale_transactions ~start_date:period.start_date ~end_date:period.end_date)
+  quarterly_periods
 ```
 
-To calculate the average balance over each period, OCaml scans all elements in the `balances` sequence from the start through `period.end_date` for each interest accrual. This repeated traversal can grow quickly as models scale.
+While this code works, it is inefficient. For each quarterly period, it iterates over the sequence of sale transactions from the beginning and recalculates sale values each time. For complex models or long sequences, this pattern can become a performance bottleneck.
 
-An easy way to improve performance in these scenarios is to memoize the sequence so that each element is only computed once:
+The easiest solution if code execution becomes too slow is memoizing the underlying sequences.
 
 ```ocaml
-let balances = List.to_seq [ (* ... balances ... *) ] |> Seq.memoize
+let quarterly_sales = Seq.map
+  (fun period ->
+    let total_sales = Transaction.sum_over sale_transactions ~start_date:period.start_date ~end_date:period.end_date)
+  (* Map over the memoized sequence of transactions. *)
+  (Seq.memoize quarterly_periods)  
 ```
 
-This pattern is also common when printing values for a sequence over a range of periods. Memoizing a sequence before iteration can significantly improve performance:
-
-```ocaml
-let () =
-  let revenue = revenue |> Seq.memoize in
-  let periods = Period.make_seq ~start_date:(CalendarLib.Date.make 2025 1 1) ~offset:(Period.make_offset ~months:1 ()) in
-  (* ...iterate over periods and print revenue accruals *)
-```
+You should take care not to memoize sequences with side effects, but sequences should generally be pure functions.
 
 ### Structuring Output with Statement
 
