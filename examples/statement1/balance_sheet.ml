@@ -22,12 +22,12 @@ let make ~start_date ~initial_cash ~initial_ppe ~common_stock_amount ~cash_flow_
   in
   let ppe_net =
     Balance_series.from_accruals ~initial_date:start_date
-      ~initial_amount:(lazy initial_ppe)
+      ~initial_value:(lazy initial_ppe)
       ppe_change_seq_lazy
   in
   let cash =
     Balance_series.from_flow ~initial_date:start_date
-      ~initial_amount:(lazy initial_cash)
+      ~initial_value:(lazy initial_cash)
       ~sum_between:(fun ~start_date ~end_date ->
         let cash_flow_stmt = Lazy.force cash_flow_statement_lazy in
         Accrual.accrue start_date end_date cash_flow_stmt.Cash_flow_statement.net_cash_change)
@@ -37,7 +37,7 @@ let make ~start_date ~initial_cash ~initial_ppe ~common_stock_amount ~cash_flow_
   let initial_re = initial_cash +. initial_ppe -. common_stock_amount in
   let retained_earnings =
     Balance_series.from_flow ~initial_date:start_date
-      ~initial_amount:(lazy initial_re)
+      ~initial_value:(lazy initial_re)
       ~sum_between:(fun ~start_date ~end_date ->
         let income_stmt = Lazy.force income_statement_lazy in
         Accrual.accrue start_date end_date income_stmt.Income_statement.net_income)

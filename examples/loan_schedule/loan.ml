@@ -32,7 +32,7 @@ let make ~loan_amount ~annual_rate ~term_months ~start_date ~yf =
   let rec lazy_balance_seq =
     lazy
       (Orcaset.Balance_series.from_transactions ~initial_date:start_date
-         ~initial_amount:(lazy loan_amount)
+         ~initial_value:(lazy loan_amount)
          lazy_amort)
   and lazy_interest_seq =
     lazy
@@ -66,7 +66,7 @@ let make ~loan_amount ~annual_rate ~term_months ~start_date ~yf =
   let total_pmt = Orcaset.Transaction.combine_seq ( +. ) amort interest_pmt in
   let balance =
     Orcaset.Balance_series.from_transactions ~initial_date:start_date
-      ~initial_amount:(lazy loan_amount)
+      ~initial_value:(lazy loan_amount)
       (lazy amort)
   in
   { balance; interest_pmt; amort; total_pmt; loan_amount; annual_rate; start_date; term_months; yf }

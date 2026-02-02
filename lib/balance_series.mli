@@ -13,20 +13,20 @@ type t
     information. *)
 
 val from_accruals :
-  initial_date:CalendarLib.Date.t -> initial_amount:float Lazy.t -> Accrual.t Seq.t Lazy.t -> t
+  initial_date:CalendarLib.Date.t -> initial_value:float Lazy.t -> Accrual.t Seq.t Lazy.t -> t
 (** Create a balance series from an accrual sequence. The balance at any date is computed as:
-    initial_amount + sum of accrued values from initial_date to query_date. Accruals are split
+    initial_value + sum of accrued values from initial_date to query_date. Accruals are split
     pro-rata when the query date falls within an accrual period. *)
 
 val from_transactions :
-  initial_date:CalendarLib.Date.t -> initial_amount:float Lazy.t -> Transaction.t Seq.t Lazy.t -> t
+  initial_date:CalendarLib.Date.t -> initial_value:float Lazy.t -> Transaction.t Seq.t Lazy.t -> t
 (** Create a balance series from a transaction sequence. The balance at any date is computed as:
-    initial_amount + sum of transactions from initial_date to query_date. Transactions on the
+    initial_value + sum of transactions from initial_date to query_date. Transactions on the
     query_date are included. *)
 
 val from_flow :
   initial_date:CalendarLib.Date.t ->
-  initial_amount:float Lazy.t ->
+  initial_value:float Lazy.t ->
   sum_between:(start_date:CalendarLib.Date.t -> end_date:CalendarLib.Date.t -> float) ->
   t
 (** Create a balance series from a custom flow function. The sum_between function should return the
