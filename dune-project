@@ -1,0 +1,23 @@
+(lang dune 3.0)
+
+(name orcaset)
+
+(generate_opam_files true)
+
+(source
+ (github Orcaset/orcaset-oc))
+
+(authors "Orcaset")
+
+(maintainers "Orcaset")
+(license SSPL)
+
+(package
+ (name orcaset)
+ (synopsis "Financial models in OCaml")
+ (description "Build strongly-type, composable financial models using OCaml")
+ (depends
+   (ocaml (>= 5.4.0))
+   dune
+   calendar
+   (alcotest :with-test)))
