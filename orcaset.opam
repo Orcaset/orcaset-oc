@@ -4,7 +4,7 @@ synopsis: "Financial models in OCaml"
 description: "Build strongly-type, composable financial models using OCaml"
 maintainer: ["Orcaset"]
 authors: ["Orcaset"]
-license: "SSPL"
+license: "SSPL-1.0"
 homepage: "https://github.com/Orcaset/orcaset-oc"
 bug-reports: "https://github.com/Orcaset/orcaset-oc/issues"
 depends: [
