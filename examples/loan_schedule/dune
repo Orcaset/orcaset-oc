@@ -1,4 +1,0 @@
-(executable
- (name main)
- (public_name loan_schedule)
- (libraries orcaset))

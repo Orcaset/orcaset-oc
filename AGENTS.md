@@ -3,7 +3,6 @@
 This project includes a library for creating financial statement models in OCaml and usage examples.
 
 `/lib` contains the main library code for building and manipulating financial models.
-`/examples` contains example executables and should be where new example programs are added.
 
 ## Coding Style
 

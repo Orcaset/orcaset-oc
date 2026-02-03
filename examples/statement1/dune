@@ -1,4 +1,0 @@
-(executable
- (name main)
- (public_name statement1)
- (libraries orcaset))

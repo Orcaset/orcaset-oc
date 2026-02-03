@@ -224,7 +224,7 @@ Statement.iter stmt
 
 ### Next Steps
 
-See the [`/examples`](./examples) directory for complete working models.
+See the [`Orcaset Examples`](https://github.com/Orcaset/orcaset-oc-examples) repository for complete working models.
 
 ## License
 
