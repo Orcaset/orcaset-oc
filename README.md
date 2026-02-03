@@ -18,6 +18,8 @@ opam pin add orcaset https://github.com/Orcaset/orcaset-oc.git
 
 ## Getting Started
 
+*See the [Orcaset Examples](https://github.com/Orcaset/orcaset-oc-examples) repository for complete working models.*
+
 Orcaset models can be built incrementally. They can start as ad-hoc scripts and evolve into highly structured models as they grow. Users coming from spreadsheets will find that Orcaset components map naturally to familiar modeling concepts.
 
 ### Create a Line Item
