@@ -5,9 +5,9 @@
  (wrapped false))
 
 (executable
- (name main)
- (public_name real_estate_proforma)
- (modules main)
+ (name run_property)
+ (public_name run_property)
+ (modules run_property)
  (libraries real_estate_lib orcaset unix))
 
 (executable

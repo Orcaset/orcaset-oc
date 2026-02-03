@@ -1,14 +1,10 @@
 (* Commercial Real Estate Pro Forma Model
    
+   Demonstrates a simple pro forma model for a fictitious small office building.
+
    Property: Small Class B Office Building
    - 25,000 SF rentable area
    - 50 parking spaces
-   - Built in 2010, acquired January 2023
-   - Located in suburban market
-   
-   Historical context (Year 0 = 2022):
-   - Acquired at 85% occupancy
-   - Below-market rents being rolled to market
 *)
 
 (* =====================================================
@@ -18,7 +14,8 @@
 (* Dates *)
 let start_date = CalendarLib.Date.make 2023 1 1
 let freq = Orcaset.Period.make_offset ~months:1 ()
-let output_freq = Orcaset.Period.make_offset ~years:1 ()
+let output_freq = Orcaset.Period.make_offset ~months:1 ()
+let output_periods = 120
 let yf = Orcaset.Yf.actual_360
 
 (* Property Characteristics *)
@@ -213,6 +210,7 @@ let () =
   Printf.printf "PRO FORMA CASH FLOW PROJECTION (5-Year)\n";
   Printf.printf "=======================================\n\n";
   let periods =
-    Orcaset.Period.make_seq ~start_date ~offset:output_freq |> Seq.take 5 |> List.of_seq
+    Orcaset.Period.make_seq ~start_date ~offset:output_freq
+    |> Seq.take output_periods |> List.of_seq
   in
   print_statement ~periods pro_forma_statement
