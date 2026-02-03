@@ -17,7 +17,7 @@ let property_count = 1000
 let start_date = CalendarLib.Date.make 2023 1 1
 let freq = Period.make_offset ~months:1 ()
 let output_freq = Period.make_offset ~months:1 ()
-let output_periods = 12
+let output_periods = 120
 let yf = Orcaset.Yf.actual_360
 
 (* =====================================================
@@ -58,22 +58,25 @@ let downtown_office : Property.assumptions =
     ti_per_sf_annual = 1.50;
     leasing_commission_pct = 0.02;
   }
-
 (* =====================================================
    BUILD PORTFOLIO MODEL
    ===================================================== *)
 
 let properties =
-  let property_list = [ Property.make downtown_office ] in
-  List.to_seq property_list |> Seq.cycle |> Seq.take property_count |> List.of_seq
+  let assumptions_list = [ downtown_office ] in
+  List.to_seq assumptions_list |> Seq.cycle |> Seq.take property_count |> Seq.map Property.make
+  |> List.of_seq
 
-(* Helper to aggregate a field across all properties *)
+(* Output periods *)
+let periods =
+  Period.make_seq ~start_date ~offset:output_freq |> Seq.take output_periods |> List.of_seq
+
+(* Helper to aggregate a field across all properties using accrue_periods *)
 let aggregate f =
+  let zero = List.init output_periods (fun _ -> 0.0) in
   List.fold_left
-    (fun acc p -> Accrual.sum_seq acc (f p))
-    (f (List.hd properties))
-    (List.tl properties)
-  |> Seq.memoize
+    (fun acc p -> List.map2 ( +. ) acc (Accrual.accrue_periods periods (f p)))
+    zero properties
 
 (* Portfolio totals - aggregate all property line items *)
 
@@ -112,7 +115,6 @@ let portfolio_total_debt = aggregate (fun p -> p.Property.debt.Debt.total_debt_s
 let portfolio_noi = aggregate (fun p -> p.Property.noi)
 let portfolio_cfbf = aggregate (fun p -> p.Property.cfbf)
 let portfolio_cfaf = aggregate (fun p -> p.Property.cfaf)
-
 (* =====================================================
    PORTFOLIO STATEMENT STRUCTURE
    ===================================================== *)
@@ -161,20 +163,19 @@ let portfolio_statement =
    OUTPUT
    ===================================================== *)
 
-let print_statement ~periods item =
+let print_statement item =
   let hdr p =
     Printf.sprintf "%14s" (CalendarLib.Printer.Date.sprint "%Y-%m-%d" p.Period.start_date)
   in
   let fmt v = Printf.sprintf "%14.0f" v in
-  let print_row label seq =
-    Printf.printf "%-40s%s\n" label
-      (String.concat "" (List.map fmt (Accrual.accrue_periods periods seq)))
+  let print_row label values =
+    Printf.printf "%-40s%s\n" label (String.concat "" (List.map fmt values))
   in
   Printf.printf "%-40s%s\n" "" (String.concat "" (List.map hdr periods));
   Printf.printf "%s\n" (String.make (40 + (14 * List.length periods)) '=');
   let indent = ref 0 in
   Statement.iter item
-    ~line_fn:(fun label seq -> print_row (String.make !indent ' ' ^ label) seq)
+    ~line_fn:(fun label values -> print_row (String.make !indent ' ' ^ label) values)
     ~group_fn:(fun label total phase ->
       match phase with
       | `Enter ->
@@ -214,7 +215,4 @@ let () =
   print_portfolio_summary ();
   Printf.printf "PORTFOLIO PRO FORMA PROJECTIONS\n";
   Printf.printf "==================================================\n\n";
-  let periods =
-    Period.make_seq ~start_date ~offset:output_freq |> Seq.take output_periods |> List.of_seq
-  in
-  print_statement ~periods portfolio_statement
+  print_statement portfolio_statement
