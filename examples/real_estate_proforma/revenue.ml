@@ -30,7 +30,8 @@ let make ~opex_total_lazy ~start_date ~base_rent_first ~rent_growth ~parking_mon
   in
   (* Parking: Fixed monthly income with modest growth *)
   let parking =
-    Accrual.const_annual_growth_seq ~start_date ~initial_value:parking_monthly ~rate:0.02 ~freq ~yf
+    Accrual.const_annual_growth_seq ~start_date ~initial_value:parking_monthly ~rate:rent_growth
+      ~freq ~yf
     |> Seq.memoize
   in
   (* CAM recoveries: Based on PRIOR month's operating expenses
@@ -64,8 +65,8 @@ let make ~opex_total_lazy ~start_date ~base_rent_first ~rent_growth ~parking_mon
   in
   (* Other income: Storage, signage, misc fees *)
   let other_income =
-    Accrual.const_annual_growth_seq ~start_date ~initial_value:other_income_monthly ~rate:0.01 ~freq
-      ~yf
+    Accrual.const_annual_growth_seq ~start_date ~initial_value:other_income_monthly
+      ~rate:rent_growth ~freq ~yf
     |> Seq.memoize
   in
   (* Gross potential rent = sum of all revenue streams *)

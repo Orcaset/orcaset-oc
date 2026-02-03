@@ -29,15 +29,14 @@ type assumptions = {
   vacancy_rate : float;
   (* OpEx assumptions *)
   property_taxes_annual : float;
-  property_tax_growth : float;
   insurance_annual : float;
-  insurance_growth : float;
   utilities_monthly : float;
   repairs_monthly : float;
   management_fee_pct : float;
   janitorial_monthly : float;
   landscaping_monthly : float;
   security_monthly : float;
+  expense_growth : float;
   (* Debt assumptions *)
   purchase_price : float;
   ltv : float;
@@ -80,11 +79,10 @@ let make (a : assumptions) : t =
       (Opex.make
          ~egi_lazy:(lazy (Lazy.force lazy_revenue).Revenue.effective_gross_income)
          ~start_date:a.start_date ~property_taxes_annual:a.property_taxes_annual
-         ~property_tax_growth:a.property_tax_growth ~insurance_annual:a.insurance_annual
-         ~insurance_growth:a.insurance_growth ~utilities_monthly:a.utilities_monthly
+         ~insurance_annual:a.insurance_annual ~utilities_monthly:a.utilities_monthly
          ~repairs_monthly:a.repairs_monthly ~management_fee_pct:a.management_fee_pct
          ~janitorial_monthly:a.janitorial_monthly ~landscaping_monthly:a.landscaping_monthly
-         ~security_monthly:a.security_monthly ~freq:a.freq ~yf:a.yf)
+         ~security_monthly:a.security_monthly ~expense_growth:a.expense_growth ~freq:a.freq ~yf:a.yf)
   and lazy_capex =
     lazy
       (Capex.make

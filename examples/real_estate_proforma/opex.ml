@@ -26,31 +26,31 @@ type t = {
   total : Accrual.t Seq.t;
 }
 
-let make ~egi_lazy ~start_date ~property_taxes_annual ~property_tax_growth ~insurance_annual
-    ~insurance_growth ~utilities_monthly ~repairs_monthly ~management_fee_pct ~janitorial_monthly
-    ~landscaping_monthly ~security_monthly ~freq ~yf =
+let make ~egi_lazy ~start_date ~property_taxes_annual ~insurance_annual ~utilities_monthly
+    ~repairs_monthly ~management_fee_pct ~janitorial_monthly ~landscaping_monthly ~security_monthly
+    ~expense_growth ~freq ~yf =
   (* Property taxes: Annual amount distributed monthly, with annual growth *)
   let property_taxes =
     Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.property_taxes_annual /. 12.0)
-      ~rate:property_tax_growth ~freq ~yf
+      ~rate:expense_growth ~freq ~yf
     |> Seq.memoize
   in
   (* Insurance: Annual premium distributed monthly, with modest growth *)
   let insurance =
     Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.insurance_annual /. 12.0)
-      ~rate:insurance_growth ~freq ~yf
+      ~rate:expense_growth ~freq ~yf
     |> Seq.memoize
   in
-  (* Utilities: Common area utilities with inflation *)
+  (* Utilities: Common area utilities with expense growth *)
   let utilities =
-    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.utilities_monthly) ~rate:0.03
-      ~freq ~yf
+    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.utilities_monthly)
+      ~rate:expense_growth ~freq ~yf
     |> Seq.memoize
   in
-  (* Repairs & Maintenance: Fixed monthly with inflation *)
+  (* Repairs & Maintenance: Fixed monthly with expense growth *)
   let repairs_maintenance =
-    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.repairs_monthly) ~rate:0.025 ~freq
-      ~yf
+    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.repairs_monthly)
+      ~rate:expense_growth ~freq ~yf
     |> Seq.memoize
   in
   (* Property Management: Percentage of Effective Gross Income *)
@@ -70,22 +70,22 @@ let make ~egi_lazy ~start_date ~property_taxes_annual ~property_tax_growth ~insu
       periods
     |> Seq.memoize
   in
-  (* Janitorial: Fixed monthly with inflation *)
+  (* Janitorial: Fixed monthly with expense growth *)
   let janitorial =
-    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.janitorial_monthly) ~rate:0.025
-      ~freq ~yf
+    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.janitorial_monthly)
+      ~rate:expense_growth ~freq ~yf
     |> Seq.memoize
   in
-  (* Landscaping: Fixed monthly with inflation *)
+  (* Landscaping: Fixed monthly with expense growth *)
   let landscaping =
-    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.landscaping_monthly) ~rate:0.02
-      ~freq ~yf
+    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.landscaping_monthly)
+      ~rate:expense_growth ~freq ~yf
     |> Seq.memoize
   in
-  (* Security: Fixed monthly with inflation *)
+  (* Security: Fixed monthly with expense growth *)
   let security =
-    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.security_monthly) ~rate:0.02 ~freq
-      ~yf
+    Accrual.const_annual_growth_seq ~start_date ~initial_value:(-.security_monthly)
+      ~rate:expense_growth ~freq ~yf
     |> Seq.memoize
   in
   (* Total operating expenses *)

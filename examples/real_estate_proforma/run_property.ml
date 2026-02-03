@@ -15,7 +15,7 @@
 let start_date = CalendarLib.Date.make 2023 1 1
 let freq = Orcaset.Period.make_offset ~months:1 ()
 let output_freq = Orcaset.Period.make_offset ~months:1 ()
-let output_periods = 120
+let output_periods = 12
 let yf = Orcaset.Yf.actual_360
 
 (* Property Characteristics *)
@@ -37,15 +37,14 @@ let vacancy_rate = 0.07 (* 7% vacancy/credit loss *)
 
 (* Operating Expense Assumptions *)
 let property_taxes_annual = 72000.0 (* $2.88/SF *)
-let property_tax_growth = 0.02 (* 2% annual increase *)
 let insurance_annual = 15000.0 (* $0.60/SF *)
-let insurance_growth = 0.03 (* 3% annual increase *)
 let utilities_monthly = 6250.0 (* $3/SF/year common area *)
 let repairs_monthly = 4167.0 (* $2/SF/year *)
 let management_fee_pct = 0.04 (* 4% of EGI *)
 let janitorial_monthly = 5208.0 (* $2.50/SF/year *)
 let landscaping_monthly = 1250.0 (* $0.60/SF/year *)
 let security_monthly = 2083.0 (* $1/SF/year *)
+let expense_growth = 0.025 (* 2.5% annual expense growth *)
 
 (* Debt Assumptions *)
 let purchase_price = 4500000.0 (* $180/SF *)
@@ -76,9 +75,9 @@ and lazy_opex =
   lazy
     (Opex.make
        ~egi_lazy:(lazy (Lazy.force lazy_revenue).Revenue.effective_gross_income)
-       ~start_date ~property_taxes_annual ~property_tax_growth ~insurance_annual ~insurance_growth
-       ~utilities_monthly ~repairs_monthly ~management_fee_pct ~janitorial_monthly
-       ~landscaping_monthly ~security_monthly ~freq ~yf)
+       ~start_date ~property_taxes_annual ~insurance_annual ~utilities_monthly ~repairs_monthly
+       ~management_fee_pct ~janitorial_monthly ~landscaping_monthly ~security_monthly
+       ~expense_growth ~freq ~yf)
 
 and lazy_capex =
   lazy
