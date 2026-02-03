@@ -10,7 +10,7 @@
 (authors "Orcaset")
 
 (maintainers "Orcaset")
-(license SSPL)
+(license SSPL-1.0)
 
 (package
  (name orcaset)
