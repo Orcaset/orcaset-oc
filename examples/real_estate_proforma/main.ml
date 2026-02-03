@@ -157,7 +157,7 @@ let pro_forma_statement =
 
 let print_statement ~periods item =
   let hdr p =
-    Printf.sprintf "%14s" (CalendarLib.Printer.Date.sprint "%Y" p.Orcaset.Period.start_date)
+    Printf.sprintf "%14s" (CalendarLib.Printer.Date.sprint "%Y-%m-%d" p.Orcaset.Period.start_date)
   in
   let fmt v = Printf.sprintf "%14.0f" v in
   let print_row label seq =
