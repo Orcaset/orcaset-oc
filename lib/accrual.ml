@@ -120,18 +120,7 @@ let sub acc1 acc2 = sub_seq (Seq.return acc1) (Seq.return acc2)
 
 let const_annual_growth_seq ~start_date ~initial_value ~rate ~(freq : Period.offset)
     ~(yf : CalendarLib.Date.t -> CalendarLib.Date.t -> float) =
-  let total_days = freq.days + (freq.weeks * 7) in
-  let total_months = freq.months + (freq.quarters * 3) + (freq.years * 12) in
-
-  let initial_end_date =
-    (* Use clamped month addition for initial period *)
-    let date_with_months = Period.add_months_clamped start_date total_months in
-    let date_with_days =
-      if total_days = 0 then date_with_months
-      else CalendarLib.Date.add date_with_months (CalendarLib.Date.Period.day total_days)
-    in
-    if freq.month_end then Period.last_day_of_month date_with_days else date_with_days
-  in
+  let initial_end_date = Period.add_offset_to_date freq start_date in
   let initial_accrual =
     let period = Period.make ~start_date ~end_date:initial_end_date in
     make ~period ~value:(lazy initial_value) ~split_fn:default_split_fn

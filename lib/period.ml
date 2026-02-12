@@ -9,15 +9,12 @@ type offset = {
   month_end : bool;
 }
 
-(** Get the last day of the month for a given date *)
 let last_day_of_month date =
   let year = CalendarLib.Date.year date in
   let month = CalendarLib.Date.month date in
   CalendarLib.Date.days_in_month date
   |> CalendarLib.Date.make year (CalendarLib.Date.int_of_month month)
 
-(** Add months to a date with clamping to month end. If the resulting day would overflow the target
-    month, clamp to the last day. *)
 let add_months_clamped date total_months =
   if total_months = 0 then date
   else
@@ -48,22 +45,20 @@ let contains period date =
   CalendarLib.Date.compare date period.start_date >= 0
   && CalendarLib.Date.compare date period.end_date <= 0
 
-let add_offset offset period =
+let add_offset_to_date offset date =
   let total_days = offset.days + (offset.weeks * 7) in
   let total_months = offset.months + (offset.quarters * 3) + (offset.years * 12) in
-  let add_to_date date =
-    (* First add months/quarters/years with clamping *)
-    let date_with_months = add_months_clamped date total_months in
-    (* Then add days (including weeks converted to days) *)
+  let date_with_months = add_months_clamped date total_months in
+  let date_with_days =
     if total_days = 0 then date_with_months
-    else
-      let day_period = CalendarLib.Date.Period.day total_days in
-      CalendarLib.Date.add date_with_months day_period
+    else CalendarLib.Date.add date_with_months (CalendarLib.Date.Period.day total_days)
   in
-  let pin_to_month_end date = if offset.month_end then last_day_of_month date else date in
+  if offset.month_end then last_day_of_month date_with_days else date_with_days
+
+let add_offset offset period =
   {
-    start_date = add_to_date period.start_date |> pin_to_month_end;
-    end_date = add_to_date period.end_date |> pin_to_month_end;
+    start_date = add_offset_to_date offset period.start_date;
+    end_date = add_offset_to_date offset period.end_date;
   }
 
 let equal p1 p2 =
@@ -75,19 +70,8 @@ let print { start_date; end_date } =
     (CalendarLib.Printer.Date.sprint "%Y-%m-%d" start_date)
     (CalendarLib.Printer.Date.sprint "%Y-%m-%d" end_date)
 
-(** Create an infinite sequence of periods starting from [start_date], each offset by [offset]. *)
 let make_seq ~start_date ~offset =
-  let total_days = offset.days + (offset.weeks * 7) in
-  let total_months = offset.months + (offset.quarters * 3) + (offset.years * 12) in
-  (* Compute initial end_date using clamped month addition *)
-  let end_date_base = add_months_clamped start_date total_months in
-  let end_date_with_days =
-    if total_days = 0 then end_date_base
-    else CalendarLib.Date.add end_date_base (CalendarLib.Date.Period.day total_days)
-  in
-  let end_date =
-    if offset.month_end then last_day_of_month end_date_with_days else end_date_with_days
-  in
+  let end_date = add_offset_to_date offset start_date in
   let initial_period = { start_date; end_date } in
   Seq.unfold
     (fun period ->
