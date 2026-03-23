@@ -19,6 +19,7 @@ type 'c t =
       f : 'c query_fn -> 'c query_fn list -> 'c Cell.t Seq.t;
     }
   | Map of { id : int; inner : 'c t Lazy.t; f : float -> float }
+  | Convert of { id : int; inner : 'c t Lazy.t; f : Period.t -> float -> float }
   | Map2 of {
       id : int;
       s1 : 'c t Lazy.t;
@@ -26,13 +27,20 @@ type 'c t =
       f : float option -> float option -> float;
     }
 
-let series_id = function Const { id; _ } | Unfold { id; _ } | Map { id; _ } | Map2 { id; _ } -> id
+let series_id = function
+  | Const { id; _ } | Unfold { id; _ } | Map { id; _ } | Convert { id; _ } | Map2 { id; _ } -> id
 
 (* CONSTRUCTORS *)
 
 let const cells = Const { id = fresh_id (); cells }
 let unfold ~deps f = Unfold { id = fresh_id (); deps; f }
 let map s f = Map { id = fresh_id (); inner = s; f }
+(* [Obj.magic] is used here to erase the phantom type of the inner series. This is safe because the
+   phantom type parameter ['c] has no runtime representation — [Cell.t] erases it internally
+   ([type +'c t = cell]) and the series type uses it only for compile-time unit tracking. The
+   [.mli] signature [val convert : 'a t Lazy.t -> ... -> 'b t] enforces the correct type
+   discipline at call sites. *)
+let convert s f = Convert { id = fresh_id (); inner = (Obj.magic s : _ t Lazy.t); f }
 let map2 s1 s2 f = Map2 { id = fresh_id (); s1; s2; f }
 let fill_zero = Option.value ~default:0.0
 let sum s1 s2 = map2 (lazy s1) (lazy s2) (fun a b -> fill_zero a +. fill_zero b)
@@ -110,6 +118,8 @@ let rec eval_seq cache series =
             caching_seq raw_seq
         | Map { inner; f; _ } ->
             Seq.map (fun cell -> Cell.map cell f) (eval_seq cache (Lazy.force inner))
+        | Convert { inner; f; _ } ->
+            Seq.map (fun cell -> Cell.convert cell f) (eval_seq cache (Lazy.force inner))
         | Map2 { s1; s2; f; _ } ->
             let seq1 = eval_seq cache (Lazy.force s1) in
             let seq2 = eval_seq cache (Lazy.force s2) in
@@ -148,7 +158,7 @@ let dependencies series =
           (* The self parameter refers back to this Unfold node, which is
              already marked visited above, so recursing into deps is safe. *)
           List.fold_left (fun acc dep -> go acc (Lazy.force dep)) acc deps
-      | Map { inner; _ } -> go acc (Lazy.force inner)
+      | Map { inner; _ } | Convert { inner; _ } -> go acc (Lazy.force inner)
       | Map2 { s1; s2; _ } -> go (go acc (Lazy.force s1)) (Lazy.force s2)
     end
   in
@@ -179,6 +189,7 @@ let pp_dot ppf roots =
     | Const _ -> Printf.sprintf "Const(%d)" sid
     | Unfold _ -> Printf.sprintf "Unfold(%d)" sid
     | Map _ -> Printf.sprintf "Map(%d)" sid
+    | Convert _ -> Printf.sprintf "Convert(%d)" sid
     | Map2 _ -> Printf.sprintf "Map2(%d)" sid
   in
 
@@ -192,7 +203,7 @@ let pp_dot ppf roots =
           match s with
           | Const _ -> []
           | Unfold { deps; _ } -> List.map Lazy.force deps
-          | Map { inner; _ } -> [ Lazy.force inner ]
+          | Map { inner; _ } | Convert { inner; _ } -> [ Lazy.force inner ]
           | Map2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
         in
         List.iter

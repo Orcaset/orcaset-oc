@@ -18,6 +18,7 @@ type cell =
   | Const of { id : int; period : Period.t; f : unit -> float; split : split_fn }
   | Deps of { id : int; period : Period.t; deps : cell list; f : float list -> float }
   | Map of { id : int; inner : cell; f : float -> float }
+  | Convert of { id : int; inner : cell; f : Period.t -> float -> float }
   | Map2 of {
       id : int;
       c1 : cell option;
@@ -33,6 +34,7 @@ type +'c t = cell
 let const period f split = Const { id = fresh_id (); period; f; split }
 let deps period deps f = Deps { id = fresh_id (); period; deps; f }
 let map inner f = Map { id = fresh_id (); inner; f }
+let convert inner f = Convert { id = fresh_id (); inner; f }
 let map2 c1 c2 f = Map2 { id = fresh_id (); c1; c2; f }
 let cell_ref period = Ref { id = fresh_id (); period; cell = None }
 
@@ -44,12 +46,14 @@ let set_ref ref_cell cell =
 (* Accessors *)
 
 let cell_id = function
-  | Const { id; _ } | Deps { id; _ } | Map { id; _ } | Map2 { id; _ } | Ref { id; _ } -> id
+  | Const { id; _ } | Deps { id; _ } | Map { id; _ } | Convert { id; _ } | Map2 { id; _ }
+  | Ref { id; _ } ->
+      id
 
 let rec cell_period = function
   | Const { period; _ } -> period
   | Deps { period; _ } -> period
-  | Map { inner; _ } -> cell_period inner
+  | Map { inner; _ } | Convert { inner; _ } -> cell_period inner
   | Map2 { c1; c2; _ } -> (
       match (c1, c2) with
       | Some c, None -> cell_period c
@@ -80,6 +84,9 @@ let rec split_cell cell date =
   | Map { id; inner; f } ->
       let left, right = split_cell inner date in
       (Map { id; inner = left; f }, Map { id; inner = right; f })
+  | Convert { id; inner; f } ->
+      let left, right = split_cell inner date in
+      (Convert { id; inner = left; f }, Convert { id; inner = right; f })
   | Map2 { id; c1; c2; f } ->
       let left1, right1 =
         match c1 with
@@ -199,7 +206,7 @@ let dependency_tree cell =
       match c with
       | Const _ -> Leaf c
       | Deps { deps; _ } -> Node (c, List.map (go visited) deps)
-      | Map { inner; _ } -> Node (c, [ go visited inner ])
+      | Map { inner; _ } | Convert { inner; _ } -> Node (c, [ go visited inner ])
       | Map2 { c1; c2; _ } ->
           let children = List.filter_map (fun opt -> Option.map (go visited) opt) [ c1; c2 ] in
           Node (c, children)
@@ -269,7 +276,7 @@ let rec prime_tree cache cell =
       | Deps { deps; _ } ->
           cache_store cache id period (Unresolved (0.0, 0));
           List.iter (prime_tree cache) deps
-      | Map { inner; _ } ->
+      | Map { inner; _ } | Convert { inner; _ } ->
           cache_store cache id period (Unresolved (0.0, 0));
           prime_tree cache inner
       | Map2 { c1; c2; _ } ->
@@ -321,6 +328,9 @@ and compute_value cache iteration cell =
   | Map { inner; f; _ } ->
       let v, d = eval_cell cache iteration inner in
       (f v, d)
+  | Convert { inner; f; _ } ->
+      let v, d = eval_cell cache iteration inner in
+      (f (cell_period inner) v, d)
   | Map2 { c1; c2; f; _ } ->
       let v1, d1 =
         match c1 with

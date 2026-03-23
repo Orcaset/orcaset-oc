@@ -40,6 +40,12 @@ val deps : Period.t -> 'c t list -> (float list -> float) -> 'c t
 val map : 'c t -> (float -> float) -> 'c t
 (** [map cell f] is a cell whose value is [f v] where [v] is the evaluated result of [cell]. *)
 
+val convert : 'a t -> (Period.t -> float -> float) -> 'b t
+(** [convert cell f] is a cell whose value is [f period v] where [period] is the inner cell's period
+    and [v] is the evaluated result of [cell]. Unlike {!map}, the phantom type of the result may
+    differ from the input, allowing unit/currency conversions. The period argument lets conversion
+    functions vary over time (e.g. time-varying exchange rates). *)
+
 val map2 : 'c t option -> 'c t option -> (float option -> float option -> float) -> 'c t
 (** [map2 c1 c2 f] combines two optional cells. At least one must be [Some]. *)
 
