@@ -17,7 +17,4 @@
  (synopsis "Financial models in OCaml")
  (description "Build strongly-type, composable financial models using OCaml")
  (depends
-   (ocaml (>= 5.4.0))
-   dune
-   calendar
-   (alcotest :with-test)))
+   (ocaml (>= 5.4.0))))

@@ -3,11 +3,9 @@
  (public_name orcaset)
  (libraries calendar)
  (modules
-  orcaset
+  cell
+  date
+  offset
   period
-  accrual
-  balance
-  balance_series
-  transaction
-  yf
-  statement))
+  series
+  yf))
