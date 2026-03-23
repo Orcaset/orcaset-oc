@@ -35,8 +35,6 @@ let const_series (type c) (value : float) : c Series.t =
 (* Revenues in GBP *)
 let revenue : [ `GBP ] Series.t = const_series 10_000.0
 
-(* Revenues in EUR *)
-
 (* Costs in USD *)
 let costs : [ `USD ] Series.t = const_series (-6_000.0)
 
@@ -59,16 +57,16 @@ let profit = Series.sum usd_revenue costs
 
 let () =
   match Series.to_seq [ usd_revenue; costs; profit ] with
-  | [ revenue_seq; costs_seq; profit_seq ] ->
-      Printf.printf "%-25s %12s %16s %14s\n" "Period" "Revenue (USD)" "Costs (USD)" "Profit (USD)";
-      Printf.printf "%s\n" (String.make 70 '-');
-      let rows = Seq.zip (Seq.zip revenue_seq costs_seq) profit_seq in
-      Seq.iter
-        (fun ((r_cell, c_cell), p_cell) ->
-          let period = Cell.cell_period r_cell in
-          let rv = Cell.eval r_cell |> snd in
-          let cv = Cell.eval c_cell |> snd in
-          let pv = Cell.eval p_cell |> snd in
-          Printf.printf "%-25s %12.2f %16.2f %14.2f\n" (Period.to_string period) rv cv pv)
-        (rows |> Seq.take 6)
+  | [ revenue_seq; costs_seq; profit_seq ] -> (
+      let r_cell = Seq.uncons revenue_seq |> Option.get |> fst in
+      let c_cell = Seq.uncons costs_seq |> Option.get |> fst in
+      let p_cell = Seq.uncons profit_seq |> Option.get |> fst in
+      let period = Cell.cell_period r_cell in
+      match Cell.eval_many [ r_cell; c_cell; p_cell ] with
+      | [ (_, rv); (_, cv); (_, pv) ] ->
+          Printf.printf "%-25s %12s %16s %14s\n" "Period" "Revenue (USD)" "Costs (USD)"
+            "Profit (USD)";
+          Printf.printf "%s\n" (String.make 70 '-');
+          Printf.printf "%-25s %12.2f %16.2f %14.2f\n" (Period.to_string period) rv cv pv
+      | _ -> assert false)
   | _ -> assert false
