@@ -16,6 +16,35 @@ module Cell = Cell
 type 'c query_fn = Period.t -> 'c Cell.t Seq.t
 (** A function that retrieves the cells covering a given period. *)
 
+type reduce = float list -> float
+(** A function that collapses multiple cell values into a single float. Used by {!dep_query} to
+    aggregate the (potentially multiple) cells returned by a period query. *)
+
+type dep_query =
+  | Self of { period : Period.t; reduce : reduce }
+  | Dep of { index : int; period : Period.t; reduce : reduce }
+      (** A declarative query against a dependency series or the series' own earlier output.
+
+          - [Self { period; reduce }] queries the series' own cached output for [period]. Only periods
+            that start strictly before the current frontier (the end date of the last produced cell) may
+            be queried; querying at or beyond the frontier raises {!Forward_self_query}.
+          - [Dep { index; period; reduce }] queries the dependency at position [index] in the [deps]
+            list for [period].
+
+          In both cases, [reduce] collapses the returned cells' values into a single float (e.g.
+          {!reduce_sum}). *)
+
+type 'c unfold_cell =
+  | Seed of { period : Period.t; f : unit -> float }
+  | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+      (** A structured cell descriptor returned by the unfold sequence.
+
+          - [Seed] is an initial/constant cell with no dependencies. Backed by {!Cell.const} with
+            {!Cell.proportional_split}.
+          - [Step] declares its dependency queries and a combining function [f] that receives one
+            reduced float per query. The system resolves queries and builds {!Cell.deps}
+            automatically, ensuring dependency connections are never erased. *)
+
 type 'c t
 (** An opaque time-series of cells denominated in currency ['c]. *)
 
@@ -32,24 +61,24 @@ exception
 val const : 'c Cell.t Seq.t -> 'c t
 (** A series backed by a pre-built cell sequence. *)
 
-val unfold : deps:'c t Lazy.t list -> ('c query_fn -> 'c query_fn list -> 'c Cell.t Seq.t) -> 'c t
-(** [unfold ~deps f] builds a series whose cells are produced by [f].
+val unfold : deps:'c t Lazy.t list -> 'c unfold_cell Seq.t -> 'c t
+(** [unfold ~deps cells] builds a series from a declarative sequence of {!unfold_cell} values.
 
-    [f] receives two arguments:
-    - [self_query : query_fn] — queries the series' own (cached) output for earlier periods. Only
-      periods that start strictly before the current frontier (the end date of the last produced
-      cell) may be queried. Querying a period whose start date is at or beyond the frontier raises
-      {!Forward_self_query}. When no cells have been produced yet, the self-query returns an empty
-      sequence.
-    - [dep_queries : query_fn list] — one query function per element of [deps], in the same order.
+    Each element in [cells] is either a {!Seed} (constant, no dependencies) or a {!Step} (declares
+    queries against [deps] or the series' own earlier output). The system resolves queries and
+    constructs the underlying {!Cell.t} values automatically.
 
     Dependencies are wrapped in [Lazy.t] to support mutually recursive series definitions via
     [let rec]. The lazy values are only forced during evaluation (i.e. {!to_seq}), not at
     construction time.
 
-    Because [f] never receives a [Series.t] value, the only way to access another series' cells
-    inside [f] is through the provided query functions, which are derived from the declared [deps].
-    This makes it impossible to silently bypass series-level dependency tracking. *)
+    Because the callback never receives raw query functions or {!Cell.t} constructors, the only way
+    to express dependencies is through {!dep_query} values in {!Step}, which are derived from the
+    declared [deps]. This makes it impossible to silently bypass series-level dependency tracking or
+    erase cell-level dependency connections. *)
+
+val reduce_sum : reduce
+(** A reduce function that sums all cell values: [List.fold_left (+.) 0.0]. *)
 
 val map : (float -> float) -> 'c t Lazy.t -> 'c t
 (** [map s f] applies [f] to each cell's float value. The dependency is wrapped in [Lazy.t] to

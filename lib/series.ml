@@ -4,20 +4,27 @@
 module Cell = Cell
 
 type 'c query_fn = Period.t -> 'c Cell.t Seq.t
+type reduce = float list -> float
+
+type dep_query =
+  | Self of { period : Period.t; reduce : reduce }
+  | Dep of { index : int; period : Period.t; reduce : reduce }
+
+type 'c unfold_cell =
+  | Seed of { period : Period.t; f : unit -> float }
+  | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
 let next_id = Atomic.make 0
 let fresh_id () = Atomic.fetch_and_add next_id 1
+
+let reduce_sum = List.fold_left ( +. ) 0.0
 
 exception
   Forward_self_query of { series_id : int; current_frontier : Date.t; query_period : Period.t }
 
 type 'c t =
   | Const of { id : int; cells : 'c Cell.t Seq.t }
-  | Unfold of {
-      id : int;
-      deps : 'c t Lazy.t list;
-      f : 'c query_fn -> 'c query_fn list -> 'c Cell.t Seq.t;
-    }
+  | Unfold of { id : int; deps : 'c t Lazy.t list; cells : 'c unfold_cell Seq.t }
   | Map of { id : int; inner : 'c t Lazy.t; f : float -> float }
   | Convert of { id : int; inner : 'c t Lazy.t; f : Period.t -> float -> float }
   | Map2 of {
@@ -33,7 +40,7 @@ let series_id = function
 (* CONSTRUCTORS *)
 
 let const cells = Const { id = fresh_id (); cells }
-let unfold ~deps f = Unfold { id = fresh_id (); deps; f }
+let unfold ~deps cells = Unfold { id = fresh_id (); deps; cells }
 let map f s = Map { id = fresh_id (); inner = s; f }
 let convert f s = Convert { id = fresh_id (); inner = (Obj.magic s : _ t Lazy.t); f }
 let map2 f s1 s2 = Map2 { id = fresh_id (); s1; s2; f }
@@ -82,10 +89,10 @@ let rec eval_seq cache series =
       let seq =
         match series with
         | Const { cells; _ } -> cells
-        | Unfold { deps; f; _ } ->
-            (* Cache cells as they are produces to enable circular references within
-                 the series. Query periods must not extent past the the historical range
-                 (raises Forward_self_query). *)
+        | Unfold { deps; cells; _ } ->
+            (* Cache cells as they are produced to enable circular references within
+               the series. Query periods must not extend past the historical range
+               (raises Forward_self_query). *)
             let cell_cache = ref [] in
             let self_query period =
               (match !cell_cache with
@@ -102,7 +109,24 @@ let rec eval_seq cache series =
             let dep_queries =
               List.map (fun dep -> fun period -> eval_query cache (Lazy.force dep) period) deps
             in
-            let raw_seq = f self_query dep_queries in
+            let resolve_query = function
+              | Self { period; reduce } -> (self_query period |> List.of_seq, reduce)
+              | Dep { index; period; reduce } ->
+                  ((List.nth dep_queries index) period |> List.of_seq, reduce)
+            in
+            let resolve_unfold_cell = function
+              | Seed { period; f } -> Cell.const period f Cell.proportional_split
+              | Step { period; queries; f } ->
+                  let inner_cells =
+                    List.map
+                      (fun q ->
+                        let dep_cells, reduce = resolve_query q in
+                        Cell.deps period dep_cells reduce)
+                      queries
+                  in
+                  Cell.deps period inner_cells f
+            in
+            let cell_seq = Seq.map resolve_unfold_cell cells in
             let rec caching_seq s () =
               match s () with
               | Seq.Nil -> Seq.Nil
@@ -110,7 +134,7 @@ let rec eval_seq cache series =
                   cell_cache := cell :: !cell_cache;
                   Seq.Cons (cell, caching_seq rest)
             in
-            caching_seq raw_seq
+            caching_seq cell_seq
         | Map { inner; f; _ } ->
             Seq.map (fun cell -> Cell.map cell f) (eval_seq cache (Lazy.force inner))
         | Convert { inner; f; _ } ->
