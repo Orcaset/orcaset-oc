@@ -50,7 +50,7 @@ let costs : [ `USD ] Series.t = const_series (-6_000.0)
 (* ── Combining requires explicit currency conversion ────────────────────────────────────────── *)
 
 (* To combine GBP and USD values you must explicitly provide a conversion function. *)
-let usd_revenue = Series.convert (lazy revenue) (fun _ r -> r *. 1.34)
+let usd_revenue = Series.convert (fun _ r -> r *. 1.34) (lazy revenue)
 let profit = Series.sum usd_revenue costs
 
 (* ── Print results ────────────────────────────────────────────────────────── *)

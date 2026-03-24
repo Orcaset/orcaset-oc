@@ -51,12 +51,12 @@ val unfold : deps:'c t Lazy.t list -> ('c query_fn -> 'c query_fn list -> 'c Cel
     inside [f] is through the provided query functions, which are derived from the declared [deps].
     This makes it impossible to silently bypass series-level dependency tracking. *)
 
-val map : 'c t Lazy.t -> (float -> float) -> 'c t
+val map : (float -> float) -> 'c t Lazy.t -> 'c t
 (** [map s f] applies [f] to each cell's float value. The dependency is wrapped in [Lazy.t] to
     support mutually recursive series definitions via [let rec]. The lazy value is forced during
     evaluation ({!to_seq}), not at construction. *)
 
-val convert : 'a t Lazy.t -> (Period.t -> float -> float) -> 'b t
+val convert : (Period.t -> float -> float) -> 'a t Lazy.t -> 'b t
 (** [convert s f] applies [f period v] to each cell's float value, where [period] is the cell's
     period and [v] is its evaluated result. Unlike {!map}, the phantom type of the result may differ
     from the input, allowing unit/currency conversions. The period argument lets conversion functions
@@ -64,7 +64,7 @@ val convert : 'a t Lazy.t -> (Period.t -> float -> float) -> 'b t
     support mutually recursive series definitions via [let rec]. The lazy value is forced during
     evaluation ({!to_seq}), not at construction. *)
 
-val map2 : 'c t Lazy.t -> 'c t Lazy.t -> (float option -> float option -> float) -> 'c t
+val map2 : (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 (** [map2 s1 s2 f] combines two series cell-by-cell, aligning periods. Dependencies are wrapped in
     [Lazy.t] to support mutually recursive series definitions via [let rec]. The lazy values are
     forced during evaluation ({!to_seq}), not at construction. *)

@@ -34,19 +34,14 @@ let series_id = function
 
 let const cells = Const { id = fresh_id (); cells }
 let unfold ~deps f = Unfold { id = fresh_id (); deps; f }
-let map s f = Map { id = fresh_id (); inner = s; f }
-(* [Obj.magic] is used here to erase the phantom type of the inner series. This is safe because the
-   phantom type parameter ['c] has no runtime representation — [Cell.t] erases it internally
-   ([type +'c t = cell]) and the series type uses it only for compile-time unit tracking. The
-   [.mli] signature [val convert : 'a t Lazy.t -> ... -> 'b t] enforces the correct type
-   discipline at call sites. *)
-let convert s f = Convert { id = fresh_id (); inner = (Obj.magic s : _ t Lazy.t); f }
-let map2 s1 s2 f = Map2 { id = fresh_id (); s1; s2; f }
+let map f s = Map { id = fresh_id (); inner = s; f }
+let convert f s = Convert { id = fresh_id (); inner = (Obj.magic s : _ t Lazy.t); f }
+let map2 f s1 s2 = Map2 { id = fresh_id (); s1; s2; f }
 let fill_zero = Option.value ~default:0.0
-let sum s1 s2 = map2 (lazy s1) (lazy s2) (fun a b -> fill_zero a +. fill_zero b)
-let sub s1 s2 = map2 (lazy s1) (lazy s2) (fun a b -> fill_zero a -. fill_zero b)
-let mul s1 s2 = map2 (lazy s1) (lazy s2) (fun a b -> fill_zero a *. fill_zero b)
-let div s1 s2 = map2 (lazy s1) (lazy s2) (fun a b -> fill_zero a /. fill_zero b)
+let sum s1 s2 = map2 (fun a b -> fill_zero a +. fill_zero b) (lazy s1) (lazy s2)
+let sub s1 s2 = map2 (fun a b -> fill_zero a -. fill_zero b) (lazy s1) (lazy s2)
+let mul s1 s2 = map2 (fun a b -> fill_zero a *. fill_zero b) (lazy s1) (lazy s2)
+let div s1 s2 = map2 (fun a b -> fill_zero a /. fill_zero b) (lazy s1) (lazy s2)
 
 (* QUERY HELPERS *)
 

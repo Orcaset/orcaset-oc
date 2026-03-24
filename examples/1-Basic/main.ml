@@ -22,7 +22,7 @@ let revenue =
       in
       Seq.cons initial_cell (generate_cells initial_period))
 
-let costs = Series.map (lazy revenue) (fun r -> r *. -0.6)
+let costs = Series.map (fun r -> r *. -0.6) (lazy revenue)
 let profit = Series.sum revenue costs
 
 let () =
