@@ -16,7 +16,6 @@ type 'c unfold_cell =
 
 let next_id = Atomic.make 0
 let fresh_id () = Atomic.fetch_and_add next_id 1
-
 let reduce_sum = List.fold_left ( +. ) 0.0
 
 exception
@@ -98,7 +97,7 @@ let rec eval_seq cache series =
               (match !cell_cache with
               | latest :: _ ->
                   let frontier = Period.end_date (Cell.cell_period latest) in
-                  if Date.compare (Period.start_date period) frontier >= 0 then
+                  if Date.compare (Period.end_date period) frontier >= 0 then
                     raise
                       (Forward_self_query
                          { series_id = id; current_frontier = frontier; query_period = period })
