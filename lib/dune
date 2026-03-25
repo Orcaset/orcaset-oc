@@ -4,8 +4,10 @@
  (libraries calendar)
  (modules
   cell
+  cell_cache
   date
   offset
   period
   series
-  yf))
+  yf)
+ (private_modules cell_cache))

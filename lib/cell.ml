@@ -4,13 +4,6 @@
 let next_id = Atomic.make 0
 let fresh_id () = Atomic.fetch_and_add next_id 1
 
-module PeriodHash = Hashtbl.Make (struct
-  type t = Period.t
-
-  let equal = Period.equal
-  let hash = Period.hash
-end)
-
 type split_fn = Period.t -> (unit -> float) -> Date.t -> split_result * split_result
 and split_result = { period : Period.t; f : unit -> float; split : split_fn }
 
@@ -46,7 +39,11 @@ let set_ref ref_cell cell =
 (* Accessors *)
 
 let cell_id = function
-  | Const { id; _ } | Deps { id; _ } | Map { id; _ } | Convert { id; _ } | Map2 { id; _ }
+  | Const { id; _ }
+  | Deps { id; _ }
+  | Map { id; _ }
+  | Convert { id; _ }
+  | Map2 { id; _ }
   | Ref { id; _ } ->
       id
 
@@ -217,43 +214,6 @@ let dependency_tree cell =
 
 (* Evaluation with fixed-point iteration (Gauss-Seidel method) *)
 
-(** Status of a cell in the evaluation cache. [Resolved] cells have a final value that will not
-    change. [Unresolved] cells are part of a dependency cycle and carry the current iteration guess
-    and the last iteration number in which they were updated (used as a Gauss-Seidel guard to avoid
-    redundant re-evaluation within a single sweep). *)
-type cell_status = Resolved of float | Unresolved of float * int
-
-let max_iterations = 1000
-let convergence_threshold = 1e-6
-
-(** Look up or create the per-cell cache for a given cell ID in the top-level cache. Then look up
-    the period in the per-cell cache. Returns [Some (period, status)] on a hit, [None] on a miss
-    (after ensuring the per-cell cache exists). *)
-let cache_find cache id period =
-  let cell_cache =
-    match Hashtbl.find_opt cache id with
-    | Some cc -> cc
-    | None ->
-        let cc = PeriodHash.create 12 in
-        Hashtbl.replace cache id cc;
-        cc
-  in
-  match PeriodHash.find_opt cell_cache period with
-  | Some status -> Some (period, status)
-  | None -> None
-
-(** Store a cell status in the cache for a given cell ID and period. *)
-let cache_store cache id period status =
-  let cell_cache =
-    match Hashtbl.find_opt cache id with
-    | Some cc -> cc
-    | None ->
-        let cc = PeriodHash.create 12 in
-        Hashtbl.replace cache id cc;
-        cc
-  in
-  PeriodHash.replace cell_cache period status
-
 (** Prime the dependency tree rooted at [cell]. Traverses dependencies recursively, setting
     unvisited cells to [Unresolved (0.0, 0)]. [Const] cells and [Ref { cell = None }] are set to
     [Resolved] immediately since their values are known without iteration. Already-cached cells
@@ -262,25 +222,25 @@ let cache_store cache id period status =
 let rec prime_tree cache cell =
   let id = cell_id cell in
   let period = cell_period cell in
-  match cache_find cache id period with
+  match Cell_cache.find cache id period with
   | Some _ -> ()
   | None -> (
       match cell with
-      | Const { period; f; _ } -> cache_store cache id period (Resolved (f ()))
+      | Const { period; f; _ } -> Cell_cache.store cache id period (Cell_cache.Resolved (f ()))
       (* TODO: Confirm this should never be reached *)
       | Ref { cell = None; _ } ->
           failwith "prime_tree: Ref cell with no resolved dependency reached during priming"
       | Ref { cell = Some inner; _ } ->
-          cache_store cache id period (Unresolved (0.0, 0));
+          Cell_cache.store cache id period (Cell_cache.Unresolved (0.0, 0));
           prime_tree cache inner
       | Deps { deps; _ } ->
-          cache_store cache id period (Unresolved (0.0, 0));
+          Cell_cache.store cache id period (Cell_cache.Unresolved (0.0, 0));
           List.iter (prime_tree cache) deps
       | Map { inner; _ } | Convert { inner; _ } ->
-          cache_store cache id period (Unresolved (0.0, 0));
+          Cell_cache.store cache id period (Cell_cache.Unresolved (0.0, 0));
           prime_tree cache inner
       | Map2 { c1; c2; _ } ->
-          cache_store cache id period (Unresolved (0.0, 0));
+          Cell_cache.store cache id period (Cell_cache.Unresolved (0.0, 0));
           List.iter (prime_tree cache) (List.filter_map Fun.id [ c1; c2 ]))
 
 (** Evaluate a single cell during a resolution pass, returning [(value, max_delta)].
@@ -294,21 +254,21 @@ let rec prime_tree cache cell =
 let rec eval_cell cache iteration cell =
   let id = cell_id cell in
   let period = cell_period cell in
-  match cache_find cache id period with
-  | Some (_, Resolved v) -> (v, 0.0)
-  | Some (_, Unresolved (v, last_iter)) when last_iter = iteration -> (v, 0.0)
-  | Some (_, Unresolved (old_v, _)) ->
+  match Cell_cache.find cache id period with
+  | Some (_, Cell_cache.Resolved v) -> (v, 0.0)
+  | Some (_, Cell_cache.Unresolved (v, last_iter)) when last_iter = iteration -> (v, 0.0)
+  | Some (_, Cell_cache.Unresolved (old_v, _)) ->
       (* Mark in-progress for this iteration before recursing (cycle guard) *)
-      cache_store cache id period (Unresolved (old_v, iteration));
+      Cell_cache.store cache id period (Cell_cache.Unresolved (old_v, iteration));
       let new_v, child_delta = compute_value cache iteration cell in
       let delta = Float.abs (new_v -. old_v) in
       let max_delta = Float.max delta child_delta in
-      cache_store cache id period (Unresolved (new_v, iteration));
+      Cell_cache.store cache id period (Cell_cache.Unresolved (new_v, iteration));
       (new_v, max_delta)
   | None ->
       (* Cell not primed — treat as a fresh evaluation *)
       let new_v, child_delta = compute_value cache iteration cell in
-      cache_store cache id period (Resolved new_v);
+      Cell_cache.store cache id period (Cell_cache.Resolved new_v);
       (new_v, child_delta)
 
 (** Compute the raw value of a cell from its dependencies, returning [(value, max_delta)] where
@@ -362,28 +322,28 @@ let resolve_pass cache roots iteration =
 (** Iterate resolution passes until all cell values converge (max delta below threshold) or the
     maximum iteration count is reached. *)
 let rec iterate cache roots iteration =
-  if iteration > max_iterations then ()
+  if iteration > Cell_cache.max_iterations then ()
   else
     let delta = resolve_pass cache roots iteration in
-    if delta < convergence_threshold then () else iterate cache roots (iteration + 1)
+    if delta < Cell_cache.convergence_threshold then () else iterate cache roots (iteration + 1)
 
 (** Extract the final value from the cache for a cell, returning [(period, value)]. *)
 let read_result cache cell =
   let id = cell_id cell in
   let period = cell_period cell in
-  match cache_find cache id period with
-  | Some (p, Resolved v) -> (p, v)
-  | Some (p, Unresolved (v, _)) -> (p, v)
+  match Cell_cache.find cache id period with
+  | Some (p, Cell_cache.Resolved v) -> (p, v)
+  | Some (p, Cell_cache.Unresolved (v, _)) -> (p, v)
   | None -> failwith "Cell.read_result: cell not found in cache after iteration"
 
 let eval cell =
-  let cache = Hashtbl.create 16 in
+  let cache = Cell_cache.create () in
   prime_tree cache cell;
   iterate cache [ cell ] 1;
   read_result cache cell
 
 let eval_many cells =
-  let cache = Hashtbl.create 16 in
+  let cache = Cell_cache.create () in
   List.iter (prime_tree cache) cells;
   iterate cache cells 1;
   List.map (read_result cache) cells
