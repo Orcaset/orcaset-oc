@@ -3,22 +3,24 @@
 
 open Cell_types
 
-let next_id = Atomic.make 0
-let fresh_id () = Atomic.fetch_and_add next_id 1
-
 type split_fn = Cell_types.split_fn
-type split_result = Cell_types.split_result = { period : Period.t; f : unit -> float; split : split_fn }
+
+type split_result = Cell_types.split_result = {
+  period : Period.t;
+  f : unit -> float;
+  split : split_fn;
+}
 
 type +'c t = Cell_types.period_cell
 
 (* Constructors *)
 
-let const period f split = RConst { id = fresh_id (); period; f; split }
-let deps period deps f = RDeps { id = fresh_id (); period; deps; f }
-let map inner f = RMap { id = fresh_id (); inner; f }
-let convert inner f = RConvert { id = fresh_id (); inner; f }
-let map2 c1 c2 f = RMap2 { id = fresh_id (); c1; c2; f }
-let cell_ref period = RRef { id = fresh_id (); period; cell = None }
+let const period f split = RConst { id = Cell_types.fresh_id (); period; f; split }
+let deps period deps f = RDeps { id = Cell_types.fresh_id (); period; deps; f }
+let map inner f = RMap { id = Cell_types.fresh_id (); inner; f }
+let convert inner f = RConvert { id = Cell_types.fresh_id (); inner; f }
+let map2 c1 c2 f = RMap2 { id = Cell_types.fresh_id (); c1; c2; f }
+let cell_ref period = RRef { id = Cell_types.fresh_id (); period; cell = None }
 
 let set_ref ref_cell cell =
   match ref_cell with
@@ -27,7 +29,7 @@ let set_ref ref_cell cell =
 
 (* Accessors *)
 
-let cell_id = function
+let id = function
   | RConst { id; _ }
   | RDeps { id; _ }
   | RMap { id; _ }
@@ -36,17 +38,17 @@ let cell_id = function
   | RRef { id; _ } ->
       id
 
-let rec cell_period = function
+let rec period = function
   | RConst { period; _ } -> period
   | RDeps { period; _ } -> period
-  | RMap { inner; _ } | RConvert { inner; _ } -> cell_period inner
+  | RMap { inner; _ } | RConvert { inner; _ } -> period inner
   | RMap2 { c1; c2; _ } -> (
       match (c1, c2) with
-      | Some c, None -> cell_period c
-      | None, Some c -> cell_period c
+      | Some c, None -> period c
+      | None, Some c -> period c
       | Some c1, Some c2 ->
-          let period1 = cell_period c1 in
-          let period2 = cell_period c2 in
+          let period1 = period c1 in
+          let period2 = period c2 in
           if Period.equal period1 period2 then period1
           else failwith "Map2 cells have mismatched periods"
       | None, None -> failwith "Map2 should have at least one non-None cell")
@@ -54,7 +56,7 @@ let rec cell_period = function
 
 (* Helpers for splitting cells *)
 let rec split_cell cell date =
-  let period = cell_period cell in
+  let period = period cell in
   if Date.(date <= Period.start_date period || date >= Period.end_date period) then
     failwith "split_cell: split date is on or out of bounds for cell period";
   match cell with
@@ -94,13 +96,13 @@ let rec split_cell cell date =
   | RRef { cell = None; _ } ->
       failwith "split_cell: cannot split Ref cell with unresolved dependency"
 
-let rec clip cell period =
-  let cell_period = cell_period cell in
-  if Period.start_date cell_period < Period.start_date period then
-    let _, right = split_cell cell (Period.start_date period) in
-    clip right period
-  else if Period.end_date cell_period > Period.end_date period then
-    let left, _ = split_cell cell (Period.end_date period) in
+let rec clip cell c_period =
+  let cell_period = period cell in
+  if Period.start_date cell_period < Period.start_date c_period then
+    let _, right = split_cell cell (Period.start_date c_period) in
+    clip right c_period
+  else if Period.end_date cell_period > Period.end_date c_period then
+    let left, _ = split_cell cell (Period.end_date c_period) in
     left
   else cell
 
@@ -142,10 +144,10 @@ let rec iter_period_union a b =
   | Some _, None -> Seq.map (fun cell -> (Some cell, None)) a ()
   | None, Some _ -> Seq.map (fun cell -> (None, Some cell)) b ()
   | Some (a_head, a_tail), Some (b_head, b_tail) ->
-      let a_start = Period.start_date (cell_period a_head) in
-      let a_end = Period.end_date (cell_period a_head) in
-      let b_start = Period.start_date (cell_period b_head) in
-      let b_end = Period.end_date (cell_period b_head) in
+      let a_start = Period.start_date (period a_head) in
+      let a_end = Period.end_date (period a_head) in
+      let b_start = Period.start_date (period b_head) in
+      let b_end = Period.end_date (period b_head) in
       (* Case 1: Periods are identical *)
       if Date.equal a_start b_start && Date.equal a_end b_end then
         Seq.Cons ((Some a_head, Some b_head), iter_period_union a_tail b_tail)
@@ -176,6 +178,65 @@ let rec iter_period_union a b =
         let a_left, a_right = split_cell a_head b_end in
         Seq.Cons ((Some a_left, Some b_head), iter_period_union (Seq.cons a_right a_tail) b_tail)
 
+(* Priming *)
+
+let prime (prime_tree : Cell_types.prime_fn) cache cell =
+  let store status = Cell_cache.store_period cache (id cell) (period cell) status in
+  match cell with
+  | RConst { f; _ } -> store (Cell_cache.Resolved (f ()))
+  | RRef { cell = None; _ } ->
+      failwith "prime: Ref cell with no resolved dependency reached during priming"
+  | RRef { cell = Some inner; _ } ->
+      store (Cell_cache.Unresolved (0.0, 0));
+      prime_tree cache (PeriodCell inner)
+  | RDeps { deps; _ } ->
+      store (Cell_cache.Unresolved (0.0, 0));
+      List.iter (fun dep -> prime_tree cache (PeriodCell dep)) deps
+  | RMap { inner; _ } | RConvert { inner; _ } ->
+      store (Cell_cache.Unresolved (0.0, 0));
+      prime_tree cache (PeriodCell inner)
+  | RMap2 { c1; c2; _ } ->
+      store (Cell_cache.Unresolved (0.0, 0));
+      List.iter (fun dep -> prime_tree cache (PeriodCell dep)) (List.filter_map Fun.id [ c1; c2 ])
+
+(* Evaluation *)
+
+let compute (eval_cell : Cell_types.eval_fn) cache iteration = function
+  | RConst { f; _ } -> (f (), 0.0)
+  | RDeps { deps; f; _ } ->
+      let values, max_delta =
+        List.fold_left
+          (fun (vals, acc_delta) dep ->
+            let v, d = eval_cell cache iteration (PeriodCell dep) in
+            (v :: vals, Float.max acc_delta d))
+          ([], 0.0) deps
+      in
+      (f (List.rev values), max_delta)
+  | RMap { inner; f; _ } ->
+      let v, d = eval_cell cache iteration (PeriodCell inner) in
+      (f v, d)
+  | RConvert { inner; f; _ } ->
+      let v, d = eval_cell cache iteration (PeriodCell inner) in
+      (f (period inner) v, d)
+  | RMap2 { c1; c2; f; _ } ->
+      let v1, d1 =
+        match c1 with
+        | None -> (None, 0.0)
+        | Some c ->
+            let v, d = eval_cell cache iteration (PeriodCell c) in
+            (Some v, d)
+      in
+      let v2, d2 =
+        match c2 with
+        | None -> (None, 0.0)
+        | Some c ->
+            let v, d = eval_cell cache iteration (PeriodCell c) in
+            (Some v, d)
+      in
+      (f v1 v2, Float.max d1 d2)
+  | RRef { cell = Some c; _ } -> eval_cell cache iteration (PeriodCell c)
+  | RRef { cell = None; _ } -> (0.0, 0.0)
+
 (** A tree representing the dependency structure of a cell. [Cycle] marks a back-edge to a cell that
     was already visited on the current path, preventing infinite recursion when circular
     dependencies exist. *)
@@ -200,140 +261,3 @@ let dependency_tree cell =
       | RRef { cell = None; _ } -> Leaf c
   in
   go [] cell
-
-(* Evaluation with fixed-point iteration (Gauss-Seidel method) *)
-
-(** Prime the dependency tree rooted at [cell]. Traverses dependencies recursively, setting
-    unvisited cells to [Unresolved (0.0, 0)]. [RConst] cells and [RRef { cell = None }] are set to
-    [Resolved] immediately since their values are known without iteration. Already-cached cells
-    (whether [Resolved] or [Unresolved]) are left untouched — [Resolved] cells need no iteration,
-    and [Unresolved] cells were already primed (possibly via a cycle back-edge or a prior root). *)
-let rec prime_tree cache cell =
-  let id = cell_id cell in
-  let period = cell_period cell in
-  match Cell_cache.find_period cache id period with
-  | Some _ -> ()
-  | None -> (
-      match cell with
-      | RConst { period; f; _ } ->
-          Cell_cache.store_period cache id period (Cell_cache.Resolved (f ()))
-      (* TODO: Confirm this should never be reached *)
-      | RRef { cell = None; _ } ->
-          failwith "prime_tree: Ref cell with no resolved dependency reached during priming"
-      | RRef { cell = Some inner; _ } ->
-          Cell_cache.store_period cache id period (Cell_cache.Unresolved (0.0, 0));
-          prime_tree cache inner
-      | RDeps { deps; _ } ->
-          Cell_cache.store_period cache id period (Cell_cache.Unresolved (0.0, 0));
-          List.iter (prime_tree cache) deps
-      | RMap { inner; _ } | RConvert { inner; _ } ->
-          Cell_cache.store_period cache id period (Cell_cache.Unresolved (0.0, 0));
-          prime_tree cache inner
-      | RMap2 { c1; c2; _ } ->
-          Cell_cache.store_period cache id period (Cell_cache.Unresolved (0.0, 0));
-          List.iter (prime_tree cache) (List.filter_map Fun.id [ c1; c2 ]))
-
-(** Evaluate a single cell during a resolution pass, returning [(value, max_delta)].
-
-    - [Resolved] cells return their value with delta [0.0].
-    - [Unresolved] cells whose [last_updated_iteration] equals the current iteration return their
-      current guess (Gauss-Seidel guard preventing re-evaluation within the same sweep).
-    - Otherwise, the cell is marked as in-progress for this iteration (to guard against cycles), its
-      dependencies are recursively evaluated, the new value is computed and cached, and the absolute
-      change from the old value is folded into the running max delta. *)
-let rec eval_cell cache iteration cell =
-  let id = cell_id cell in
-  let period = cell_period cell in
-  match Cell_cache.find_period cache id period with
-  | Some (_, Cell_cache.Resolved v) -> (v, 0.0)
-  | Some (_, Cell_cache.Unresolved (v, last_iter)) when last_iter = iteration -> (v, 0.0)
-  | Some (_, Cell_cache.Unresolved (old_v, _)) ->
-      (* Mark in-progress for this iteration before recursing (cycle guard) *)
-      Cell_cache.store_period cache id period (Cell_cache.Unresolved (old_v, iteration));
-      let new_v, child_delta = compute_value cache iteration cell in
-      let delta = Float.abs (new_v -. old_v) in
-      let max_delta = Float.max delta child_delta in
-      Cell_cache.store_period cache id period (Cell_cache.Unresolved (new_v, iteration));
-      (new_v, max_delta)
-  | None ->
-      (* Cell not primed — treat as a fresh evaluation *)
-      let new_v, child_delta = compute_value cache iteration cell in
-      Cell_cache.store_period cache id period (Cell_cache.Resolved new_v);
-      (new_v, child_delta)
-
-(** Compute the raw value of a cell from its dependencies, returning [(value, max_delta)] where
-    [max_delta] is the maximum delta accumulated from evaluating child cells. *)
-and compute_value cache iteration cell =
-  match cell with
-  | RConst { f; _ } -> (f (), 0.0)
-  | RDeps { deps; f; _ } ->
-      let values, max_delta =
-        List.fold_left
-          (fun (vals, acc_delta) dep ->
-            let v, d = eval_cell cache iteration dep in
-            (v :: vals, Float.max acc_delta d))
-          ([], 0.0) deps
-      in
-      (f (List.rev values), max_delta)
-  | RMap { inner; f; _ } ->
-      let v, d = eval_cell cache iteration inner in
-      (f v, d)
-  | RConvert { inner; f; _ } ->
-      let v, d = eval_cell cache iteration inner in
-      (f (cell_period inner) v, d)
-  | RMap2 { c1; c2; f; _ } ->
-      let v1, d1 =
-        match c1 with
-        | None -> (None, 0.0)
-        | Some c ->
-            let v, d = eval_cell cache iteration c in
-            (Some v, d)
-      in
-      let v2, d2 =
-        match c2 with
-        | None -> (None, 0.0)
-        | Some c ->
-            let v, d = eval_cell cache iteration c in
-            (Some v, d)
-      in
-      (f v1 v2, Float.max d1 d2)
-  | RRef { cell = Some c; _ } -> eval_cell cache iteration c
-  | RRef { cell = None; _ } -> (0.0, 0.0)
-
-(** Run a single resolution pass over all root cells, returning the maximum absolute delta across
-    all cells updated in this sweep. *)
-let resolve_pass cache roots iteration =
-  List.fold_left
-    (fun acc_delta root ->
-      let _, d = eval_cell cache iteration root in
-      Float.max acc_delta d)
-    0.0 roots
-
-(** Iterate resolution passes until all cell values converge (max delta below threshold) or the
-    maximum iteration count is reached. *)
-let rec iterate cache roots iteration =
-  if iteration > Cell_cache.max_iterations then ()
-  else
-    let delta = resolve_pass cache roots iteration in
-    if delta < Cell_cache.convergence_threshold then () else iterate cache roots (iteration + 1)
-
-(** Extract the final value from the cache for a cell, returning [(period, value)]. *)
-let read_result cache cell =
-  let id = cell_id cell in
-  let period = cell_period cell in
-  match Cell_cache.find_period cache id period with
-  | Some (p, Cell_cache.Resolved v) -> (p, v)
-  | Some (p, Cell_cache.Unresolved (v, _)) -> (p, v)
-  | None -> failwith "Period_cell.read_result: cell not found in cache after iteration"
-
-let eval cell =
-  let cache = Cell_cache.create () in
-  prime_tree cache cell;
-  iterate cache [ cell ] 1;
-  read_result cache cell
-
-let eval_many cells =
-  let cache = Cell_cache.create () in
-  List.iter (prime_tree cache) cells;
-  iterate cache cells 1;
-  List.map (read_result cache) cells

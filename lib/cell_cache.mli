@@ -4,7 +4,7 @@
 (** Evaluation cache for period and point-in-time cells.
 
     Stores intermediate and final cell values during fixed-point iteration. Period cells are keyed by
-    cell ID and period; point cells are keyed by cell ID and date.
+    cell ID and period; point cells are keyed by cell ID.
 
     {1 Types} *)
 
@@ -36,13 +36,12 @@ val store_period : t -> int -> Period.t -> cell_status -> unit
 
 (** {1 Point cell operations} *)
 
-val find_point : t -> int -> Date.t -> cell_status option
-(** [find_point cache id date] looks up the status of a point cell [id] at [date]. Returns
-    [Some status] on a hit, [None] on a miss. *)
+val find_point : t -> int -> cell_status option
+(** [find_point cache id] looks up the status of point cell [id]. Returns [Some status] on a hit,
+    [None] on a miss. *)
 
-val store_point : t -> int -> Date.t -> cell_status -> unit
-(** [store_point cache id date status] writes [status] into the cache for point cell [id] at
-    [date]. *)
+val store_point : t -> int -> cell_status -> unit
+(** [store_point cache id status] writes [status] into the cache for point cell [id]. *)
 
 (** {1 Constants} *)
 

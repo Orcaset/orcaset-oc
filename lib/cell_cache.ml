@@ -8,13 +8,6 @@ module PeriodHash = Hashtbl.Make (struct
   let hash = Period.hash
 end)
 
-module DateHash = Hashtbl.Make (struct
-  type t = Date.t
-
-  let equal = Date.equal
-  let hash = Date.hash
-end)
-
 (** Status of a cell in the evaluation cache. [Resolved] cells have a final value that will not
     change. [Unresolved] cells are part of a dependency cycle and carry the current iteration guess
     and the last iteration number in which they were updated (used as a Gauss-Seidel guard to avoid
@@ -23,7 +16,7 @@ type cell_status = Resolved of float | Unresolved of float * int
 
 type t = {
   period : (int, cell_status PeriodHash.t) Hashtbl.t;
-  point : (int, cell_status DateHash.t) Hashtbl.t;
+  point : (int, cell_status) Hashtbl.t;
 }
 
 let create () = { period = Hashtbl.create 16; point = Hashtbl.create 16 }
@@ -56,30 +49,11 @@ let store_period cache id period status =
   in
   PeriodHash.replace cell_cache period status
 
-(** Look up a point cell status by cell ID and date. Returns [Some status] on a hit, [None] on a
-    miss. *)
-let find_point cache id date =
-  let cell_cache =
-    match Hashtbl.find_opt cache.point id with
-    | Some cc -> cc
-    | None ->
-        let cc = DateHash.create 12 in
-        Hashtbl.replace cache.point id cc;
-        cc
-  in
-  DateHash.find_opt cell_cache date
+(** Look up a point cell status by cell ID. Returns [Some status] on a hit, [None] on a miss. *)
+let find_point cache id = Hashtbl.find_opt cache.point id
 
-(** Store a point cell status in the cache for a given cell ID and date. *)
-let store_point cache id date status =
-  let cell_cache =
-    match Hashtbl.find_opt cache.point id with
-    | Some cc -> cc
-    | None ->
-        let cc = DateHash.create 12 in
-        Hashtbl.replace cache.point id cc;
-        cc
-  in
-  DateHash.replace cell_cache date status
+(** Store a point cell status in the cache for a given cell ID. *)
+let store_point cache id status = Hashtbl.replace cache.point id status
 
 let max_iterations = 1000
 let convergence_threshold = 1e-6

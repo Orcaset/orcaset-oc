@@ -58,7 +58,7 @@ let rec take_cells_while s date =
   match s () with
   | Seq.Nil -> Seq.empty
   | Seq.Cons (cell, rest) ->
-      let cell_period = Cell.cell_period cell in
+      let cell_period = Cell.period cell in
       let period_end_comparison = Date.compare (Period.end_date cell_period) date in
       let straddles_date =
         Date.compare (Period.start_date cell_period) date <= 0
@@ -72,8 +72,7 @@ let rec take_cells_while s date =
 let overlapping_cells period seq =
   let max_cells = take_cells_while seq (Period.end_date period) in
   Seq.drop_while
-    (fun cell ->
-      Date.compare (Period.end_date (Cell.cell_period cell)) (Period.start_date period) <= 0)
+    (fun cell -> Date.compare (Period.end_date (Cell.period cell)) (Period.start_date period) <= 0)
     max_cells
 
 let clipped_cells period seq =
@@ -96,7 +95,7 @@ let rec eval_seq cache series =
             let self_query period =
               (match !cell_cache with
               | latest :: _ ->
-                  let frontier = Period.end_date (Cell.cell_period latest) in
+                  let frontier = Period.end_date (Cell.period latest) in
                   if Date.compare (Period.end_date period) frontier > 0 then
                     raise
                       (Forward_self_query

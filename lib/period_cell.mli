@@ -4,13 +4,12 @@
 (** Single-period computation cells.
 
     A cell represents a single value associated with a time period. Cells form a graph structure
-    where composite cells ({!deps}, {!map}, {!map2}) depend on other cells. Evaluation via {!eval}
-    traverses the graph, caching results by cell identity and period so that shared sub-graphs are
-    computed only once. Dependencies may be circular.
+    where composite cells ({!deps}, {!map}, {!map2}) depend on other cells. Evaluation via
+    {!Solver.eval_period} traverses the graph, caching results by cell identity and period so that
+    shared sub-graphs are computed only once. Dependencies may be circular.
 
     The phantom type parameter ['c] tracks the currency (or unit) associated with a cell, e.g.
-    [[\`USD] Period_cell.t].
-*)
+    [[\`USD] Period_cell.t]. *)
 
 (** {1 Types} *)
 
@@ -18,13 +17,17 @@ type split_fn = Cell_types.split_fn
 (** A function that splits a constant cell's value at a given date, producing two {!split_result}
     values covering the left and right sub-periods. *)
 
-type split_result = Cell_types.split_result = { period : Period.t; f : unit -> float; split : split_fn }
+type split_result = Cell_types.split_result = {
+  period : Period.t;
+  f : unit -> float;
+  split : split_fn;
+}
 (** The result of splitting a [Const] cell's value at a date. Contains the components needed to
     construct a new [Const] cell covering a sub-period. *)
 
 type +'c t = Cell_types.period_cell
-(** A single-period computation cell. The phantom type parameter ['c] tracks the currency or
-    unit associated with the cell's value. *)
+(** A single-period computation cell. The phantom type parameter ['c] tracks the currency or unit
+    associated with the cell's value. *)
 
 (** {1 Constructors} *)
 
@@ -62,26 +65,12 @@ val set_ref : 'c t -> 'c t -> unit
 
 (** {1 Accessors} *)
 
-val cell_id : 'c t -> int
-(** [cell_id cell] is the unique integer identifier assigned to [cell] at construction time. *)
+val id : 'c t -> int
+(** [id cell] is the unique integer identifier assigned to [cell] at construction time. *)
 
-val cell_period : 'c t -> Period.t
-(** [cell_period cell] is the time period covered by [cell]. For [Map] and [Map2] cells this is
-    derived recursively from the inner cell(s). *)
-
-(** {1 Evaluation} *)
-
-val eval : 'c t -> Period.t * float
-(** [eval cell] forces the computation tree rooted at [cell] and returns its period and float value.
-    Results are cached by cell identity and period, so shared sub-trees are computed only once
-    within a single [eval] call.
-
-    Note: each call creates a fresh cache. When evaluating many cells that share dependencies,
-    prefer {!eval_many} for cache sharing. *)
-
-val eval_many : 'c t list -> (Period.t * float) list
-(** [eval_many cells] evaluates a list of cells using a single shared cache, so common
-    sub-dependencies are computed only once. Returns results in the same order as the input. *)
+val period : 'c t -> Period.t
+(** [period cell] is the time period covered by [cell]. For [Map] and [Map2] cells this is derived
+    recursively from the inner cell(s). *)
 
 (** {1 Splitting} *)
 
@@ -103,6 +92,18 @@ val iter_period_union : 'c t Seq.t -> 'c t Seq.t -> ('c t option * 'c t option) 
 (** [iter_period_union a b] merges two cell sequences by aligning their periods. Cells are split as
     needed so that each emitted pair covers an identical sub-period. Unmatched cells are paired with
     [None]. *)
+
+(** {1 Priming} *)
+
+val prime : Cell_types.prime_fn -> Cell_cache.t -> 'c t -> unit
+(** [prime prime_tree cache cell] initialises the cache entry for [cell] and recursively primes its
+    dependencies via the [prime_tree] callback. *)
+
+(** {1 Evaluation} *)
+
+val compute : Cell_types.eval_fn -> Cell_cache.t -> int -> 'c t -> float * float
+(** [compute eval_cell cache iteration cell] computes the value of [cell] for a single evaluation
+    step. [eval_cell] is used to recursively evaluate dependencies. *)
 
 (** {1 Dependency analysis} *)
 

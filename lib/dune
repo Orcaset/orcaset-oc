@@ -6,9 +6,11 @@
   cell_types
   cell_cache
   date
+  eval
   offset
   period
   period_cell
+  point_cell
   series
   yf)
  (private_modules cell_cache cell_types))

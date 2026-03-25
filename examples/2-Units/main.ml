@@ -28,7 +28,9 @@ let end_date = Date.make 2026 3 31
 let const_series (type c) (value : float) : c Series.t =
   Series.const
     (Seq.return
-       (Period_cell.const (Period.make start_date end_date) (fun () -> value) Period_cell.proportional_split))
+       (Period_cell.const (Period.make start_date end_date)
+          (fun () -> value)
+          Period_cell.proportional_split))
 
 (* ── Line items denominated in different currencies ───────────────────────────── *)
 
@@ -61,8 +63,8 @@ let () =
       let r_cell = Seq.uncons revenue_seq |> Option.get |> fst in
       let c_cell = Seq.uncons costs_seq |> Option.get |> fst in
       let p_cell = Seq.uncons profit_seq |> Option.get |> fst in
-      let period = Period_cell.cell_period r_cell in
-      match Period_cell.eval_many [ r_cell; c_cell; p_cell ] with
+      let period = Period_cell.period r_cell in
+      match Eval.eval_period_many [ r_cell; c_cell; p_cell ] with
       | [ (_, rv); (_, cv); (_, pv) ] ->
           Printf.printf "%-25s %12s %16s %14s\n" "Period" "Revenue (USD)" "Costs (USD)"
             "Profit (USD)";

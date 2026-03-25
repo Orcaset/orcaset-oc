@@ -36,8 +36,8 @@ let () =
   | [ profit_seq ] ->
       Seq.iter
         (fun cell ->
-          let period = Period_cell.cell_period cell in
-          let value = Period_cell.eval cell |> snd in
+          let period = Period_cell.period cell in
+          let value = Eval.eval_period cell |> snd in
           Printf.printf "%s: %.2f\n" (Period.to_string period) value)
         (profit_seq |> Seq.take 6)
   | _ -> assert false

@@ -18,14 +18,20 @@ type period_cell =
   | RRef of { id : int; period : Period.t; mutable cell : period_cell option }
 
 and point_cell =
-  | TConst of { id : int; value : float }
-  | TAccum of { id : int; initial : float; flow : period_cell }
+  | TConst of { id : int; date : Date.t; value : float }
   | TMap of { id : int; inner : point_cell; f : float -> float }
-  | TMap2 of {
+  | TConvert of { id : int; inner : point_cell; f : Date.t -> float -> float }
+  | TDep2 of {
       id : int;
+      date : Date.t;
       c1 : point_cell option;
       c2 : point_cell option;
       f : float option -> float option -> float;
     }
 
 type cell = PeriodCell of period_cell | PointCell of point_cell
+type eval_fn = Cell_cache.t -> int -> cell -> float * float
+type prime_fn = Cell_cache.t -> cell -> unit
+
+let next_id = Atomic.make 0
+let fresh_id () = Atomic.fetch_and_add next_id 1
