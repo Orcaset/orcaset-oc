@@ -126,7 +126,7 @@ val to_seq : 'c t list -> 'c Cell.t Seq.t list
 (** Materialize a list of series into corresponding lazy cell sequences. All series in the list
     share a single evaluation cache, so common dependencies are computed only once. *)
 
-(** {1 Dependency analysis} *)
+(** {1 Dependencies} *)
 
 val dependencies : 'c t -> 'c t list
 (** Return all transitive dependencies of a series (including itself). Uses physical identity to

@@ -1,3 +1,6 @@
+(* Copyright (C) 2026 Orcaset Inc.
+ * SPDX-License-Identifier: SSPL-1.0 *)
+
 (** Year fraction calculations for various day count conventions. *)
 
 let diff_days d1 d2 = CalendarLib.Date.sub d2 d1 |> CalendarLib.Date.Period.nb_days

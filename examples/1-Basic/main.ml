@@ -13,26 +13,26 @@ let revenue =
   let rec generate_cells last_period () =
     let current_period = Period.shift offset last_period in
     Seq.Cons
-      ( Series.Step
+      ( Period_series.Step
           {
             period = current_period;
-            queries = [ Self { period = last_period; reduce = Series.reduce_sum } ];
+            queries = [ Self { period = last_period; reduce = Period_series.reduce_sum } ];
             f =
               (fun values ->
                 match values with [ last_value ] -> last_value *. (1.0 +. growth_rate) | _ -> 0.0);
           },
         generate_cells current_period )
   in
-  Series.unfold ~deps:[]
+  Period_series.unfold ~deps:[]
     (Seq.cons
-       (Series.Seed { period = initial_period; f = (fun () -> initial_value) })
+       (Period_series.Seed { period = initial_period; f = (fun () -> initial_value) })
        (generate_cells initial_period))
 
-let costs = Series.map (fun r -> r *. -0.6) (lazy revenue)
-let profit = Series.sum revenue costs
+let costs = Period_series.map (fun r -> r *. -0.6) (lazy revenue)
+let profit = Period_series.sum revenue costs
 
 let () =
-  match Series.to_seq [ profit ] with
+  match Period_series.to_seq [ profit ] with
   | [ profit_seq ] ->
       Seq.iter
         (fun cell ->

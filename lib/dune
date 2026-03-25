@@ -11,6 +11,7 @@
   period
   period_cell
   point_cell
-  series
+  period_series
+  point_series
   yf)
  (private_modules cell_cache cell_types))

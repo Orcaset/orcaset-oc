@@ -2,14 +2,15 @@ open Orcaset
 
 (* This example shows how Orcaset protects against unit/currency mismatches at compile time. *)
 
-(* Cell and series carry a phantom type tag (e.g. [`USD] or [`EUR] for currencies) that is checked
+(* Cells and series carry a phantom type tag (e.g. [`USD] or [`EUR] for currencies) that is checked
    by the OCaml type system. Types parameterized by different unit tags are considered different types
    in OCaml, so they are not interchangeable without explicit conversion.
    
-   In code, the library exposes Period_cell.t and Series.t as:
+   In code, the library exposes Period_cell.t and Period_series.t as below (with analogous 
+   definitions for point-wise cells and series):
 
      type +'c Period_cell.t
-     type  'c Series.t
+     type  'c Period_series.t
 
    The constraints cost nothing at runtime. They are erased after type-checking. The compiler can 
    also often infer the correct units from context, so unit tags don't litter the codebase.
@@ -25,8 +26,8 @@ let start_date = Date.make 2025 12 31
 let end_date = Date.make 2026 3 31
 
 (* Helper function to create a constant series with a given value and phantom type tag *)
-let const_series (type c) (value : float) : c Series.t =
-  Series.const
+let const_series (type c) (value : float) : c Period_series.t =
+  Period_series.const
     (Seq.return
        (Period_cell.const (Period.make start_date end_date)
           (fun () -> value)
@@ -35,10 +36,10 @@ let const_series (type c) (value : float) : c Series.t =
 (* ── Line items denominated in different currencies ───────────────────────────── *)
 
 (* Revenues in GBP *)
-let revenue : [ `GBP ] Series.t = const_series 10_000.0
+let revenue : [ `GBP ] Period_series.t = const_series 10_000.0
 
 (* Costs in USD *)
-let costs : [ `USD ] Series.t = const_series (-6_000.0)
+let costs : [ `USD ] Period_series.t = const_series (-6_000.0)
 
 (* ── Type-safe arithmetic failure case ─────────────────────────────────────────────────── *)
 
@@ -52,13 +53,13 @@ let costs : [ `USD ] Series.t = const_series (-6_000.0)
 (* ── Combining requires explicit currency conversion ────────────────────────────────────────── *)
 
 (* To combine GBP and USD values you must explicitly provide a conversion function. *)
-let usd_revenue = Series.convert (fun _ r -> r *. 1.34) (lazy revenue)
-let profit = Series.sum usd_revenue costs
+let usd_revenue = Period_series.convert (fun _ r -> r *. 1.34) (lazy revenue)
+let profit = Period_series.sum usd_revenue costs
 
 (* ── Print results ────────────────────────────────────────────────────────── *)
 
 let () =
-  match Series.to_seq [ usd_revenue; costs; profit ] with
+  match Period_series.to_seq [ usd_revenue; costs; profit ] with
   | [ revenue_seq; costs_seq; profit_seq ] -> (
       let r_cell = Seq.uncons revenue_seq |> Option.get |> fst in
       let c_cell = Seq.uncons costs_seq |> Option.get |> fst in
