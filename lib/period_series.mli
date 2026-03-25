@@ -11,9 +11,7 @@
     The phantom type parameter ['c] tracks the currency (or unit) associated with the series,
     matching the currency of the cells it produces. *)
 
-module Cell = Period_cell
-
-type 'c query_fn = Period.t -> 'c Cell.t Seq.t
+type 'c query_fn = Period.t -> 'c Period_cell.t Seq.t
 (** A function that retrieves the cells covering a given period. *)
 
 type reduce = float list -> float
@@ -58,7 +56,7 @@ exception
 
 (** {1 Constructors} *)
 
-val const : 'c Cell.t Seq.t -> 'c t
+val const : 'c Period_cell.t Seq.t -> 'c t
 (** A series backed by a pre-built cell sequence. *)
 
 val unfold : deps:'c t Lazy.t list -> 'c unfold_cell Seq.t -> 'c t
@@ -116,13 +114,13 @@ val div : 'c t -> 'c t -> 'c t
 
 (** {1 Accessors} *)
 
-val series_id : 'c t -> int
+val id : 'c t -> int
 (** Return the unique integer identifier assigned to a series at construction time. Useful for
     debugging, logging, and DOT output. *)
 
 (** {1 Evaluation} *)
 
-val to_seq : 'c t list -> 'c Cell.t Seq.t list
+val to_seq : 'c t list -> 'c Period_cell.t Seq.t list
 (** Materialize a list of series into corresponding lazy cell sequences. All series in the list
     share a single evaluation cache, so common dependencies are computed only once. *)
 

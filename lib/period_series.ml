@@ -1,9 +1,7 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-module Cell = Period_cell
-
-type 'c query_fn = Period.t -> 'c Cell.t Seq.t
+type 'c query_fn = Period.t -> 'c Period_cell.t Seq.t
 type reduce = float list -> float
 
 type dep_query =
@@ -22,7 +20,7 @@ exception
   Forward_self_query of { series_id : int; current_frontier : Date.t; query_period : Period.t }
 
 type 'c t =
-  | Const of { id : int; cells : 'c Cell.t Seq.t }
+  | Const of { id : int; cells : 'c Period_cell.t Seq.t }
   | Unfold of { id : int; deps : 'c t Lazy.t list; cells : 'c unfold_cell Seq.t }
   | Map of { id : int; inner : 'c t Lazy.t; f : float -> float }
   | Convert of { id : int; inner : 'c t Lazy.t; f : Period.t -> float -> float }
@@ -33,7 +31,7 @@ type 'c t =
       f : float option -> float option -> float;
     }
 
-let series_id = function
+let id = function
   | Const { id; _ } | Unfold { id; _ } | Map { id; _ } | Convert { id; _ } | Map2 { id; _ } -> id
 
 (* CONSTRUCTORS *)
@@ -58,7 +56,7 @@ let rec take_cells_while s date =
   match s () with
   | Seq.Nil -> Seq.empty
   | Seq.Cons (cell, rest) ->
-      let cell_period = Cell.period cell in
+      let cell_period = Period_cell.period cell in
       let period_end_comparison = Date.compare (Period.end_date cell_period) date in
       let straddles_date =
         Date.compare (Period.start_date cell_period) date <= 0
@@ -72,16 +70,17 @@ let rec take_cells_while s date =
 let overlapping_cells period seq =
   let max_cells = take_cells_while seq (Period.end_date period) in
   Seq.drop_while
-    (fun cell -> Date.compare (Period.end_date (Cell.period cell)) (Period.start_date period) <= 0)
+    (fun cell ->
+      Date.compare (Period.end_date (Period_cell.period cell)) (Period.start_date period) <= 0)
     max_cells
 
 let clipped_cells period seq =
   let overlapped_cells = overlapping_cells period seq in
-  Seq.map (fun cell -> Cell.clip cell period) overlapped_cells
+  Seq.map (fun cell -> Period_cell.clip cell period) overlapped_cells
 
 let rec eval_seq cache series =
-  let id = series_id series in
-  match Hashtbl.find_opt cache id with
+  let series_id = id series in
+  match Hashtbl.find_opt cache series_id with
   | Some seq -> seq
   | None ->
       let seq =
@@ -95,11 +94,11 @@ let rec eval_seq cache series =
             let self_query period =
               (match !cell_cache with
               | latest :: _ ->
-                  let frontier = Period.end_date (Cell.period latest) in
+                  let frontier = Period.end_date (Period_cell.period latest) in
                   if Date.compare (Period.end_date period) frontier > 0 then
                     raise
                       (Forward_self_query
-                         { series_id = id; current_frontier = frontier; query_period = period })
+                         { series_id; current_frontier = frontier; query_period = period })
               | [] -> ());
               let self_seq () = List.to_seq (List.rev !cell_cache) () in
               clipped_cells period self_seq
@@ -113,16 +112,16 @@ let rec eval_seq cache series =
                   ((List.nth dep_queries index) period |> List.of_seq, reduce)
             in
             let resolve_unfold_cell = function
-              | Seed { period; f } -> Cell.const period f Cell.proportional_split
+              | Seed { period; f } -> Period_cell.const period f Period_cell.proportional_split
               | Step { period; queries; f } ->
                   let inner_cells =
                     List.map
                       (fun q ->
                         let dep_cells, reduce = resolve_query q in
-                        Cell.deps period dep_cells reduce)
+                        Period_cell.deps period dep_cells reduce)
                       queries
                   in
-                  Cell.deps period inner_cells f
+                  Period_cell.deps period inner_cells f
             in
             let cell_seq = Seq.map resolve_unfold_cell cells in
             let rec caching_seq s () =
@@ -134,17 +133,19 @@ let rec eval_seq cache series =
             in
             caching_seq cell_seq
         | Map { inner; f; _ } ->
-            Seq.map (fun cell -> Cell.map cell f) (eval_seq cache (Lazy.force inner))
+            Seq.map (fun cell -> Period_cell.map cell f) (eval_seq cache (Lazy.force inner))
         | Convert { inner; f; _ } ->
-            Seq.map (fun cell -> Cell.convert cell f) (eval_seq cache (Lazy.force inner))
+            Seq.map (fun cell -> Period_cell.convert cell f) (eval_seq cache (Lazy.force inner))
         | Map2 { s1; s2; f; _ } ->
             let seq1 = eval_seq cache (Lazy.force s1) in
             let seq2 = eval_seq cache (Lazy.force s2) in
-            let aligned_seq = Cell.iter_period_union seq1 seq2 in
-            Seq.map (fun (cell_opt1, cell_opt2) -> Cell.map2 cell_opt1 cell_opt2 f) aligned_seq
+            let aligned_seq = Period_cell.iter_period_union seq1 seq2 in
+            Seq.map
+              (fun (cell_opt1, cell_opt2) -> Period_cell.map2 cell_opt1 cell_opt2 f)
+              aligned_seq
       in
       let memo_seq = Seq.memoize seq in
-      Hashtbl.replace cache id memo_seq;
+      Hashtbl.replace cache series_id memo_seq;
       memo_seq
 
 (* Get the cells from a series that cover the period range. *)
@@ -201,7 +202,7 @@ let pp_dot ppf roots =
     id
   in
   let label_of s =
-    let sid = series_id s in
+    let sid = id s in
     match s with
     | Const _ -> Printf.sprintf "Const(%d)" sid
     | Unfold _ -> Printf.sprintf "Unfold(%d)" sid
