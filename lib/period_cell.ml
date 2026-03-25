@@ -16,7 +16,8 @@ type +'c t = Cell_types.period_cell
 (* Constructors *)
 
 let const period f split = RConst { id = Cell_types.fresh_id (); period; f; split }
-let deps period deps f = RDeps { id = Cell_types.fresh_id (); period; deps; f }
+let deps period (deps : Cell_types.cell list) f =
+  RDeps { id = Cell_types.fresh_id (); period; deps; f }
 let map inner f = RMap { id = Cell_types.fresh_id (); inner; f }
 let convert inner f = RConvert { id = Cell_types.fresh_id (); inner; f }
 let map2 c1 c2 f = RMap2 { id = Cell_types.fresh_id (); c1; c2; f }
@@ -191,7 +192,7 @@ let prime (prime_tree : Cell_types.prime_fn) cache cell =
       prime_tree cache (PeriodCell inner)
   | RDeps { deps; _ } ->
       store (Cell_cache.Unresolved (0.0, 0));
-      List.iter (fun dep -> prime_tree cache (PeriodCell dep)) deps
+      List.iter (fun dep -> prime_tree cache dep) deps
   | RMap { inner; _ } | RConvert { inner; _ } ->
       store (Cell_cache.Unresolved (0.0, 0));
       prime_tree cache (PeriodCell inner)
@@ -207,7 +208,7 @@ let compute (eval_cell : Cell_types.eval_fn) cache iteration = function
       let values, max_delta =
         List.fold_left
           (fun (vals, acc_delta) dep ->
-            let v, d = eval_cell cache iteration (PeriodCell dep) in
+            let v, d = eval_cell cache iteration dep in
             (v :: vals, Float.max acc_delta d))
           ([], 0.0) deps
       in
@@ -237,27 +238,3 @@ let compute (eval_cell : Cell_types.eval_fn) cache iteration = function
   | RRef { cell = Some c; _ } -> eval_cell cache iteration (PeriodCell c)
   | RRef { cell = None; _ } -> (0.0, 0.0)
 
-(** A tree representing the dependency structure of a cell. [Cycle] marks a back-edge to a cell that
-    was already visited on the current path, preventing infinite recursion when circular
-    dependencies exist. *)
-type 'c dep_tree = Leaf of 'c t | Node of 'c t * 'c dep_tree list | Cycle of 'c t
-
-(** Return the dependency tree rooted at [cell]. Circular dependencies are detected via physical
-    identity ([==]) on a visited set and represented as [Cycle] nodes rather than recursing
-    infinitely. *)
-let dependency_tree cell =
-  let rec go visited c =
-    if List.exists (fun v -> v == c) visited then Cycle c
-    else
-      let visited = c :: visited in
-      match c with
-      | RConst _ -> Leaf c
-      | RDeps { deps; _ } -> Node (c, List.map (go visited) deps)
-      | RMap { inner; _ } | RConvert { inner; _ } -> Node (c, [ go visited inner ])
-      | RMap2 { c1; c2; _ } ->
-          let children = List.filter_map (fun opt -> Option.map (go visited) opt) [ c1; c2 ] in
-          Node (c, children)
-      | RRef { cell = Some inner; _ } -> Node (c, [ go visited inner ])
-      | RRef { cell = None; _ } -> Leaf c
-  in
-  go [] cell

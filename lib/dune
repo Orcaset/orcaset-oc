@@ -7,11 +7,14 @@
   cell_cache
   date
   eval
+  graph
   offset
   period
   period_cell
   point_cell
+  series_types
   period_series
   point_series
+  series
   yf)
- (private_modules cell_cache cell_types))
+ (private_modules cell_cache cell_types graph series_types))

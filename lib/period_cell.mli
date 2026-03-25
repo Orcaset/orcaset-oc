@@ -36,9 +36,9 @@ val const : Period.t -> (unit -> float) -> split_fn -> 'c t
     how the cell's value is divided when period alignment requires splitting (see
     {!proportional_split}). *)
 
-val deps : Period.t -> 'c t list -> (float list -> float) -> 'c t
+val deps : Period.t -> Cell_types.cell list -> (float list -> float) -> 'c t
 (** [deps period cells f] is a cell whose value is [f values] where [values] are the evaluated
-    results of the dependency [cells]. *)
+    results of the dependency [cells]. Dependencies can be either period cells or point cells. *)
 
 val map : 'c t -> (float -> float) -> 'c t
 (** [map cell f] is a cell whose value is [f v] where [v] is the evaluated result of [cell]. *)
@@ -105,15 +105,3 @@ val compute : Cell_types.eval_fn -> Cell_cache.t -> int -> 'c t -> float * float
 (** [compute eval_cell cache iteration cell] computes the value of [cell] for a single evaluation
     step. [eval_cell] is used to recursively evaluate dependencies. *)
 
-(** {1 Dependency analysis} *)
-
-type 'c dep_tree =
-  | Leaf of 'c t
-  | Node of 'c t * 'c dep_tree list
-  | Cycle of 'c t
-      (** A tree representing the dependency structure of a cell. [Cycle] marks a back-edge to a
-          cell that was already visited on the current path. *)
-
-val dependency_tree : 'c t -> 'c dep_tree
-(** [dependency_tree cell] is the dependency tree rooted at [cell]. Circular dependencies are
-    detected via physical identity and represented as [Cycle] nodes. *)

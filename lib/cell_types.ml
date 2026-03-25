@@ -6,7 +6,7 @@ and split_result = { period : Period.t; f : unit -> float; split : split_fn }
 
 type period_cell =
   | RConst of { id : int; period : Period.t; f : unit -> float; split : split_fn }
-  | RDeps of { id : int; period : Period.t; deps : period_cell list; f : float list -> float }
+  | RDeps of { id : int; period : Period.t; deps : cell list; f : float list -> float }
   | RMap of { id : int; inner : period_cell; f : float -> float }
   | RConvert of { id : int; inner : period_cell; f : Period.t -> float -> float }
   | RMap2 of {
@@ -29,7 +29,7 @@ and point_cell =
       f : float option -> float option -> float;
     }
 
-type cell = PeriodCell of period_cell | PointCell of point_cell
+and cell = PeriodCell of period_cell | PointCell of point_cell
 type eval_fn = Cell_cache.t -> int -> cell -> float * float
 type prime_fn = Cell_cache.t -> cell -> unit
 
