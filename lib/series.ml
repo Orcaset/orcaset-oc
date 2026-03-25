@@ -97,7 +97,7 @@ let rec eval_seq cache series =
               (match !cell_cache with
               | latest :: _ ->
                   let frontier = Period.end_date (Cell.cell_period latest) in
-                  if Date.compare (Period.end_date period) frontier >= 0 then
+                  if Date.compare (Period.end_date period) frontier > 0 then
                     raise
                       (Forward_self_query
                          { series_id = id; current_frontier = frontier; query_period = period })
