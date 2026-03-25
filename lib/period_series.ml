@@ -89,8 +89,7 @@ let rec eval_seq ~eval_point cache series =
                 (fun dep ->
                   match dep with
                   | Period_dep ps ->
-                      fun period ->
-                        eval_query ~eval_point cache (Lazy.force ps) period
+                      fun period -> eval_query ~eval_point cache (Lazy.force ps) period
                   | Point_dep _ ->
                       fun _period ->
                         failwith
@@ -99,14 +98,26 @@ let rec eval_seq ~eval_point cache series =
                 deps
             in
             let resolve_query = function
-              | Self { period; reduce } -> (self_query period |> List.of_seq, reduce)
+              | Self { period; reduce } ->
+                  let cells = self_query period |> List.of_seq in
+                  (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
               | Dep { index; period; reduce } ->
-                  ((List.nth dep_queries index) period |> List.of_seq, reduce)
-              | Series_types.Point_dep { index = _; date = _ } ->
-                  (* Point_dep resolution requires cell-layer support for mixed
-                     period/point dependencies. This will be implemented when
-                     the cell types are extended to support cross-type deps. *)
-                  failwith "Point_dep resolution in period series unfold is not yet implemented"
+                  let cells = (List.nth dep_queries index) period |> List.of_seq in
+                  (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
+              | Point_dep { index; date } ->
+                  let point_series =
+                    match List.nth deps index with
+                    | Point_dep ps -> Lazy.force ps
+                    | Period_dep _ ->
+                        failwith "Point_dep query references a period series dep: use Dep instead"
+                  in
+                  let cells =
+                    match eval_point cache date point_series with
+                    | Some cell -> [ Cell_types.PointCell cell ]
+                    | None -> []
+                  in
+                  (* TODO: This effectively fills N/A's for query dates outside the series range with zeros. *)
+                  (cells, reduce_sum)
             in
             let resolve_unfold_cell = function
               | Seed { period; f } -> Period_cell.const period f Period_cell.proportional_split
@@ -115,9 +126,7 @@ let rec eval_seq ~eval_point cache series =
                     List.map
                       (fun q ->
                         let dep_cells, reduce = resolve_query q in
-                        Period_cell.deps period
-                          (List.map (fun c -> Cell_types.PeriodCell c) dep_cells)
-                          reduce)
+                        Period_cell.deps period dep_cells reduce)
                       queries
                   in
                   Period_cell.deps period
@@ -156,4 +165,3 @@ let rec eval_seq ~eval_point cache series =
 and eval_query ~eval_point cache series period =
   let seq = eval_seq ~eval_point cache series in
   clipped_cells period seq
-

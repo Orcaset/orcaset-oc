@@ -23,7 +23,7 @@ val id : 'c t -> int
 
 (** {1 Evaluation} *)
 
-val eval_query : Series_types.cache -> 'c t -> Date.t -> 'c Point_cell.t
+val eval_query : Series_types.cache -> 'c t -> Date.t -> 'c Point_cell.t option
 (** Materialize a point series at a given date into a point cell. Uses the shared cache for
     memoization. *)
 

@@ -18,15 +18,20 @@ let id = function TConst { id; _ } -> id | TMap { id; _ } -> id | TConvert { id;
 let rec eval_query cache series date =
   let series_id = id series in
   match Hashtbl.find_opt cache.point series_id with
-  | Some value -> value
-  | None ->
+  | Some value -> Some value
+  | None -> (
       let value =
         match series with
-        | TConst { value; _ } -> Point_cell.const date value
-        | TMap { inner; f; _ } -> Point_cell.map (eval_query cache (Lazy.force inner) date) f
-        | TConvert { inner; f; _ } ->
-            Point_cell.convert (eval_query cache (Lazy.force inner) date) f
+        | TConst { value; _ } -> Some (Point_cell.const date value)
+        | TMap { inner; f; _ } -> (
+            let inner_cell = eval_query cache (Lazy.force inner) date in
+            match inner_cell with None -> None | Some cell -> Some (Point_cell.map cell f))
+        | TConvert { inner; f; _ } -> (
+            let inner_cell = eval_query cache (Lazy.force inner) date in
+            match inner_cell with None -> None | Some cell -> Some (Point_cell.convert cell f))
       in
-      Hashtbl.add cache.point series_id value;
-      value
-
+      match value with
+      | None -> value
+      | Some cell ->
+          Hashtbl.add cache.point series_id cell;
+          value)

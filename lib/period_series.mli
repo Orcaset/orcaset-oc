@@ -64,7 +64,7 @@ val id : 'c t -> int
 (** {1 Evaluation} *)
 
 val eval_seq :
-  eval_point:(Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t) ->
+  eval_point:(Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
   Series_types.cache ->
   'c t ->
   'c Period_cell.t Seq.t
@@ -73,7 +73,7 @@ val eval_seq :
     and point evaluation without circular module dependencies. *)
 
 val eval_query :
-  eval_point:(Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t) ->
+  eval_point:(Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
   Series_types.cache ->
   'c t ->
   Period.t ->

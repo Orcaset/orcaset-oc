@@ -41,5 +41,5 @@ module Point = struct
 
   let query date series =
     let cache = Series_types.create_cache () in
-    Some (Point_series.eval_query cache series date)
+    Point_series.eval_query cache series date
 end
