@@ -1,10 +1,10 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-(** Evaluation cache for period cells.
+(** Evaluation cache for period and point-in-time cells.
 
-    Stores intermediate and final cell values during fixed-point iteration. The cache is keyed by
-    cell ID and period, supporting cells that have been split into sub-periods with distinct values.
+    Stores intermediate and final cell values during fixed-point iteration. Period cells are keyed by
+    cell ID and period; point cells are keyed by cell ID and date.
 
     {1 Types} *)
 
@@ -22,15 +22,27 @@ type t
 val create : unit -> t
 (** [create ()] is a fresh, empty cache. *)
 
-(** {1 Operations} *)
+(** {1 Period cell operations} *)
 
-val find : t -> int -> Period.t -> (Period.t * cell_status) option
-(** [find cache id period] looks up the status of cell [id] for [period]. Returns
+val find_period : t -> int -> Period.t -> (Period.t * cell_status) option
+(** [find_period cache id period] looks up the status of a period cell [id] for [period]. Returns
     [Some (period, status)] on a hit, [None] on a miss. As a side effect, ensures the per-cell
-    sub-table exists so that a subsequent {!store} for the same [id] does not need to re-check. *)
+    sub-table exists so that a subsequent {!store_period} for the same [id] does not need to
+    re-check. *)
 
-val store : t -> int -> Period.t -> cell_status -> unit
-(** [store cache id period status] writes [status] into the cache for cell [id] and [period]. *)
+val store_period : t -> int -> Period.t -> cell_status -> unit
+(** [store_period cache id period status] writes [status] into the cache for period cell [id] and
+    [period]. *)
+
+(** {1 Point cell operations} *)
+
+val find_point : t -> int -> Date.t -> cell_status option
+(** [find_point cache id date] looks up the status of a point cell [id] at [date]. Returns
+    [Some status] on a hit, [None] on a miss. *)
+
+val store_point : t -> int -> Date.t -> cell_status -> unit
+(** [store_point cache id date status] writes [status] into the cache for point cell [id] at
+    [date]. *)
 
 (** {1 Constants} *)
 

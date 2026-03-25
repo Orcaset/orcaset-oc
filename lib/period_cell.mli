@@ -9,21 +9,21 @@
     computed only once. Dependencies may be circular.
 
     The phantom type parameter ['c] tracks the currency (or unit) associated with a cell, e.g.
-    [[\`USD] Cell.t].
+    [[\`USD] Period_cell.t].
 *)
 
 (** {1 Types} *)
 
-type split_fn = Period.t -> (unit -> float) -> Date.t -> split_result * split_result
+type split_fn = Cell_types.split_fn
 (** A function that splits a constant cell's value at a given date, producing two {!split_result}
     values covering the left and right sub-periods. *)
 
-and split_result = { period : Period.t; f : unit -> float; split : split_fn }
+type split_result = Cell_types.split_result = { period : Period.t; f : unit -> float; split : split_fn }
 (** The result of splitting a [Const] cell's value at a date. Contains the components needed to
     construct a new [Const] cell covering a sub-period. *)
 
-type +'c t
-(** An opaque single-period computation cell. The phantom type parameter ['c] tracks the currency or
+type +'c t = Cell_types.period_cell
+(** A single-period computation cell. The phantom type parameter ['c] tracks the currency or
     unit associated with the cell's value. *)
 
 (** {1 Constructors} *)

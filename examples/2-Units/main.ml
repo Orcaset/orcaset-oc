@@ -6,9 +6,9 @@ open Orcaset
    by the OCaml type system. Types parameterized by different unit tags are considered different types
    in OCaml, so they are not interchangeable without explicit conversion.
    
-   In code, the library exposes Cell.t and Series.t as:
+   In code, the library exposes Period_cell.t and Series.t as:
 
-     type +'c Cell.t
+     type +'c Period_cell.t
      type  'c Series.t
 
    The constraints cost nothing at runtime. They are erased after type-checking. The compiler can 
@@ -28,7 +28,7 @@ let end_date = Date.make 2026 3 31
 let const_series (type c) (value : float) : c Series.t =
   Series.const
     (Seq.return
-       (Cell.const (Period.make start_date end_date) (fun () -> value) Cell.proportional_split))
+       (Period_cell.const (Period.make start_date end_date) (fun () -> value) Period_cell.proportional_split))
 
 (* ── Line items denominated in different currencies ───────────────────────────── *)
 
@@ -61,8 +61,8 @@ let () =
       let r_cell = Seq.uncons revenue_seq |> Option.get |> fst in
       let c_cell = Seq.uncons costs_seq |> Option.get |> fst in
       let p_cell = Seq.uncons profit_seq |> Option.get |> fst in
-      let period = Cell.cell_period r_cell in
-      match Cell.eval_many [ r_cell; c_cell; p_cell ] with
+      let period = Period_cell.cell_period r_cell in
+      match Period_cell.eval_many [ r_cell; c_cell; p_cell ] with
       | [ (_, rv); (_, cv); (_, pv) ] ->
           Printf.printf "%-25s %12s %16s %14s\n" "Period" "Revenue (USD)" "Costs (USD)"
             "Profit (USD)";

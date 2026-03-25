@@ -11,7 +11,7 @@
     The phantom type parameter ['c] tracks the currency (or unit) associated with the series,
     matching the currency of the cells it produces. *)
 
-module Cell = Cell
+module Cell = Period_cell
 
 type 'c query_fn = Period.t -> 'c Cell.t Seq.t
 (** A function that retrieves the cells covering a given period. *)

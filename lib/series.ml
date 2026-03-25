@@ -1,7 +1,7 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-module Cell = Cell
+module Cell = Period_cell
 
 type 'c query_fn = Period.t -> 'c Cell.t Seq.t
 type reduce = float list -> float

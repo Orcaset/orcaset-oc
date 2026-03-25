@@ -3,11 +3,12 @@
  (public_name orcaset)
  (libraries calendar)
  (modules
-  cell
+  cell_types
   cell_cache
   date
   offset
   period
+  period_cell
   series
   yf)
- (private_modules cell_cache))
+ (private_modules cell_cache cell_types))
