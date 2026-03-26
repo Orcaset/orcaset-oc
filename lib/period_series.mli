@@ -68,7 +68,7 @@ val eval_seq :
   Series_types.cache ->
   'c t ->
   'c Period_cell.t Seq.t
-(** Materialize a series into a lazy cell sequence. Accepts an [eval_point] callback for resolving
+(** Materialize a series into a cell sequence. Accepts an [eval_point] callback for resolving
     point series dependencies. The callback is provided by {!Series} to tie the knot between period
     and point evaluation without circular module dependencies. *)
 

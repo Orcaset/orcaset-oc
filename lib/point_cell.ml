@@ -9,13 +9,16 @@ let const date value = TConst { id = Cell_types.fresh_id (); date; value }
 let map inner f = TMap { id = Cell_types.fresh_id (); inner; f }
 let convert inner f = TConvert { id = Cell_types.fresh_id (); inner; f }
 let dep2 c1 c2 date f = TDep2 { id = Cell_types.fresh_id (); date; c1; c2; f }
+let accum changes date f = TAccum { id = Cell_types.fresh_id (); date; changes; f }
 
 (* Accessors *)
 
-let id = function TConst { id; _ } | TMap { id; _ } | TConvert { id; _ } | TDep2 { id; _ } -> id
+let id = function
+  | TConst { id; _ } | TMap { id; _ } | TConvert { id; _ } | TDep2 { id; _ } | TAccum { id; _ } ->
+      id
 
 let rec date = function
-  | TConst { date; _ } | TDep2 { date; _ } -> date
+  | TConst { date; _ } | TDep2 { date; _ } | TAccum { date; _ } -> date
   | TMap { inner; _ } | TConvert { inner; _ } -> date inner
 
 (* Priming *)
@@ -30,6 +33,9 @@ let prime (prime_tree : Cell_types.prime_fn) cache cell =
   | TDep2 { c1; c2; _ } ->
       store (Cell_cache.Unresolved (0.0, 0));
       List.iter (fun dep -> prime_tree cache (PointCell dep)) (List.filter_map Fun.id [ c1; c2 ])
+  | TAccum { changes; _ } ->
+      store (Cell_cache.Unresolved (0.0, 0));
+      Seq.iter (fun dep -> prime_tree cache (PeriodCell dep)) changes
 
 (* Evaluation *)
 
@@ -57,3 +63,14 @@ let compute (eval_cell : Cell_types.eval_fn) cache iteration = function
             (Some v, d)
       in
       (f v1 v2, Float.max d1 d2)
+  | TAccum { changes; f; _ } ->
+      let change_values =
+        Seq.map
+          (fun change ->
+            let v, d = eval_cell cache iteration (PeriodCell change) in
+            (v, d))
+          changes
+      in
+      let total_accum = Seq.fold_left (fun acc (v, _) -> acc +. v) 0.0 change_values in
+      let max_delta = Seq.fold_left (fun acc (_, d) -> Float.max acc d) 0.0 change_values in
+      (f total_accum, max_delta)

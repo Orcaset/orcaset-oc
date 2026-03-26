@@ -33,6 +33,7 @@ and point_cell =
       c2 : point_cell option;
       f : float option -> float option -> float;
     }
+  | TAccum of { id : int; date : Date.t; changes : period_cell Seq.t; f : float -> float }
 
 and cell = PeriodCell of period_cell | PointCell of point_cell
 type eval_fn = Cell_cache.t -> int -> cell -> float * float

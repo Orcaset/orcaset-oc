@@ -44,6 +44,9 @@ let cells cell =
             List.filter_map (fun opt -> Option.map (go_point visited) opt) [ c1; c2 ]
           in
           Node (wrapped, children)
+      | TAccum { changes; _ } ->
+          let children = List.of_seq (Seq.map (go_period visited) changes) in
+          Node (wrapped, children)
   and go visited = function
     | PeriodCell c -> go_period visited c
     | PointCell c -> go_point visited c
@@ -85,6 +88,7 @@ let series series =
       match s with
       | TConst _ -> acc
       | TMap { inner; _ } | TConvert { inner; _ } -> go_point acc (Lazy.force inner)
+      | TAccum { changes; _ } -> go_period acc (Lazy.force changes)
     end
   in
   (match series with PeriodSeries s -> go_period [] s | PointSeries s -> go_point [] s)
@@ -122,6 +126,7 @@ let pp_dot ppf roots =
     | TConst _ -> Printf.sprintf "PtConst(%d)" sid
     | TMap _ -> Printf.sprintf "PtMap(%d)" sid
     | TConvert _ -> Printf.sprintf "PtConvert(%d)" sid
+    | TAccum _ -> Printf.sprintf "PtAccum(%d)" sid
   in
 
   let edges : (int * int) list ref = ref [] in
@@ -167,6 +172,10 @@ let pp_dot ppf roots =
           match s with
           | TConst _ -> []
           | TMap { inner; _ } | TConvert { inner; _ } -> [ Lazy.force inner ]
+          | TAccum { changes; _ } ->
+              let child_id = visit_period (Lazy.force changes) in
+              edges := (did, child_id) :: !edges;
+              []
         in
         List.iter
           (fun child ->

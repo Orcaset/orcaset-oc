@@ -21,8 +21,12 @@ type 'c unfold_cell = 'c Series_types.unfold_cell =
   | Seed of { period : Period.t; f : unit -> float }
   | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
-(* The callback that period_series uses to resolve point dependencies *)
-let eval_point cache date point_series = Point_series.eval_query cache point_series date
+(* Mutually recursive callbacks that tie the knot between period and point evaluation *)
+let rec eval_point cache date point_series =
+  Point_series.eval_query ~eval_period cache point_series date
+
+and eval_period cache period_series period =
+  Period_series.eval_query ~eval_point cache period_series period
 
 module Period = struct
   include Period_series
@@ -41,5 +45,5 @@ module Point = struct
 
   let query date series =
     let cache = Series_types.create_cache () in
-    Point_series.eval_query cache series date
+    Point_series.eval_query ~eval_period cache series date
 end

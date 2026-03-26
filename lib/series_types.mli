@@ -35,6 +35,7 @@ and 'c point_series =
   | TConst of { id : int; value : float }
   | TMap of { id : int; inner : 'c point_series Lazy.t; f : float -> float }
   | TConvert of { id : int; inner : 'c point_series Lazy.t; f : Date.t -> float -> float }
+  | TAccum of { id : int; start_date : Date.t; initial_value : float; changes : 'c period_series Lazy.t }
 
 and 'c series_dep =
   | Period_dep of 'c period_series Lazy.t
@@ -44,7 +45,7 @@ type 'c series = PeriodSeries of 'c period_series | PointSeries of 'c point_seri
 
 type cache = {
   period : (int, Cell_types.period_cell Seq.t) Hashtbl.t;
-  point : (int, Cell_types.point_cell) Hashtbl.t;
+  point : (int * Date.t, Cell_types.point_cell) Hashtbl.t;
 }
 
 val create_cache : unit -> cache

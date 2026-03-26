@@ -60,6 +60,7 @@ module Point : sig
   val const : float -> 'c t
   val map : (float -> float) -> 'c t Lazy.t -> 'c t
   val convert : (Date.t -> float -> float) -> 'c t Lazy.t -> 'd t
+  val accum : start_date:Date.t -> initial_value:float -> 'c Series_types.period_series Lazy.t -> 'c t
   val id : 'c t -> int
 
   val query : Date.t -> 'c t -> 'c Point_cell.t option
