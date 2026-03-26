@@ -1,7 +1,6 @@
 (library
  (name orcaset)
  (public_name orcaset)
- (libraries calendar)
  (modules
   cell_types
   cell_cache
