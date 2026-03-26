@@ -13,19 +13,15 @@
 
 (** {1 Types} *)
 
-type split_fn = Cell_types.split_fn
+type split_fn = Period.t -> (unit -> float) -> Date.t -> split_result * split_result
 (** A function that splits a constant cell's value at a given date, producing two {!split_result}
     values covering the left and right sub-periods. *)
 
-type split_result = Cell_types.split_result = {
-  period : Period.t;
-  f : unit -> float;
-  split : split_fn;
-}
+and split_result = { period : Period.t; f : unit -> float; split : split_fn }
 (** The result of splitting a [Const] cell's value at a date. Contains the components needed to
     construct a new [Const] cell covering a sub-period. *)
 
-type +'c t = Cell_types.period_cell
+type 'c t = 'c Cell_types.period_cell
 (** A single-period computation cell. The phantom type parameter ['c] tracks the currency or unit
     associated with the cell's value. *)
 
@@ -35,10 +31,6 @@ val const : Period.t -> (unit -> float) -> split_fn -> 'c t
 (** [const period f split] is a constant cell that evaluates [f ()] over [period]. [split] controls
     how the cell's value is divided when period alignment requires splitting (see
     {!proportional_split}). *)
-
-val deps : Period.t -> Cell_types.cell list -> (float list -> float) -> 'c t
-(** [deps period cells f] is a cell whose value is [f values] where [values] are the evaluated
-    results of the dependency [cells]. Dependencies can be either period cells or point cells. *)
 
 val map : 'c t -> (float -> float) -> 'c t
 (** [map cell f] is a cell whose value is [f v] where [v] is the evaluated result of [cell]. *)
@@ -92,16 +84,3 @@ val iter_period_union : 'c t Seq.t -> 'c t Seq.t -> ('c t option * 'c t option) 
 (** [iter_period_union a b] merges two cell sequences by aligning their periods. Cells are split as
     needed so that each emitted pair covers an identical sub-period. Unmatched cells are paired with
     [None]. *)
-
-(** {1 Priming} *)
-
-val prime : Cell_types.prime_fn -> Cell_cache.t -> 'c t -> unit
-(** [prime prime_tree cache cell] initialises the cache entry for [cell] and recursively primes its
-    dependencies via the [prime_tree] callback. *)
-
-(** {1 Evaluation} *)
-
-val compute : Cell_types.eval_fn -> Cell_cache.t -> int -> 'c t -> float * float
-(** [compute eval_cell cache iteration cell] computes the value of [cell] for a single evaluation
-    step. [eval_cell] is used to recursively evaluate dependencies. *)
-

@@ -6,11 +6,13 @@
     Parallels {!Eval} at the cell level: creates the shared cache and provides the callbacks that
     route evaluation across the period/point boundary. *)
 
+type reduce = Series_types.reduce
+type 'c period_t = 'c Period_series.t
+type 'c point_t = 'c Point_series.t
+
 type 'c series_dep = 'c Series_types.series_dep =
   | Period_dep of 'c Period_series.t Lazy.t
   | Point_dep of 'c Point_series.t Lazy.t
-
-type reduce = Series_types.reduce
 
 type dep_query = Series_types.dep_query =
   | Self of { period : Period.t; reduce : reduce }
@@ -29,7 +31,19 @@ and eval_period cache period_series period =
   Period_series.eval_query ~eval_point cache period_series period
 
 module Period = struct
-  include Period_series
+  let const = Period_series.const
+  let unfold = Period_series.unfold
+  let reduce_sum = Period_series.reduce_sum
+  let map = Period_series.map
+  let convert = Period_series.convert
+  let map2 = Period_series.map2
+  let sum = Period_series.sum
+  let sub = Period_series.sub
+  let mul = Period_series.mul
+  let div = Period_series.div
+  let id = Period_series.id
+
+  type nonrec 'c t = 'c period_t
 
   type 'c unfold_cell = 'c Series_types.unfold_cell =
     | Seed of { period : Period.t; f : unit -> float }
@@ -41,7 +55,13 @@ module Period = struct
 end
 
 module Point = struct
-  include Point_series
+  let const = Point_series.const
+  let map = Point_series.map
+  let convert = Point_series.convert
+  let accum = Point_series.accum
+  let id = Point_series.id
+
+  type nonrec 'c t = 'c point_t
 
   let query date series =
     let cache = Series_types.create_cache () in

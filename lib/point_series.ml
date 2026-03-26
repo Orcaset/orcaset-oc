@@ -5,23 +5,42 @@ open Series_types
 
 type 'c t = 'c point_series
 
+(* SAFETY: These casts only change the phantom type parameter 'c, which has no
+   runtime representation — all point_cell and point_series variants carry only
+   int, float, Date.t, functions, and nested values of the same GADT family.
+   Used to store/retrieve values from the existentially-typed cache
+   (Pack_point_cell), which erases 'c on insertion and needs it restored on lookup. *)
+let cast_point_cell : type a b. a Point_cell.t -> b Point_cell.t = Obj.magic
+let cast_point_series : type a b. a t -> b t = Obj.magic
+
 (*  Constructors *)
 let const value = TConst { id = fresh_id (); value }
 let map f s = TMap { id = fresh_id (); inner = s; f }
-let convert f s = TConvert { id = fresh_id (); inner = (Obj.magic s : _ t Lazy.t); f }
+let convert f s = TConvert { id = fresh_id (); inner = s; f }
 
 let accum ~start_date ~initial_value changes =
   TAccum { id = fresh_id (); start_date; initial_value; changes }
 
 (*  Accessors *)
-let id = function TConst { id; _ } -> id | TMap { id; _ } -> id | TConvert { id; _ } -> id | TAccum { id; _ } -> id
+let id = function
+  | TConst { id; _ } -> id
+  | TMap { id; _ } -> id
+  | TConvert { id; _ } -> id
+  | TAccum { id; _ } -> id
 
 (*  Evaluation *)
 
-let rec eval_query ~eval_period cache series date =
+let rec eval_query : type c.
+    eval_period:
+      (Series_types.cache -> c Series_types.period_series -> Period.t -> c Period_cell.t Seq.t) ->
+    Series_types.cache ->
+    c t ->
+    Date.t ->
+    c Point_cell.t option =
+ fun ~eval_period cache series date ->
   let series_id = id series in
   match Hashtbl.find_opt cache.point (series_id, date) with
-  | Some value -> Some value
+  | Some (Pack_point_cell value) -> Some (cast_point_cell value)
   | None -> (
       let value =
         match series with
@@ -30,11 +49,12 @@ let rec eval_query ~eval_period cache series date =
             let inner_cell = eval_query ~eval_period cache (Lazy.force inner) date in
             match inner_cell with None -> None | Some cell -> Some (Point_cell.map cell f))
         | TConvert { inner; f; _ } -> (
-            let inner_cell = eval_query ~eval_period cache (Lazy.force inner) date in
+            let inner_cell =
+              eval_query ~eval_period cache (cast_point_series (Lazy.force inner)) date
+            in
             match inner_cell with None -> None | Some cell -> Some (Point_cell.convert cell f))
         | TAccum { start_date; initial_value; changes; _ } ->
-            if Date.compare date start_date <= 0 then
-              Some (Point_cell.const date initial_value)
+            if Date.compare date start_date <= 0 then Some (Point_cell.const date initial_value)
             else
               let change_series = Lazy.force changes in
               let query_period = Period.make start_date date in
@@ -44,5 +64,5 @@ let rec eval_query ~eval_period cache series date =
       match value with
       | None -> value
       | Some cell ->
-          Hashtbl.add cache.point (series_id, date) cell;
+          Hashtbl.add cache.point (series_id, date) (Pack_point_cell cell);
           value)

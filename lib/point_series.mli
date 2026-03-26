@@ -17,8 +17,8 @@ val convert : (Date.t -> float -> float) -> 'c t Lazy.t -> 'd t
     value. The cell date is passed as an argument to the conversion function. *)
 
 val accum : start_date:Date.t -> initial_value:float -> 'c Series_types.period_series Lazy.t -> 'c t
-(** [accum ~start_date ~initial_value changes] accumulates period series values from [start_date]
-    to the query date, adding them to [initial_value]. *)
+(** [accum ~start_date ~initial_value changes] accumulates period series values from [start_date] to
+    the query date, adding them to [initial_value]. *)
 
 (** {1 Accessors} *)
 
@@ -28,7 +28,8 @@ val id : 'c t -> int
 (** {1 Evaluation} *)
 
 val eval_query :
-  eval_period:(Series_types.cache -> 'c Series_types.period_series -> Period.t -> Cell_types.period_cell Seq.t) ->
+  eval_period:
+    (Series_types.cache -> 'c Series_types.period_series -> Period.t -> 'c Period_cell.t Seq.t) ->
   Series_types.cache ->
   'c t ->
   Date.t ->
@@ -37,4 +38,3 @@ val eval_query :
     for resolving period series dependencies (e.g. in [TAccum]). The callback is provided by
     {!Series} to tie the knot between point and period evaluation without circular module
     dependencies. Uses the shared cache for memoization. *)
-

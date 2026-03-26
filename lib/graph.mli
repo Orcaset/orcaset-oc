@@ -9,25 +9,28 @@
 (** {1 Cell dependency trees} *)
 
 type cell_dep_tree =
-  | Leaf of Cell_types.cell
-  | Node of Cell_types.cell * cell_dep_tree list
-  | Cycle of Cell_types.cell
+  | Leaf of Eval.cell
+  | Node of Eval.cell * cell_dep_tree list
+  | Cycle of Eval.cell
       (** A tree representing the dependency structure of a cell. [Cycle] marks a back-edge to a
           cell that was already visited on the current path. *)
 
-val cells : Cell_types.cell -> cell_dep_tree
-(** [cells cell] is the dependency tree rooted at [cell]. Handles both period and
-    point cells. Circular dependencies are detected via physical identity and represented as
-    [Cycle] nodes. *)
+val cells : Eval.cell -> cell_dep_tree
+(** [cells cell] is the dependency tree rooted at [cell]. Handles both period and point cells.
+    Circular dependencies are detected via physical identity and represented as [Cycle] nodes. *)
 
 (** {1 Series dependencies} *)
 
-val series : 'c Series_types.series -> 'c Series_types.series list
+type series =
+  | PeriodSeries : 'c Series.Period.t -> series
+  | PointSeries : 'c Series.Point.t -> series
+
+val series : series -> series list
 (** Return all transitive series dependencies (including the root itself). Handles both period and
     point series. Uses physical identity to detect cycles. *)
 
 (** {1 DOT output} *)
 
-val pp_dot : Format.formatter -> 'c Series_types.period_series list -> unit
+val pp_dot : Format.formatter -> series list -> unit
 (** Pretty-print a DOT digraph of the dependency structure of one or more series. Handles both
     period and point series dependencies within the graph. *)

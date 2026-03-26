@@ -6,7 +6,7 @@
     Implements iterative evaluation over a dependency graph of period and point-in-time cells.
     Handles both cell types through the {!cell} sum type, computing values for all cell variants. *)
 
-type cell = PeriodCell of Cell_types.period_cell | PointCell of Cell_types.point_cell
+type cell = PeriodCell : 'c Period_cell.t -> cell | PointCell : 'c Point_cell.t -> cell
 
 val one : cell -> float
 (** [one cell] forces the computation tree rooted at [cell] and returns its float value. Creates a

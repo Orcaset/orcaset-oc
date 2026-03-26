@@ -11,13 +11,11 @@ type split_result = Cell_types.split_result = {
   split : split_fn;
 }
 
-type +'c t = Cell_types.period_cell
+type 'c t = 'c Cell_types.period_cell
 
 (* Constructors *)
 
 let const period f split = RConst { id = Cell_types.fresh_id (); period; f; split }
-let deps period (deps : Cell_types.cell list) f =
-  RDeps { id = Cell_types.fresh_id (); period; deps; f }
 let map inner f = RMap { id = Cell_types.fresh_id (); inner; f }
 let convert inner f = RConvert { id = Cell_types.fresh_id (); inner; f }
 let map2 c1 c2 f = RMap2 { id = Cell_types.fresh_id (); c1; c2; f }
@@ -39,10 +37,11 @@ let id = function
   | RRef { id; _ } ->
       id
 
-let rec period = function
+let rec period : type c. c t -> Period.t = function
   | RConst { period; _ } -> period
   | RDeps { period; _ } -> period
-  | RMap { inner; _ } | RConvert { inner; _ } -> period inner
+  | RMap { inner; _ } -> period inner
+  | RConvert { inner; _ } -> period inner
   | RMap2 { c1; c2; _ } -> (
       match (c1, c2) with
       | Some c, None -> period c
@@ -56,7 +55,8 @@ let rec period = function
   | RRef { period; _ } -> period
 
 (* Helpers for splitting cells *)
-let rec split_cell cell date =
+let rec split_cell : type c. c t -> Date.t -> c t * c t =
+ fun cell date ->
   let period = period cell in
   if Date.(date <= Period.start_date period || date >= Period.end_date period) then
     failwith "split_cell: split date is on or out of bounds for cell period";
@@ -178,63 +178,3 @@ let rec iter_period_union a b =
            then recurse with a's remainder *)
         let a_left, a_right = split_cell a_head b_end in
         Seq.Cons ((Some a_left, Some b_head), iter_period_union (Seq.cons a_right a_tail) b_tail)
-
-(* Priming *)
-
-let prime (prime_tree : Cell_types.prime_fn) cache cell =
-  let store status = Cell_cache.store_period cache (id cell) (period cell) status in
-  match cell with
-  | RConst { f; _ } -> store (Cell_cache.Resolved (f ()))
-  | RRef { cell = None; _ } ->
-      failwith "prime: Ref cell with no resolved dependency reached during priming"
-  | RRef { cell = Some inner; _ } ->
-      store (Cell_cache.Unresolved (0.0, 0));
-      prime_tree cache (PeriodCell inner)
-  | RDeps { deps; _ } ->
-      store (Cell_cache.Unresolved (0.0, 0));
-      List.iter (fun dep -> prime_tree cache dep) deps
-  | RMap { inner; _ } | RConvert { inner; _ } ->
-      store (Cell_cache.Unresolved (0.0, 0));
-      prime_tree cache (PeriodCell inner)
-  | RMap2 { c1; c2; _ } ->
-      store (Cell_cache.Unresolved (0.0, 0));
-      List.iter (fun dep -> prime_tree cache (PeriodCell dep)) (List.filter_map Fun.id [ c1; c2 ])
-
-(* Evaluation *)
-
-let compute (eval_cell : Cell_types.eval_fn) cache iteration = function
-  | RConst { f; _ } -> (f (), 0.0)
-  | RDeps { deps; f; _ } ->
-      let values, max_delta =
-        List.fold_left
-          (fun (vals, acc_delta) dep ->
-            let v, d = eval_cell cache iteration dep in
-            (v :: vals, Float.max acc_delta d))
-          ([], 0.0) deps
-      in
-      (f (List.rev values), max_delta)
-  | RMap { inner; f; _ } ->
-      let v, d = eval_cell cache iteration (PeriodCell inner) in
-      (f v, d)
-  | RConvert { inner; f; _ } ->
-      let v, d = eval_cell cache iteration (PeriodCell inner) in
-      (f (period inner) v, d)
-  | RMap2 { c1; c2; f; _ } ->
-      let v1, d1 =
-        match c1 with
-        | None -> (None, 0.0)
-        | Some c ->
-            let v, d = eval_cell cache iteration (PeriodCell c) in
-            (Some v, d)
-      in
-      let v2, d2 =
-        match c2 with
-        | None -> (None, 0.0)
-        | Some c ->
-            let v, d = eval_cell cache iteration (PeriodCell c) in
-            (Some v, d)
-      in
-      (f v1 v2, Float.max d1 d2)
-  | RRef { cell = Some c; _ } -> eval_cell cache iteration (PeriodCell c)
-  | RRef { cell = None; _ } -> (0.0, 0.0)
-

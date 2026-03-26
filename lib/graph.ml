@@ -2,28 +2,37 @@
  * SPDX-License-Identifier: SSPL-1.0 *)
 
 open Cell_types
-open Series_types
 
 (* CELL DEPENDENCY TREE *)
 
 (** A tree representing the dependency structure of a cell. [Cycle] marks a back-edge to a cell that
     was already visited on the current path, preventing infinite recursion when circular
     dependencies exist. *)
-type cell_dep_tree = Leaf of cell | Node of cell * cell_dep_tree list | Cycle of cell
+type cell_dep_tree =
+  | Leaf of Eval.cell
+  | Node of Eval.cell * cell_dep_tree list
+  | Cycle of Eval.cell
+
+type series =
+  | PeriodSeries : 'c Series.Period.t -> series
+  | PointSeries : 'c Series.Point.t -> series
 
 (** Return the dependency tree rooted at [cell]. Circular dependencies are detected via physical
     identity ([==]) on a visited set and represented as [Cycle] nodes rather than recursing
     infinitely. *)
-let cells cell =
-  let rec go_period visited c =
-    let wrapped = PeriodCell c in
+let cells (cell : Eval.cell) =
+  let pack_cell = function PeriodCell c -> Eval.PeriodCell c | PointCell c -> Eval.PointCell c in
+  let rec go_period : type c. Eval.cell list -> c period_cell -> cell_dep_tree =
+   fun visited c ->
+    let wrapped = Eval.PeriodCell c in
     if List.exists (fun v -> v == wrapped) visited then Cycle wrapped
     else
       let visited = wrapped :: visited in
       match c with
       | RConst _ -> Leaf wrapped
-      | RDeps { deps; _ } -> Node (wrapped, List.map (go visited) deps)
-      | RMap { inner; _ } | RConvert { inner; _ } -> Node (wrapped, [ go_period visited inner ])
+      | RDeps { deps; _ } -> Node (wrapped, List.map (fun dep -> go visited (pack_cell dep)) deps)
+      | RMap { inner; _ } -> Node (wrapped, [ go_period visited inner ])
+      | RConvert { inner; _ } -> Node (wrapped, [ go_period visited inner ])
       | RMap2 { c1; c2; _ } ->
           let children =
             List.filter_map (fun opt -> Option.map (go_period visited) opt) [ c1; c2 ]
@@ -31,14 +40,16 @@ let cells cell =
           Node (wrapped, children)
       | RRef { cell = Some inner; _ } -> Node (wrapped, [ go_period visited inner ])
       | RRef { cell = None; _ } -> Leaf wrapped
-  and go_point visited c =
-    let wrapped = PointCell c in
+  and go_point : type c. Eval.cell list -> c point_cell -> cell_dep_tree =
+   fun visited c ->
+    let wrapped = Eval.PointCell c in
     if List.exists (fun v -> v == wrapped) visited then Cycle wrapped
     else
       let visited = wrapped :: visited in
       match c with
       | TConst _ -> Leaf wrapped
-      | TMap { inner; _ } | TConvert { inner; _ } -> Node (wrapped, [ go_point visited inner ])
+      | TMap { inner; _ } -> Node (wrapped, [ go_point visited inner ])
+      | TConvert { inner; _ } -> Node (wrapped, [ go_point visited inner ])
       | TDep2 { c1; c2; _ } ->
           let children =
             List.filter_map (fun opt -> Option.map (go_point visited) opt) [ c1; c2 ]
@@ -48,8 +59,8 @@ let cells cell =
           let children = List.of_seq (Seq.map (go_period visited) changes) in
           Node (wrapped, children)
   and go visited = function
-    | PeriodCell c -> go_period visited c
-    | PointCell c -> go_point visited c
+    | Eval.PeriodCell c -> go_period visited c
+    | Eval.PointCell c -> go_point visited c
   in
   go [] cell
 
@@ -58,7 +69,22 @@ let cells cell =
 (** Return all transitive series dependencies (including the root itself). Handles both period and
     point series via the [series] sum type. Each [PUnfold] node is self-referential via its [self]
     parameter, so cycle detection uses physical identity ([==]) to avoid infinite recursion. *)
-let series series =
+let series s =
+  (* SAFETY: Series.Period.t and Series.Point.t are defined as = Series_types.period_series
+     and = Series_types.point_series respectively — identical at runtime. The module abstraction
+     barrier in Series.mli prevents the compiler from seeing through the alias. The phantom-type
+     casts (cast_period_series, cast_point_series) only change 'c, which has no runtime
+     representation. *)
+  let cast_internal_period : type c. c Series_types.period_series -> c Series.Period.t =
+    Obj.magic
+  in
+  let cast_internal_point : type c. c Series_types.point_series -> c Series.Point.t = Obj.magic in
+  let cast_period_series : type a b. a Series_types.period_series -> b Series_types.period_series =
+    Obj.magic
+  in
+  let cast_point_series : type a b. a Series_types.point_series -> b Series_types.point_series =
+    Obj.magic
+  in
   let period_visited = ref [] in
   let point_visited = ref [] in
   let is_period_visited s = List.exists (fun v -> v == s) !period_visited in
@@ -67,31 +93,43 @@ let series series =
     if is_period_visited s then acc
     else begin
       period_visited := s :: !period_visited;
-      let acc = PeriodSeries s :: acc in
+      let acc = PeriodSeries (cast_internal_period s) :: acc in
       match s with
-      | PConst _ -> acc
-      | PUnfold { deps; _ } ->
+      | Series_types.PConst _ -> acc
+      | Series_types.PUnfold { deps; _ } ->
           List.fold_left
             (fun acc dep ->
               match dep with
-              | Period_dep ps -> go_period acc (Lazy.force ps)
+              | Series_types.Period_dep ps -> go_period acc (Lazy.force ps)
               | Series_types.Point_dep ps -> go_point acc (Lazy.force ps))
             acc deps
-      | PMap { inner; _ } | PConvert { inner; _ } -> go_period acc (Lazy.force inner)
-      | PMap2 { s1; s2; _ } -> go_period (go_period acc (Lazy.force s1)) (Lazy.force s2)
+      | Series_types.PMap { inner; _ } -> go_period acc (Lazy.force inner)
+      | Series_types.PConvert { inner; _ } -> go_period acc (cast_period_series (Lazy.force inner))
+      | Series_types.PMap2 { s1; s2; _ } ->
+          go_period (go_period acc (Lazy.force s1)) (Lazy.force s2)
     end
   and go_point acc s =
     if is_point_visited s then acc
     else begin
       point_visited := s :: !point_visited;
-      let acc = PointSeries s :: acc in
+      let acc = PointSeries (cast_internal_point s) :: acc in
       match s with
-      | TConst _ -> acc
-      | TMap { inner; _ } | TConvert { inner; _ } -> go_point acc (Lazy.force inner)
-      | TAccum { changes; _ } -> go_period acc (Lazy.force changes)
+      | Series_types.TConst _ -> acc
+      | Series_types.TMap { inner; _ } -> go_point acc (Lazy.force inner)
+      | Series_types.TConvert { inner; _ } -> go_point acc (cast_point_series (Lazy.force inner))
+      | Series_types.TAccum { changes; _ } -> go_period acc (Lazy.force changes)
     end
   in
-  (match series with PeriodSeries s -> go_period [] s | PointSeries s -> go_point [] s)
+  (* SAFETY: Reverses the Series.mli abstraction barrier — Series.Period.t is
+     Series_types.period_series at runtime, so we can pattern-match on the
+     internal constructors. *)
+  let go_public_period : type c. c Series.Period.t -> series list =
+   fun s -> go_period [] (Obj.magic s)
+  in
+  let go_public_point : type c. c Series.Point.t -> series list =
+   fun s -> go_point [] (Obj.magic s)
+  in
+  (match s with PeriodSeries ps -> go_public_period ps | PointSeries ps -> go_public_point ps)
   |> List.rev
 
 (* DOT OUTPUT *)
@@ -101,11 +139,21 @@ let series series =
     Circular dependencies (e.g. self-referential [PUnfold] nodes) are handled via physical identity
     and will appear as back-edges in the graph rather than causing infinite recursion. *)
 let pp_dot ppf roots =
+  (* SAFETY: Only changes the phantom type parameter 'c, which has no runtime
+     representation. Needed so that PConvert/TConvert children (which have a
+     different phantom type) can be compared by physical identity (==) against
+     the visited set for cycle detection. *)
+  let cast_period_series : type a b. a Series_types.period_series -> b Series_types.period_series =
+    Obj.magic
+  in
+  let cast_point_series : type a b. a Series_types.point_series -> b Series_types.point_series =
+    Obj.magic
+  in
   let next_dot_id = ref 0 in
   let nodes : (int * string) list ref = ref [] in
   (* Use separate tables for period and point series to handle physical identity *)
-  let period_ids : (_ period_series * int) list ref = ref [] in
-  let point_ids : (_ point_series * int) list ref = ref [] in
+  let period_ids : (_ Series_types.period_series * int) list ref = ref [] in
+  let point_ids : (_ Series_types.point_series * int) list ref = ref [] in
   let alloc_id () =
     let did = !next_dot_id in
     incr next_dot_id;
@@ -114,19 +162,19 @@ let pp_dot ppf roots =
   let period_label s =
     let sid = Period_series.id s in
     match s with
-    | PConst _ -> Printf.sprintf "Const(%d)" sid
-    | PUnfold _ -> Printf.sprintf "Unfold(%d)" sid
-    | PMap _ -> Printf.sprintf "Map(%d)" sid
-    | PConvert _ -> Printf.sprintf "Convert(%d)" sid
-    | PMap2 _ -> Printf.sprintf "Map2(%d)" sid
+    | Series_types.PConst _ -> Printf.sprintf "Const(%d)" sid
+    | Series_types.PUnfold _ -> Printf.sprintf "Unfold(%d)" sid
+    | Series_types.PMap _ -> Printf.sprintf "Map(%d)" sid
+    | Series_types.PConvert _ -> Printf.sprintf "Convert(%d)" sid
+    | Series_types.PMap2 _ -> Printf.sprintf "Map2(%d)" sid
   in
   let point_label s =
     let sid = Point_series.id s in
     match s with
-    | TConst _ -> Printf.sprintf "PtConst(%d)" sid
-    | TMap _ -> Printf.sprintf "PtMap(%d)" sid
-    | TConvert _ -> Printf.sprintf "PtConvert(%d)" sid
-    | TAccum _ -> Printf.sprintf "PtAccum(%d)" sid
+    | Series_types.TConst _ -> Printf.sprintf "PtConst(%d)" sid
+    | Series_types.TMap _ -> Printf.sprintf "PtMap(%d)" sid
+    | Series_types.TConvert _ -> Printf.sprintf "PtConvert(%d)" sid
+    | Series_types.TAccum _ -> Printf.sprintf "PtAccum(%d)" sid
   in
 
   let edges : (int * int) list ref = ref [] in
@@ -139,12 +187,12 @@ let pp_dot ppf roots =
         nodes := (did, period_label s) :: !nodes;
         let children =
           match s with
-          | PConst _ -> []
-          | PUnfold { deps; _ } ->
+          | Series_types.PConst _ -> []
+          | Series_types.PUnfold { deps; _ } ->
               List.iter
                 (fun dep ->
                   match dep with
-                  | Period_dep ps ->
+                  | Series_types.Period_dep ps ->
                       let child_id = visit_period (Lazy.force ps) in
                       edges := (did, child_id) :: !edges
                   | Series_types.Point_dep ps ->
@@ -152,8 +200,9 @@ let pp_dot ppf roots =
                       edges := (did, child_id) :: !edges)
                 deps;
               []
-          | PMap { inner; _ } | PConvert { inner; _ } -> [ Lazy.force inner ]
-          | PMap2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
+          | Series_types.PMap { inner; _ } -> [ Lazy.force inner ]
+          | Series_types.PConvert { inner; _ } -> [ cast_period_series (Lazy.force inner) ]
+          | Series_types.PMap2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
         in
         List.iter
           (fun child ->
@@ -170,9 +219,10 @@ let pp_dot ppf roots =
         nodes := (did, point_label s) :: !nodes;
         let children =
           match s with
-          | TConst _ -> []
-          | TMap { inner; _ } | TConvert { inner; _ } -> [ Lazy.force inner ]
-          | TAccum { changes; _ } ->
+          | Series_types.TConst _ -> []
+          | Series_types.TMap { inner; _ } -> [ Lazy.force inner ]
+          | Series_types.TConvert { inner; _ } -> [ cast_point_series (Lazy.force inner) ]
+          | Series_types.TAccum { changes; _ } ->
               let child_id = visit_period (Lazy.force changes) in
               edges := (did, child_id) :: !edges;
               []
@@ -184,7 +234,19 @@ let pp_dot ppf roots =
           children;
         did
   in
-  List.iter (fun root -> ignore (visit_period root)) roots;
+  (* SAFETY: Reverses the Series.mli abstraction barrier — Series.Period.t is
+     Series_types.period_series at runtime, so we can pattern-match on the
+     internal constructors. *)
+  let visit_public_period : type c. c Series.Period.t -> unit =
+   fun root -> ignore (visit_period (Obj.magic root))
+  in
+  let visit_public_point : type c. c Series.Point.t -> unit =
+   fun root -> ignore (visit_point (Obj.magic root))
+  in
+  List.iter
+    (function
+      | PeriodSeries root -> visit_public_period root | PointSeries root -> visit_public_point root)
+    roots;
 
   Format.fprintf ppf "@[<v>digraph deps {@ ";
   Format.fprintf ppf "  rankdir=TB;@ ";

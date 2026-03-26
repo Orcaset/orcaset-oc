@@ -23,7 +23,12 @@ type 'c period_series =
   | PConst of { id : int; cells : 'c Period_cell.t Seq.t }
   | PUnfold of { id : int; deps : 'c series_dep list; cells : 'c unfold_cell Seq.t }
   | PMap of { id : int; inner : 'c period_series Lazy.t; f : float -> float }
-  | PConvert of { id : int; inner : 'c period_series Lazy.t; f : Period.t -> float -> float }
+  | PConvert : {
+      id : int;
+      inner : 'a period_series Lazy.t;
+      f : Period.t -> float -> float;
+    }
+      -> 'b period_series
   | PMap2 of {
       id : int;
       s1 : 'c period_series Lazy.t;
@@ -34,24 +39,31 @@ type 'c period_series =
 and 'c point_series =
   | TConst of { id : int; value : float }
   | TMap of { id : int; inner : 'c point_series Lazy.t; f : float -> float }
-  | TConvert of { id : int; inner : 'c point_series Lazy.t; f : Date.t -> float -> float }
-  | TAccum of { id : int; start_date : Date.t; initial_value : float; changes : 'c period_series Lazy.t }
+  | TConvert : {
+      id : int;
+      inner : 'a point_series Lazy.t;
+      f : Date.t -> float -> float;
+    }
+      -> 'b point_series
+  | TAccum of {
+      id : int;
+      start_date : Date.t;
+      initial_value : float;
+      changes : 'c period_series Lazy.t;
+    }
 
-and 'c series_dep =
-  | Period_dep of 'c period_series Lazy.t
-  | Point_dep of 'c point_series Lazy.t
+and 'c series_dep = Period_dep of 'c period_series Lazy.t | Point_dep of 'c point_series Lazy.t
 
 type 'c series = PeriodSeries of 'c period_series | PointSeries of 'c point_series
+type packed_period_seq = Pack_period_seq : 'c Period_cell.t Seq.t -> packed_period_seq
+type packed_point_cell = Pack_point_cell : 'c Point_cell.t -> packed_point_cell
 
 type cache = {
-  period : (int, Cell_types.period_cell Seq.t) Hashtbl.t;
-  point : (int * Date.t, Cell_types.point_cell) Hashtbl.t;
+  period : (int, packed_period_seq) Hashtbl.t;
+  point : (int * Date.t, packed_point_cell) Hashtbl.t;
 }
 
 val create_cache : unit -> cache
 
-exception Forward_self_query of {
-  series_id : int;
-  current_frontier : Date.t;
-  query_period : Period.t;
-}
+exception
+  Forward_self_query of { series_id : int; current_frontier : Date.t; query_period : Period.t }

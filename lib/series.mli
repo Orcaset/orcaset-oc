@@ -11,27 +11,27 @@
 
 (** {1 Shared types} *)
 
-type 'c series_dep = 'c Series_types.series_dep =
-  | Period_dep of 'c Period_series.t Lazy.t
-  | Point_dep of 'c Point_series.t Lazy.t
+type reduce = float list -> float
 
-type reduce = Series_types.reduce
-
-type dep_query = Series_types.dep_query =
+type dep_query =
   | Self of { period : Period.t; reduce : reduce }
   | Dep of { index : int; period : Period.t; reduce : reduce }
   | Point_dep of { index : int; date : Date.t }
 
-type 'c unfold_cell = 'c Series_types.unfold_cell =
+type 'c unfold_cell =
   | Seed of { period : Period.t; f : unit -> float }
   | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+
+type 'c period_t
+type 'c point_t
+type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
 
 (** {1 Period series} *)
 
 module Period : sig
-  type 'c t = 'c Period_series.t
+  type 'c t = 'c period_t
 
-  type 'c unfold_cell = 'c Series_types.unfold_cell =
+  type nonrec 'c unfold_cell = 'c unfold_cell =
     | Seed of { period : Period.t; f : unit -> float }
     | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
@@ -55,12 +55,12 @@ end
 (** {1 Point series} *)
 
 module Point : sig
-  type 'c t = 'c Point_series.t
+  type 'c t = 'c point_t
 
   val const : float -> 'c t
   val map : (float -> float) -> 'c t Lazy.t -> 'c t
   val convert : (Date.t -> float -> float) -> 'c t Lazy.t -> 'd t
-  val accum : start_date:Date.t -> initial_value:float -> 'c Series_types.period_series Lazy.t -> 'c t
+  val accum : start_date:Date.t -> initial_value:float -> 'c period_t Lazy.t -> 'c t
   val id : 'c t -> int
 
   val query : Date.t -> 'c t -> 'c Point_cell.t option

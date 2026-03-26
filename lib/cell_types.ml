@@ -4,33 +4,38 @@
 type split_fn = Period.t -> (unit -> float) -> Date.t -> split_result * split_result
 and split_result = { period : Period.t; f : unit -> float; split : split_fn }
 
-type period_cell =
+type 'c period_cell =
   | RConst of { id : int; period : Period.t; f : unit -> float; split : split_fn }
   | RDeps of { id : int; period : Period.t; deps : cell list; f : float list -> float }
-  | RMap of { id : int; inner : period_cell; f : float -> float }
-  | RConvert of { id : int; inner : period_cell; f : Period.t -> float -> float }
+  | RMap of { id : int; inner : 'c period_cell; f : float -> float }
+  | RConvert : {
+      id : int;
+      inner : 'a period_cell;
+      f : Period.t -> float -> float;
+    }
+      -> 'b period_cell
   | RMap2 of {
       id : int;
-      c1 : period_cell option;
-      c2 : period_cell option;
+      c1 : 'c period_cell option;
+      c2 : 'c period_cell option;
       f : float option -> float option -> float;
     }
-  | RRef of { id : int; period : Period.t; mutable cell : period_cell option }
+  | RRef of { id : int; period : Period.t; mutable cell : 'c period_cell option }
 
-and point_cell =
+and 'c point_cell =
   | TConst of { id : int; date : Date.t; value : float }
-  | TMap of { id : int; inner : point_cell; f : float -> float }
-  | TConvert of { id : int; inner : point_cell; f : Date.t -> float -> float }
+  | TMap of { id : int; inner : 'c point_cell; f : float -> float }
+  | TConvert : { id : int; inner : 'a point_cell; f : Date.t -> float -> float } -> 'b point_cell
   | TDep2 of {
       id : int;
       date : Date.t;
-      c1 : point_cell option;
-      c2 : point_cell option;
+      c1 : 'c point_cell option;
+      c2 : 'c point_cell option;
       f : float option -> float option -> float;
     }
-  | TAccum of { id : int; date : Date.t; changes : period_cell Seq.t; f : float -> float }
+  | TAccum of { id : int; date : Date.t; changes : 'c period_cell Seq.t; f : float -> float }
 
-and cell = PeriodCell of period_cell | PointCell of point_cell
+and cell = PeriodCell : 'c period_cell -> cell | PointCell : 'c point_cell -> cell
 
 type eval_fn = Cell_cache.t -> int -> cell -> float * float
 type prime_fn = Cell_cache.t -> cell -> unit

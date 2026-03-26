@@ -5,6 +5,13 @@ open Series_types
 
 type 'c t = 'c period_series
 
+(* SAFETY: These casts only change the phantom type parameter 'c, which has no
+   runtime representation — all period_cell and period_series variants carry only
+   int, float, Period.t, Date.t, functions, and nested values of the same GADT
+   family. Used to store/retrieve values from the existentially-typed cache
+   (Pack_period_seq), which erases 'c on insertion and needs it restored on lookup. *)
+let cast_period_seq : type a b. a Period_cell.t Seq.t -> b Period_cell.t Seq.t = Obj.magic
+let cast_period_series : type a b. a t -> b t = Obj.magic
 let reduce_sum = List.fold_left ( +. ) 0.0
 
 (* CONSTRUCTORS *)
@@ -12,7 +19,7 @@ let reduce_sum = List.fold_left ( +. ) 0.0
 let const cells = PConst { id = fresh_id (); cells }
 let unfold ~deps cells = PUnfold { id = fresh_id (); deps; cells }
 let map f s = PMap { id = fresh_id (); inner = s; f }
-let convert f s = PConvert { id = fresh_id (); inner = (Obj.magic s : _ t Lazy.t); f }
+let convert f s = PConvert { id = fresh_id (); inner = s; f }
 let map2 f s1 s2 = PMap2 { id = fresh_id (); s1; s2; f }
 let fill_zero = Option.value ~default:0.0
 let sum s1 s2 = map2 (fun a b -> fill_zero a +. fill_zero b) (lazy s1) (lazy s2)
@@ -59,10 +66,16 @@ let clipped_cells period seq =
 
 (* EVALUATION *)
 
-let rec eval_seq ~eval_point cache series =
+let rec eval_seq : type c.
+    eval_point:
+      (Series_types.cache -> Date.t -> c Series_types.point_series -> c Point_cell.t option) ->
+    Series_types.cache ->
+    c t ->
+    c Period_cell.t Seq.t =
+ fun ~eval_point cache series ->
   let series_id = id series in
   match Hashtbl.find_opt cache.period series_id with
-  | Some seq -> seq
+  | Some (Pack_period_seq seq) -> cast_period_seq seq
   | None ->
       let seq =
         match series with
@@ -126,12 +139,17 @@ let rec eval_seq ~eval_point cache series =
                     List.map
                       (fun q ->
                         let dep_cells, reduce = resolve_query q in
-                        Period_cell.deps period dep_cells reduce)
+                        Cell_types.RDeps
+                          { id = Cell_types.fresh_id (); period; deps = dep_cells; f = reduce })
                       queries
                   in
-                  Period_cell.deps period
-                    (List.map (fun c -> Cell_types.PeriodCell c) inner_cells)
-                    f
+                  Cell_types.RDeps
+                    {
+                      id = Cell_types.fresh_id ();
+                      period;
+                      deps = List.map (fun c -> Cell_types.PeriodCell c) inner_cells;
+                      f;
+                    }
             in
             let cell_seq = Seq.map resolve_unfold_cell cells in
             let rec caching_seq s () =
@@ -149,7 +167,7 @@ let rec eval_seq ~eval_point cache series =
         | PConvert { inner; f; _ } ->
             Seq.map
               (fun cell -> Period_cell.convert cell f)
-              (eval_seq ~eval_point cache (Lazy.force inner))
+              (eval_seq ~eval_point cache (cast_period_series (Lazy.force inner)))
         | PMap2 { s1; s2; f; _ } ->
             let seq1 = eval_seq ~eval_point cache (Lazy.force s1) in
             let seq2 = eval_seq ~eval_point cache (Lazy.force s2) in
@@ -159,9 +177,16 @@ let rec eval_seq ~eval_point cache series =
               aligned_seq
       in
       let memo_seq = Seq.memoize seq in
-      Hashtbl.replace cache.period series_id memo_seq;
+      Hashtbl.replace cache.period series_id (Pack_period_seq memo_seq);
       memo_seq
 
-and eval_query ~eval_point cache series period =
+and eval_query : type c.
+    eval_point:
+      (Series_types.cache -> Date.t -> c Series_types.point_series -> c Point_cell.t option) ->
+    Series_types.cache ->
+    c t ->
+    Period.t ->
+    c Period_cell.t Seq.t =
+ fun ~eval_point cache series period ->
   let seq = eval_seq ~eval_point cache series in
   clipped_cells period seq

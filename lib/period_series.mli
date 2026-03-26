@@ -64,19 +64,20 @@ val id : 'c t -> int
 (** {1 Evaluation} *)
 
 val eval_seq :
-  eval_point:(Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
+  eval_point:
+    (Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
   Series_types.cache ->
   'c t ->
   'c Period_cell.t Seq.t
-(** Materialize a series into a cell sequence. Accepts an [eval_point] callback for resolving
-    point series dependencies. The callback is provided by {!Series} to tie the knot between period
-    and point evaluation without circular module dependencies. *)
+(** Materialize a series into a cell sequence. Accepts an [eval_point] callback for resolving point
+    series dependencies. The callback is provided by {!Series} to tie the knot between period and
+    point evaluation without circular module dependencies. *)
 
 val eval_query :
-  eval_point:(Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
+  eval_point:
+    (Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
   Series_types.cache ->
   'c t ->
   Period.t ->
   'c Period_cell.t Seq.t
 (** Get the cells from a series that cover the given period range. *)
-
