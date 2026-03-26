@@ -65,8 +65,8 @@ let () =
       let c_cell = Seq.uncons costs_seq |> Option.get |> fst in
       let p_cell = Seq.uncons profit_seq |> Option.get |> fst in
       let period = Period_cell.period r_cell in
-      match Eval.eval_period_many [ r_cell; c_cell; p_cell ] with
-      | [ (_, rv); (_, cv); (_, pv) ] ->
+      match Eval.many [ [ Eval.PeriodCell r_cell; Eval.PeriodCell c_cell; Eval.PeriodCell p_cell ] ] with
+      | [ [ rv; cv; pv ] ] ->
           Printf.printf "%-25s %12s %16s %14s\n" "Period" "Revenue (USD)" "Costs (USD)"
             "Profit (USD)";
           Printf.printf "%s\n" (String.make 70 '-');

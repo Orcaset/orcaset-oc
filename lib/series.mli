@@ -65,4 +65,8 @@ module Point : sig
 
   val query : Date.t -> 'c t -> 'c Point_cell.t option
   (** Retrieve the cell corresponding to a specific date. *)
+
+  val query_many : Date.t list -> 'c t -> 'c Point_cell.t option list
+  (** Retrieve cells for multiple dates from a single series, sharing an evaluation cache across all
+      queries. *)
 end

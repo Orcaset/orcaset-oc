@@ -3,6 +3,8 @@
 
 open Cell_types
 
+type cell = Cell_types.cell = PeriodCell of period_cell | PointCell of point_cell
+
 (* Cache dispatch helpers *)
 
 let find_in_cache cache = function
@@ -70,38 +72,17 @@ let read_result cache cell =
   | Some (Cell_cache.Unresolved (v, _)) -> v
   | None -> failwith "Solver.read_result: cell not found in cache after iteration"
 
-(* Internal helpers *)
+(* Public API *)
 
-let solve_one cell =
+let one cell =
   let cache = Cell_cache.create () in
   prime_tree cache cell;
   iterate cache [ cell ] 1;
   read_result cache cell
 
-let solve_many cells =
+let many groups =
   let cache = Cell_cache.create () in
-  List.iter (prime_tree cache) cells;
-  iterate cache cells 1;
-  List.map (read_result cache) cells
-
-(* Public API — period cells *)
-
-let eval_period cell =
-  let v = solve_one (PeriodCell cell) in
-  (Period_cell.period cell, v)
-
-let eval_period_many cells =
-  let wrapped = List.map (fun c -> PeriodCell c) cells in
-  let values = solve_many wrapped in
-  List.map2 (fun c v -> (Period_cell.period c, v)) cells values
-
-(* Public API — point cells *)
-
-let eval_point cell =
-  let v = solve_one (PointCell cell) in
-  (Point_cell.date cell, v)
-
-let eval_point_many cells =
-  let wrapped = List.map (fun c -> PointCell c) cells in
-  let values = solve_many wrapped in
-  List.map2 (fun c v -> (Point_cell.date c, v)) cells values
+  let all_cells = List.concat groups in
+  List.iter (prime_tree cache) all_cells;
+  iterate cache all_cells 1;
+  List.map (List.map (read_result cache)) groups

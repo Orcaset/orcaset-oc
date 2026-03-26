@@ -64,13 +64,11 @@ let compute (eval_cell : Cell_types.eval_fn) cache iteration = function
       in
       (f v1 v2, Float.max d1 d2)
   | TAccum { changes; f; _ } ->
-      let change_values =
-        Seq.map
-          (fun change ->
+      let total_accum, max_delta =
+        Seq.fold_left
+          (fun (acc_v, acc_d) change ->
             let v, d = eval_cell cache iteration (PeriodCell change) in
-            (v, d))
-          changes
+            (acc_v +. v, Float.max acc_d d))
+          (0.0, 0.0) changes
       in
-      let total_accum = Seq.fold_left (fun acc (v, _) -> acc +. v) 0.0 change_values in
-      let max_delta = Seq.fold_left (fun acc (_, d) -> Float.max acc d) 0.0 change_values in
       (f total_accum, max_delta)

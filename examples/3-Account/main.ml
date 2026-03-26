@@ -32,25 +32,39 @@ and balance = lazy (Series.Point.accum ~start_date ~initial_value:100.0 interest
 let () =
   let interest_cells =
     match Series.Period.to_seq [ Lazy.force interest ] with
-    | [ seq ] -> seq |> Seq.take 120
+    | [ seq ] -> seq |> Seq.take 120 |> List.of_seq
     | _ -> assert false
   in
+  let balance_dates =
+    List.concat_map
+      (fun cell ->
+        let period = Period_cell.period cell in
+        [ Period.start_date period; Period.end_date period ])
+      interest_cells
+  in
+  let balance_cells = Series.Point.query_many balance_dates (Lazy.force balance) in
+  let rec build_rows interest_cells balance_cells =
+    match (interest_cells, balance_cells) with
+    | ic :: rest_ic, start_bc :: end_bc :: rest_bc ->
+        let row =
+          (Eval.PeriodCell ic)
+          :: List.filter_map
+               (Option.map (fun c -> Eval.PointCell c))
+               [ start_bc; end_bc ]
+        in
+        (Period_cell.period ic, row) :: build_rows rest_ic rest_bc
+    | _ -> []
+  in
+  let rows = build_rows interest_cells balance_cells in
+  let groups = List.map snd rows in
+  let value_groups = Eval.many groups in
   Printf.printf "%-25s %16s %16s %16s\n" "Period" "Start Balance" "Interest" "End Balance";
   Printf.printf "%s\n" (String.make 73 '-');
-  Seq.iter
-    (fun cell ->
-      let period = Period_cell.period cell in
-      let _, interest_value = Eval.eval_period cell in
-      let start_balance =
-        match Series.Point.query (Period.start_date period) (Lazy.force balance) with
-        | Some c -> Eval.eval_point c |> snd
-        | None -> 0.0
-      in
-      let end_balance =
-        match Series.Point.query (Period.end_date period) (Lazy.force balance) with
-        | Some c -> Eval.eval_point c |> snd
-        | None -> 0.0
-      in
-      Printf.printf "%-25s %16.2f %16.2f %16.2f\n" (Period.to_string period) start_balance
-        interest_value end_balance)
-    interest_cells
+  List.iter2
+    (fun (period, _) values ->
+      match values with
+      | [ interest_v; start_v; end_v ] ->
+          Printf.printf "%-25s %16.2f %16.2f %16.2f\n" (Period.to_string period) start_v interest_v
+            end_v
+      | _ -> ())
+    rows value_groups

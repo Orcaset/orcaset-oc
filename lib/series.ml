@@ -46,4 +46,8 @@ module Point = struct
   let query date series =
     let cache = Series_types.create_cache () in
     Point_series.eval_query ~eval_period cache series date
+
+  let query_many dates series =
+    let cache = Series_types.create_cache () in
+    List.map (fun date -> Point_series.eval_query ~eval_period cache series date) dates
 end
