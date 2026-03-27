@@ -28,7 +28,7 @@ let rec eval_point cache date point_series =
   Point_series.eval_query ~eval_period cache point_series date
 
 and eval_period cache period_series period =
-  Period_series.eval_query ~eval_point cache period_series period
+  Period_series.eval_query ~eval_point cache period period_series
 
 module Period = struct
   let const = Period_series.const
@@ -48,6 +48,10 @@ module Period = struct
   type 'c unfold_cell = 'c Series_types.unfold_cell =
     | Seed of { period : Period.t; f : unit -> float }
     | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+
+  let query period series_list =
+    let cache = Series_types.create_cache () in
+    List.map (Period_series.eval_query ~eval_point cache period) series_list
 
   let to_seq series_list =
     let cache = Series_types.create_cache () in

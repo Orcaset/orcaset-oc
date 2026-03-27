@@ -47,6 +47,9 @@ module Period : sig
   val div : 'c t -> 'c t -> 'c t
   val id : 'c t -> int
 
+  val query : Period.t -> 'c t list -> 'c Period_cell.t Seq.t list
+  (** Retrieve the cell corresponding to a specific period. *)
+
   val to_seq : 'c t list -> 'c Period_cell.t Seq.t list
   (** Materialize a list of series into corresponding lazy cell sequences. All series in the list
       share a single evaluation cache, so common dependencies are computed only once. *)

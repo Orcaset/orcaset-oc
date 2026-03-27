@@ -13,6 +13,9 @@ type 'c t = 'c point_series
 let cast_point_cell : type a b. a Point_cell.t -> b Point_cell.t = Obj.magic
 let cast_point_series : type a b. a t -> b t = Obj.magic
 
+type 'c eval_period_fn =
+  Series_types.cache -> 'c Series_types.period_series -> Period.t -> 'c Period_cell.t Seq.t
+
 (*  Constructors *)
 let const value = TConst { id = fresh_id (); value }
 let map f s = TMap { id = fresh_id (); inner = s; f }
@@ -31,8 +34,7 @@ let id = function
 (*  Evaluation *)
 
 let rec eval_query : type c.
-    eval_period:
-      (Series_types.cache -> c Series_types.period_series -> Period.t -> c Period_cell.t Seq.t) ->
+    eval_period:c eval_period_fn ->
     Series_types.cache ->
     c t ->
     Date.t ->

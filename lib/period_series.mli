@@ -14,6 +14,10 @@
 type 'c t = 'c Series_types.period_series
 (** A period-indexed series of cells denominated in currency ['c]. *)
 
+type 'c eval_point_fn =
+  Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option
+(** Callback type for resolving point series dependencies during period series evaluation. *)
+
 (** {1 Constructors} *)
 
 val const : 'c Period_cell.t Seq.t -> 'c t
@@ -64,8 +68,7 @@ val id : 'c t -> int
 (** {1 Evaluation} *)
 
 val eval_seq :
-  eval_point:
-    (Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
+  eval_point:'c eval_point_fn ->
   Series_types.cache ->
   'c t ->
   'c Period_cell.t Seq.t
@@ -74,10 +77,9 @@ val eval_seq :
     point evaluation without circular module dependencies. *)
 
 val eval_query :
-  eval_point:
-    (Series_types.cache -> Date.t -> 'c Series_types.point_series -> 'c Point_cell.t option) ->
+  eval_point:'c eval_point_fn ->
   Series_types.cache ->
-  'c t ->
-  Period.t ->
+    Period.t ->
+    'c t ->
   'c Period_cell.t Seq.t
 (** Get the cells from a series that cover the given period range. *)

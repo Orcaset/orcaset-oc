@@ -4,6 +4,10 @@
 type 'c t = 'c Series_types.point_series
 (** An opaque time-series of cells denominated in currency ['c]. *)
 
+type 'c eval_period_fn =
+  Series_types.cache -> 'c Series_types.period_series -> Period.t -> 'c Period_cell.t Seq.t
+(** Callback type for resolving period series dependencies during point series evaluation. *)
+
 (** {1 Constructors} *)
 
 val const : float -> 'c t
@@ -28,8 +32,7 @@ val id : 'c t -> int
 (** {1 Evaluation} *)
 
 val eval_query :
-  eval_period:
-    (Series_types.cache -> 'c Series_types.period_series -> Period.t -> 'c Period_cell.t Seq.t) ->
+  eval_period:'c eval_period_fn ->
   Series_types.cache ->
   'c t ->
   Date.t ->
