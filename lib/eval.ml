@@ -50,7 +50,12 @@ let rec prime_tree cache cell =
               store (Cell_cache.Unresolved (0.0, 0));
               List.iter
                 (fun dep -> prime_tree cache (PeriodCell dep))
-                (List.filter_map Fun.id [ c1; c2 ]))
+                (List.filter_map Fun.id [ c1; c2 ])
+          | RClip { inner; period; _ } -> (
+              store (Cell_cache.Unresolved (0.0, 0));
+              match inner with
+              | RRef { cell = None; _ } -> ()
+              | _ -> prime_tree cache (PeriodCell (Period_cell.clip inner period))))
       | PointCell tc -> (
           let store status = Cell_cache.store_point cache (Point_cell.id tc) status in
           match tc with
@@ -123,6 +128,10 @@ and compute_value cache iteration = function
                 (Some v, d)
           in
           (f v1 v2, Float.max d1 d2)
+      | RClip { inner; period; _ } -> (
+          match inner with
+          | RRef { cell = None; _ } -> (0.0, 0.0)
+          | _ -> eval_cell cache iteration (PeriodCell (Period_cell.clip inner period)))
       | RRef { cell = Some c; _ } -> eval_cell cache iteration (PeriodCell c)
       | RRef { cell = None; _ } -> (0.0, 0.0))
   | PointCell tc -> (

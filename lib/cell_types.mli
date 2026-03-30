@@ -25,6 +25,7 @@ type 'c period_cell =
       c2 : 'c period_cell option;
       f : float option -> float option -> float;
     }
+  | RClip of { id : int; inner : 'c period_cell; period : Period.t }
   | RRef of { id : int; period : Period.t; mutable cell : 'c period_cell option }
 
 and 'c point_cell =

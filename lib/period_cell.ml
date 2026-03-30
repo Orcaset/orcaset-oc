@@ -29,13 +29,13 @@ let set_ref ref_cell cell =
 (* Accessors *)
 
 let id = function
-  | RConst { id; _ }
-  | RDeps { id; _ }
-  | RMap { id; _ }
-  | RConvert { id; _ }
-  | RMap2 { id; _ }
-  | RRef { id; _ } ->
-      id
+  | RConst { id; _ } -> id
+  | RDeps { id; _ } -> id
+  | RMap { id; _ } -> id
+  | RConvert { id; _ } -> id
+  | RMap2 { id; _ } -> id
+  | RClip { id; _ } -> id
+  | RRef { id; _ } -> id
 
 let rec period : type c. c t -> Period.t = function
   | RConst { period; _ } -> period
@@ -52,9 +52,25 @@ let rec period : type c. c t -> Period.t = function
           if Period.equal period1 period2 then period1
           else failwith "Map2 cells have mismatched periods"
       | None, None -> failwith "Map2 should have at least one non-None cell")
+  | RClip { period; _ } -> period
   | RRef { period; _ } -> period
 
 (* Helpers for splitting cells *)
+let clipped_period cell target =
+  let cell_period = period cell in
+  let start_date =
+    if Date.compare (Period.start_date cell_period) (Period.start_date target) >= 0 then
+      Period.start_date cell_period
+    else Period.start_date target
+  in
+  let end_date =
+    if Date.compare (Period.end_date cell_period) (Period.end_date target) <= 0 then
+      Period.end_date cell_period
+    else Period.end_date target
+  in
+  if Date.compare start_date end_date >= 0 then invalid_arg "clip: periods do not overlap";
+  Period.make start_date end_date
+
 let rec split_cell : type c. c t -> Date.t -> c t * c t =
  fun cell date ->
   let period = period cell in
@@ -93,19 +109,56 @@ let rec split_cell : type c. c t -> Date.t -> c t * c t =
       in
       ( RMap2 { id; c1 = left1; c2 = left2; f = (fun v1 v2 -> f v1 v2) },
         RMap2 { id; c1 = right1; c2 = right2; f = (fun v1 v2 -> f v1 v2) } )
-  | RRef { cell = Some c; _ } -> split_cell c date
-  | RRef { cell = None; _ } ->
-      failwith "split_cell: cannot split Ref cell with unresolved dependency"
+  | RClip { id; inner; _ } ->
+      let left_period = Period.make (Period.start_date period) date in
+      let right_period = Period.make date (Period.end_date period) in
+      (RClip { id; inner; period = left_period }, RClip { id; inner; period = right_period })
+  | RRef _ ->
+      let left_period = Period.make (Period.start_date period) date in
+      let right_period = Period.make date (Period.end_date period) in
+      ( RClip { id = id cell; inner = cell; period = left_period },
+        RClip { id = id cell; inner = cell; period = right_period } )
 
-let rec clip cell c_period =
-  let cell_period = period cell in
-  if Period.start_date cell_period < Period.start_date c_period then
-    let _, right = split_cell cell (Period.start_date c_period) in
-    clip right c_period
-  else if Period.end_date cell_period > Period.end_date c_period then
-    let left, _ = split_cell cell (Period.end_date c_period) in
-    left
-  else cell
+and expand_to_period : type c. c t -> Period.t -> c t option =
+ fun cell target_period ->
+  let target_period = clipped_period cell target_period in
+  if Period.equal (period cell) target_period then Some cell
+  else
+    match cell with
+    | RConst _ ->
+        let rec trim_const current =
+          let current_period = period current in
+          if Period.equal current_period target_period then current
+          else if Period.start_date current_period < Period.start_date target_period then
+            let _, right = split_cell current (Period.start_date target_period) in
+            trim_const right
+          else
+            let left, _ = split_cell current (Period.end_date target_period) in
+            trim_const left
+        in
+        Some (trim_const cell)
+    | RDeps { id; deps; f; _ } -> Some (RDeps { id; period = target_period; deps; f })
+    | RMap { id; inner; f } ->
+        expand_to_period inner target_period |> Option.map (fun inner -> RMap { id; inner; f })
+    | RConvert { id; inner; f } ->
+        expand_to_period inner target_period |> Option.map (fun inner -> RConvert { id; inner; f })
+    | RMap2 { id; c1; c2; f } -> (
+        let clipped_opt = function
+          | None -> Some None
+          | Some c -> expand_to_period c target_period |> Option.map Option.some
+        in
+        match (clipped_opt c1, clipped_opt c2) with
+        | Some c1, Some c2 -> Some (RMap2 { id; c1; c2; f })
+        | _ -> None)
+    | RClip { inner; _ } -> expand_to_period inner target_period
+    | RRef { cell = Some inner; _ } -> expand_to_period inner target_period
+    | RRef { cell = None; _ } -> None
+
+and clip cell c_period =
+  let period = clipped_period cell c_period in
+  match expand_to_period cell period with
+  | Some clipped -> clipped
+  | None -> RClip { id = id cell; inner = cell; period }
 
 let rec proportional_split period value_fn split_date =
   let total_days = Period.days period in

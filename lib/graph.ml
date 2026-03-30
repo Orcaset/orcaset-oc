@@ -41,6 +41,7 @@ let cells (cell : Eval.cell) =
             List.filter_map (fun opt -> Option.map (go_period visited) opt) [ c1; c2 ]
           in
           Node (wrapped, children)
+      | RClip { inner; _ } -> Node (wrapped, [ go_period visited inner ])
       | RRef { cell = Some inner; _ } -> Node (wrapped, [ go_period visited inner ])
       | RRef { cell = None; _ } -> Leaf wrapped
   and go_point : type c. Eval.cell list -> c point_cell -> cell_dep_tree =

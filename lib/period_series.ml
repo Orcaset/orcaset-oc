@@ -26,10 +26,10 @@ let map f s = PMap { id = fresh_id (); inner = s; f }
 let convert f s = PConvert { id = fresh_id (); inner = s; f }
 let map2 f s1 s2 = PMap2 { id = fresh_id (); s1; s2; f }
 let fill_zero = Option.value ~default:0.0
-let sum s1 s2 = map2 (fun a b -> fill_zero a +. fill_zero b) (lazy s1) (lazy s2)
-let sub s1 s2 = map2 (fun a b -> fill_zero a -. fill_zero b) (lazy s1) (lazy s2)
-let mul s1 s2 = map2 (fun a b -> fill_zero a *. fill_zero b) (lazy s1) (lazy s2)
-let div s1 s2 = map2 (fun a b -> fill_zero a /. fill_zero b) (lazy s1) (lazy s2)
+let sum s1 s2 = map2 (fun a b -> fill_zero a +. fill_zero b) s1 s2
+let sub s1 s2 = map2 (fun a b -> fill_zero a -. fill_zero b) s1 s2
+let mul s1 s2 = map2 (fun a b -> fill_zero a *. fill_zero b) s1 s2
+let div s1 s2 = map2 (fun a b -> fill_zero a /. fill_zero b) s1 s2
 
 let const_ann_growth ~start ~value ~rate ~offset ~yf =
   (* TODO: Create a split function that divides value based on the relative proportion of 
@@ -139,9 +139,10 @@ let rec eval_seq : type c.
         let placeholder_seq = Seq.memoize (Seq.map (fun (rref, _) -> rref) rref_pairs) in
         Hashtbl.replace cache.period series_id (Pack_period_seq placeholder_seq);
 
-        (* Query resolution helpers — all recursion goes through eval_query,
-           which will hit the cached placeholder sequence. *)
-        let self_query period = eval_query ~eval_point cache period series in
+        (* Query resolution helpers. Self queries read directly from the placeholder sequence so
+           that same-series forward or simultaneous references can discover cells without forcing
+           their resolution order. External dependencies continue through eval_query. *)
+        let self_query period = clipped_cells period placeholder_seq in
         let dep_queries =
           List.map
             (fun dep ->
@@ -200,13 +201,17 @@ let rec eval_seq : type c.
            Because rref_pairs is memoized and shared with placeholder_seq,
            the same RRef objects appear in both sequences — patching here
            makes the cached placeholders resolve correctly at eval time. *)
-        Seq.memoize
-          (Seq.map
-             (fun (rref, uc) ->
-               let resolved = resolve_unfold_cell uc in
-               Period_cell.set_ref rref resolved;
-               rref)
-             rref_pairs)
+        let resolving_seq =
+          Seq.memoize
+            (Seq.map
+               (fun (rref, uc) ->
+                 let resolved = resolve_unfold_cell uc in
+                 Period_cell.set_ref rref resolved;
+                 rref)
+               rref_pairs)
+        in
+        Hashtbl.replace cache.period series_id (Pack_period_seq resolving_seq);
+        resolving_seq
     | PMap { inner; f; _ } ->
         let seq =
           Seq.map

@@ -55,7 +55,7 @@ let costs : [ `USD ] S.Period.t = const_series ~label:"Costs (USD)" (-6_000.0)
 
 (* To combine GBP and USD values you must explicitly provide a conversion function. *)
 let usd_revenue = S.Period.convert ~label:"Revenue (USD)" (fun _ r -> r *. 1.34) (lazy revenue)
-let profit = S.Period.sum ~label:"Profit (USD)" usd_revenue costs
+let profit = S.Period.sum ~label:"Profit (USD)" (lazy usd_revenue) (lazy costs)
 
 (* ── Print results ────────────────────────────────────────────────────────── *)
 

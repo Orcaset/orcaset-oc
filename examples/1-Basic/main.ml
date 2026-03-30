@@ -30,7 +30,7 @@ let revenue =
        (generate_cells initial_period))
 
 let costs = S.Period.map ~label:"Costs" (fun r -> r *. -0.6) (lazy revenue)
-let profit = S.Period.sum ~label:"Profit" revenue costs
+let profit = S.Period.sum ~label:"Profit" (lazy revenue) (lazy costs)
 
 let () =
   match S.Period.to_seq [ profit ] with
