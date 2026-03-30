@@ -11,9 +11,7 @@ let actual_360 dt1 dt2 = float_of_int (Date.diff dt2 dt1) /. 360.0
 (** 30/360 day count (NASD method): each month is treated as 30 days, each year as 360 days. *)
 let thirty_360 dt1 dt2 =
   (* Based on this the Excel implementation discussed here: https://stackoverflow.com/questions/43355292/replicating-yearfrac-function-from-excel-in-python *)
-  let flipped, dt1, dt2 =
-    if Date.compare dt1 dt2 > 0 then (-1, dt2, dt1) else (1, dt1, dt2)
-  in
+  let flipped, dt1, dt2 = if Date.compare dt1 dt2 > 0 then (-1, dt2, dt1) else (1, dt1, dt2) in
   let y1 = Date.year dt1 in
   let m1 = Date.month dt1 in
   let d1 = Date.day dt1 in
@@ -34,9 +32,7 @@ let thirty_360 dt1 dt2 =
     treated as actual days elapsed over actual days in the month. Year fraction from but excluding
     dt1 to and including dt2. *)
 let cmonthly dt1 dt2 =
-  let flipped, dt1, dt2 =
-    if Date.compare dt1 dt2 > 0 then (-1, dt2, dt1) else (1, dt1, dt2)
-  in
+  let flipped, dt1, dt2 = if Date.compare dt1 dt2 > 0 then (-1, dt2, dt1) else (1, dt1, dt2) in
   let y1 = Date.year dt1 in
   let m1 = Date.month dt1 in
   let d1 = Date.day dt1 in
