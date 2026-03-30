@@ -1,4 +1,5 @@
 open Orcaset
+module S = Series.Make ()
 
 (* Use Unfold to create a series that starts with an initial value and grows monthly by querying its own last monthly value and 
 multiplying by the growth rate. *)
@@ -13,26 +14,26 @@ let revenue =
   let rec generate_cells last_period () =
     let current_period = Period.shift offset last_period in
     Seq.Cons
-      ( Series.Period.Step
+      ( S.Period.Step
           {
             period = current_period;
-            queries = [ Self { period = last_period; reduce = Series.Period.reduce_sum } ];
+            queries = [ Self { period = last_period; reduce = S.Period.reduce_sum } ];
             f =
               (fun values ->
                 match values with [ last_value ] -> last_value *. (1.0 +. growth_rate) | _ -> 0.0);
           },
         generate_cells current_period )
   in
-  Series.Period.unfold ~deps:[]
+  S.Period.unfold ~label:"Revenue" ~deps:[]
     (Seq.cons
-       (Series.Period.Seed { period = initial_period; f = (fun () -> initial_value) })
+       (S.Period.Seed { period = initial_period; f = (fun () -> initial_value) })
        (generate_cells initial_period))
 
-let costs = Series.Period.map (fun r -> r *. -0.6) (lazy revenue)
-let profit = Series.Period.sum revenue costs
+let costs = S.Period.map ~label:"Costs" (fun r -> r *. -0.6) (lazy revenue)
+let profit = S.Period.sum ~label:"Profit" revenue costs
 
 let () =
-  match Series.Period.to_seq [ profit ] with
+  match S.Period.to_seq [ profit ] with
   | [ profit_seq ] ->
       Seq.iter
         (fun cell ->

@@ -14,8 +14,11 @@ type cell_dep_tree =
   | Cycle of Eval.cell
 
 type series =
-  | PeriodSeries : 'c Series.Period.t -> series
-  | PointSeries : 'c Series.Point.t -> series
+  | PeriodSeries : _ Series_types.period_series -> series
+  | PointSeries : _ Series_types.point_series -> series
+
+let pack_period s = PeriodSeries s
+let pack_point s = PointSeries s
 
 (** Return the dependency tree rooted at [cell]. Circular dependencies are detected via physical
     identity ([==]) on a visited set and represented as [Cycle] nodes rather than recursing
@@ -70,15 +73,8 @@ let cells (cell : Eval.cell) =
     point series via the [series] sum type. Each [PUnfold] node is self-referential via its [self]
     parameter, so cycle detection uses physical identity ([==]) to avoid infinite recursion. *)
 let series s =
-  (* SAFETY: Series.Period.t and Series.Point.t are defined as = Series_types.period_series
-     and = Series_types.point_series respectively — identical at runtime. The module abstraction
-     barrier in Series.mli prevents the compiler from seeing through the alias. The phantom-type
-     casts (cast_period_series, cast_point_series) only change 'c, which has no runtime
-     representation. *)
-  let cast_internal_period : type c. c Series_types.period_series -> c Series.Period.t =
-    Obj.magic
-  in
-  let cast_internal_point : type c. c Series_types.point_series -> c Series.Point.t = Obj.magic in
+  (* SAFETY: The phantom-type casts (cast_period_series, cast_point_series) only change 'c,
+     which has no runtime representation. *)
   let cast_period_series : type a b. a Series_types.period_series -> b Series_types.period_series =
     Obj.magic
   in
@@ -93,7 +89,7 @@ let series s =
     if is_period_visited s then acc
     else begin
       period_visited := s :: !period_visited;
-      let acc = PeriodSeries (cast_internal_period s) :: acc in
+      let acc = PeriodSeries s :: acc in
       match s with
       | Series_types.PConst _ -> acc
       | Series_types.PUnfold { deps; _ } ->
@@ -112,7 +108,7 @@ let series s =
     if is_point_visited s then acc
     else begin
       point_visited := s :: !point_visited;
-      let acc = PointSeries (cast_internal_point s) :: acc in
+      let acc = PointSeries s :: acc in
       match s with
       | Series_types.TConst _ -> acc
       | Series_types.TMap { inner; _ } -> go_point acc (Lazy.force inner)
@@ -120,16 +116,13 @@ let series s =
       | Series_types.TAccum { changes; _ } -> go_period acc (Lazy.force changes)
     end
   in
-  (* SAFETY: Reverses the Series.mli abstraction barrier — Series.Period.t is
-     Series_types.period_series at runtime, so we can pattern-match on the
-     internal constructors. *)
-  let go_public_period : type c. c Series.Period.t -> series list =
-   fun s -> go_period [] (Obj.magic s)
-  in
-  let go_public_point : type c. c Series.Point.t -> series list =
-   fun s -> go_point [] (Obj.magic s)
-  in
-  (match s with PeriodSeries ps -> go_public_period ps | PointSeries ps -> go_public_point ps)
+  (* SAFETY: The existential type from PeriodSeries/PointSeries constructors is erased
+     at runtime. We cast to a monomorphic phantom type to satisfy the type checker. *)
+  let cast_ps : type c. c Series_types.period_series -> _ Series_types.period_series = Obj.magic in
+  let cast_ts : type c. c Series_types.point_series -> _ Series_types.point_series = Obj.magic in
+  (match s with
+    | PeriodSeries ps -> go_period [] (cast_ps ps)
+    | PointSeries ps -> go_point [] (cast_ts ps))
   |> List.rev
 
 (* DOT OUTPUT *)
@@ -234,18 +227,13 @@ let pp_dot ppf roots =
           children;
         did
   in
-  (* SAFETY: Reverses the Series.mli abstraction barrier — Series.Period.t is
-     Series_types.period_series at runtime, so we can pattern-match on the
-     internal constructors. *)
-  let visit_public_period : type c. c Series.Period.t -> unit =
-   fun root -> ignore (visit_period (Obj.magic root))
-  in
-  let visit_public_point : type c. c Series.Point.t -> unit =
-   fun root -> ignore (visit_point (Obj.magic root))
-  in
+  (* SAFETY: Same existential escape as in [series] above. *)
+  let cast_ps : type c. c Series_types.period_series -> _ Series_types.period_series = Obj.magic in
+  let cast_ts : type c. c Series_types.point_series -> _ Series_types.point_series = Obj.magic in
   List.iter
     (function
-      | PeriodSeries root -> visit_public_period root | PointSeries root -> visit_public_point root)
+      | PeriodSeries root -> ignore (visit_period (cast_ps root))
+      | PointSeries root -> ignore (visit_point (cast_ts root)))
     roots;
 
   Format.fprintf ppf "@[<v>digraph deps {@ ";

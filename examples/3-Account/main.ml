@@ -1,4 +1,5 @@
 open Orcaset
+module S = Series.Make ()
 
 (* An account that earns 3% monthly interest on its balance, compounding each month. The balance is
    a point series (queryable at any date) that accumulates interest from a period series. The
@@ -15,10 +16,10 @@ let periods = Period.make_seq ~start_date ~offset
 (* Interest: each month's interest = balance at period start * rate. *)
 let rec interest =
   lazy
-    (Series.Period.unfold ~deps:[ Point_dep balance ]
+    (S.Period.unfold ~label:"Interest" ~deps:[ Point_dep balance ]
        (Seq.map
           (fun period ->
-            Series.Period.Step
+            S.Period.Step
               {
                 period;
                 queries = [ Point_dep { index = 0; date = Period.start_date period } ];
@@ -27,11 +28,11 @@ let rec interest =
           periods))
 
 (* Balance: initial value + accumulated interest over time. *)
-and balance = lazy (Series.Point.accum ~start_date ~initial_value:100.0 interest)
+and balance = lazy (S.Point.accum ~label:"Balance" ~start_date ~initial_value:100.0 interest)
 
 let () =
   let interest_cells =
-    match Series.Period.to_seq [ Lazy.force interest ] with
+    match S.Period.to_seq [ Lazy.force interest ] with
     | [ seq ] -> seq |> Seq.take 120 |> List.of_seq
     | _ -> assert false
   in
@@ -42,15 +43,13 @@ let () =
         [ Period.start_date period; Period.end_date period ])
       interest_cells
   in
-  let balance_cells = Series.Point.query_many balance_dates (Lazy.force balance) in
+  let balance_cells = S.Point.query_many balance_dates (Lazy.force balance) in
   let rec build_rows interest_cells balance_cells =
     match (interest_cells, balance_cells) with
     | ic :: rest_ic, start_bc :: end_bc :: rest_bc ->
         let row =
-          (Eval.PeriodCell ic)
-          :: List.filter_map
-               (Option.map (fun c -> Eval.PointCell c))
-               [ start_bc; end_bc ]
+          Eval.PeriodCell ic
+          :: List.filter_map (Option.map (fun c -> Eval.PointCell c)) [ start_bc; end_bc ]
         in
         (Period_cell.period ic, row) :: build_rows rest_ic rest_bc
     | _ -> []

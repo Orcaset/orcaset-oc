@@ -22,8 +22,14 @@ val cells : Eval.cell -> cell_dep_tree
 (** {1 Series dependencies} *)
 
 type series =
-  | PeriodSeries : 'c Series.Period.t -> series
-  | PointSeries : 'c Series.Point.t -> series
+  | PeriodSeries : _ Series_types.period_series -> series
+  | PointSeries : _ Series_types.point_series -> series
+
+val pack_period : 'c Series_types.period_series -> series
+(** Wrap a period series for use with {!series} and {!pp_dot}. *)
+
+val pack_point : 'c Series_types.point_series -> series
+(** Wrap a point series for use with {!series} and {!pp_dot}. *)
 
 val series : series -> series list
 (** Return all transitive series dependencies (including the root itself). Handles both period and

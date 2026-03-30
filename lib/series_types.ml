@@ -61,5 +61,4 @@ type cache = {
 
 let create_cache () = { period = Hashtbl.create 16; point = Hashtbl.create 16 }
 
-exception
-  Forward_self_query of { series_id : int; current_frontier : Date.t; query_period : Period.t }
+exception Duplicate_label of { label : string; existing_series_id : int }

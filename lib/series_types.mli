@@ -65,5 +65,4 @@ type cache = {
 
 val create_cache : unit -> cache
 
-exception
-  Forward_self_query of { series_id : int; current_frontier : Date.t; query_period : Period.t }
+exception Duplicate_label of { label : string; existing_series_id : int }

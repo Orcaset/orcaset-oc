@@ -1,4 +1,5 @@
 open Orcaset
+module S = Series.Make ()
 
 (* Demonstrate that Point_cell.accum preserves the phantom unit type from its period cell input.
    The commented-out line at the bottom should fail to compile with a type mismatch. *)
@@ -13,21 +14,21 @@ let usd_cell : [ `USD ] Period_cell.t =
     (fun () -> 100.0)
     Period_cell.proportional_split
 
-let usd_series : [ `USD ] Series.Period.t = Series.Period.const (Seq.return usd_cell)
+let usd_series : [ `USD ] S.Period.t = S.Period.const ~label:"USD Series" (Seq.return usd_cell)
 
 (* Accumulate USD period cells into a USD point series — this compiles fine *)
-let usd_balance : [ `USD ] Series.Point.t =
-  Series.Point.accum ~start_date ~initial_value:0.0 (lazy usd_series)
+let usd_balance : [ `USD ] S.Point.t =
+  S.Point.accum ~label:"USD Balance" ~start_date ~initial_value:0.0 (lazy usd_series)
 
 (* Now try to annotate the result as EUR — this must fail to compile *)
 
 (* Uncomment to confirm compile-time error: *)
 
-(* let eur_balance : [ `EUR ] Series.Point.t =
-  Series.Point.accum ~start_date ~initial_value:0.0 (lazy usd_series) *)
+(* let eur_balance : [ `EUR ] S.Point.t =
+  S.Point.accum ~label:"EUR Balance" ~start_date ~initial_value:0.0 (lazy usd_series) *)
 
-(* Error: This expression has type [ `USD ] Series.Point.t
-      but an expression was expected of type [ `EUR ] Series.Point.t
+(* Error: This expression has type [ `USD ] S.Point.t
+      but an expression was expected of type [ `EUR ] S.Point.t
       Type [ `USD ] is not compatible with type [ `EUR ] *)
 
 let () =
