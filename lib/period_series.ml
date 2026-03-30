@@ -31,6 +31,44 @@ let sub s1 s2 = map2 (fun a b -> fill_zero a -. fill_zero b) (lazy s1) (lazy s2)
 let mul s1 s2 = map2 (fun a b -> fill_zero a *. fill_zero b) (lazy s1) (lazy s2)
 let div s1 s2 = map2 (fun a b -> fill_zero a /. fill_zero b) (lazy s1) (lazy s2)
 
+let const_ann_growth ~start ~value ~rate ~offset ~yf =
+  (* TODO: Create a split function that divides value based on the relative proportion of 
+     the period covered by each sub-period, as determined by the year fraction function [yf].
+     This ensures the total value always sums to the parent, even if the sum of the sub-periods'
+     year fraction does not equal the year fraction over the entire period (e.g. in 30/360
+     case). Re-evaluate when looking at split function implementation. This doesn't work
+     quite right for re-dividing split periods for YF functions where the original period 
+     start date matters (e.g. 30/360). *)
+  let rec split_fn period value_thunk split_date =
+    let first_period = Period.make (Period.start_date period) split_date in
+    let second_period = Period.make split_date (Period.end_date period) in
+    let first_period_yf = yf (Period.start_date period) split_date in
+    let second_period_yf = yf split_date (Period.end_date period) in
+    let total_yf = first_period_yf +. second_period_yf in
+    if total_yf = 0.0 then
+      let zero_thunk = fun () -> 0.0 in
+      ( { Period_cell.period = first_period; f = zero_thunk; split = split_fn },
+        { Period_cell.period = second_period; f = zero_thunk; split = split_fn } )
+    else
+      let first_value = fun () -> value_thunk () *. (first_period_yf /. total_yf) in
+      let second_value = fun () -> value_thunk () *. (second_period_yf /. total_yf) in
+      ( { Period_cell.period = first_period; f = first_value; split = split_fn },
+        { Period_cell.period = second_period; f = second_value; split = split_fn } )
+  in
+  let rec generate_cells last_period last_value () =
+    let current_period = Period.shift offset last_period in
+    let current_value =
+      last_value
+      *. ((1.0 +. rate) ** yf (Period.start_date last_period) (Period.end_date current_period))
+    in
+    Seq.Cons
+      ( Period_cell.const current_period (fun () -> current_value) split_fn,
+        generate_cells current_period current_value )
+  in
+  let initial_period = Period.make start (Date.shift offset start) in
+  let initial_cell = Period_cell.const initial_period (fun () -> value) split_fn in
+  PConst { id = fresh_id (); cells = Seq.cons initial_cell (generate_cells initial_period value) }
+
 (* ACCESSORS *)
 
 let id = function

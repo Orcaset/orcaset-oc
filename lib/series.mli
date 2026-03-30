@@ -41,6 +41,7 @@ module Period : sig
   val map : (float -> float) -> 'c t Lazy.t -> 'c t
   val convert : (Period.t -> float -> float) -> 'a t Lazy.t -> 'b t
   val map2 : (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+  val const_ann_growth : start:Date.t -> value:float -> rate:float -> offset:Offset.t -> yf:(Date.t -> Date.t -> float) -> 'c t
   val sum : 'c t -> 'c t -> 'c t
   val sub : 'c t -> 'c t -> 'c t
   val mul : 'c t -> 'c t -> 'c t

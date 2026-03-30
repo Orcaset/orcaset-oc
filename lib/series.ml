@@ -37,6 +37,7 @@ module Period = struct
   let map = Period_series.map
   let convert = Period_series.convert
   let map2 = Period_series.map2
+  let const_ann_growth = Period_series.const_ann_growth
   let sum = Period_series.sum
   let sub = Period_series.sub
   let mul = Period_series.mul

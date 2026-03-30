@@ -55,6 +55,10 @@ val convert : (Period.t -> float -> float) -> 'a t Lazy.t -> 'b t
 val map2 : (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 (** [map2 f s1 s2] combines two series cell-by-cell, aligning periods. *)
 
+val const_ann_growth : start:Date.t -> value:float -> rate:float -> offset:Offset.t -> yf:(Date.t -> Date.t -> float) -> 'c t
+(** A convenience constructor for a series that grows from a starting value by a constant annual growth
+    rate, compounded according to the given offset. *)
+
 val sum : 'c t -> 'c t -> 'c t
 val sub : 'c t -> 'c t -> 'c t
 val mul : 'c t -> 'c t -> 'c t
