@@ -59,7 +59,7 @@ let const_ann_growth ~start ~value ~rate ~offset ~yf =
     let current_period = Period.shift offset last_period in
     let current_value =
       last_value
-      *. ((1.0 +. rate) ** yf (Period.start_date last_period) (Period.end_date current_period))
+      *. ((1.0 +. rate) ** yf (Period.start_date current_period) (Period.end_date current_period))
     in
     Seq.Cons
       ( Period_cell.const current_period (fun () -> current_value) split_fn,
