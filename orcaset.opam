@@ -8,10 +8,11 @@ license: "SSPL-1.0"
 homepage: "https://github.com/Orcaset/orcaset-oc"
 bug-reports: "https://github.com/Orcaset/orcaset-oc/issues"
 depends: [
-  "ocaml" {>= "5.4.0"}
   "dune" {>= "3.0"}
-  "calendar"
+  "ocaml" {>= "5.4.0"}
   "alcotest" {with-test}
+  "ocamlformat" {>= "0.29.0" & with-dev-setup}
+  "ocaml-lsp-server" {with-dev-setup}
   "odoc" {with-doc}
 ]
 build: [

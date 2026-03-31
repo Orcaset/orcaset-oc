@@ -18,6 +18,13 @@
  (description "Build strongly-type, composable financial models using OCaml")
  (depends
    (ocaml (>= 5.4.0))
-   dune
-   calendar
-   (alcotest :with-test)))
+   (alcotest :with-test)
+
+   ;; Dev dependencies
+   (ocamlformat
+   (and
+    (>= 0.29.0)
+    :with-dev-setup))
+  (ocaml-lsp-server :with-dev-setup)
+  
+  ))

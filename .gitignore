@@ -49,3 +49,8 @@ Thumbs.db
 # Local configuration
 *.local
 .env
+
+TODO*
+scratch/
+.opencode/
+.claude/

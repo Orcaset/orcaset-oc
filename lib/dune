@@ -1,13 +1,19 @@
 (library
  (name orcaset)
  (public_name orcaset)
- (libraries calendar)
  (modules
-  orcaset
+  cell_types
+  cell_cache
+  date
+  eval
+  graph
+  offset
   period
-  accrual
-  balance
-  balance_series
-  transaction
-  yf
-  statement))
+  period_cell
+  point_cell
+  series_types
+  period_series
+  point_series
+  series
+  yf)
+ (private_modules cell_cache cell_types period_series point_series series_types))

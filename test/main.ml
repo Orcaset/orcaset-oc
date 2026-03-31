@@ -1,1 +1,1 @@
-let () = Alcotest.run "orcaset" (Yf_tests.suite @ Period_tests.suite)
+let () = Alcotest.run "orcaset" [ ("Date", Test_date.tests); ("Period", Test_period.tests) ]
