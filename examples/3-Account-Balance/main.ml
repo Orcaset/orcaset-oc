@@ -1,39 +1,37 @@
 open Orcaset
 module S = Series.Make ()
 
-(* An account that earns 3% monthly interest on its balance, compounding each month. The balance is
-   a point series (queryable at any date) that accumulates interest from a period series. The
-   interest series references the balance at the start of each period, creating a circular
-   dependency that the evaluation engine resolves automatically. *)
+(* This example models an account balance that grows over time based on 
+   monthly compounding interest. The balance can be queried at any 
+   date for the current value, including accrued interest. *)
 
 let start_date = Date.make 2025 12 31
 let offset = Offset.make ~months:1 ~month_end:true ()
 let rate = 0.03
-
-(* Monthly periods starting from start_date *)
 let periods = Period.make_seq ~start_date ~offset
 
 (* Interest: each month's interest = balance at period start * rate. *)
+let interest_step period =
+  S.Period.Step
+    {
+      period;
+      queries = [ Point_dep { index = 0; date = Period.start_date period } ];
+      f = (fun values -> match values with [ v ] -> v *. rate | _ -> 0.0);
+    }
+
 let rec interest =
   lazy
-    (S.Period.unfold ~label:"Interest" ~deps:[ Point_dep balance ]
-       (Seq.map
-          (fun period ->
-            S.Period.Step
-              {
-                period;
-                queries = [ Point_dep { index = 0; date = Period.start_date period } ];
-                f = (fun values -> match values with [ v ] -> v *. rate | _ -> 0.0);
-              })
-          periods))
+    (S.Period.unfold ~label:"Interest" ~deps:[ Point_dep balance ] (Seq.map interest_step periods))
 
 (* Balance: initial value + accumulated interest over time. *)
 and balance = lazy (S.Point.accum ~label:"Balance" ~start_date ~initial_value:100.0 interest)
 
+(* Print out periods. *)
 let () =
+  let period_count = 12 in
   let interest_cells =
     match S.Period.to_seq [ Lazy.force interest ] with
-    | [ seq ] -> seq |> Seq.take 120 |> List.of_seq
+    | [ seq ] -> seq |> Seq.take period_count |> List.of_seq
     | _ -> assert false
   in
   let balance_dates =
@@ -67,3 +65,19 @@ let () =
             end_v
       | _ -> ())
     rows value_groups
+
+(* 
+Period                       Start Balance         Interest      End Balance
+-------------------------------------------------------------------------
+2025-12-31..2026-01-31              100.00             3.00           103.00
+2026-01-31..2026-02-28              103.00             3.09           106.09
+2026-02-28..2026-03-31              106.09             3.18           109.27
+2026-03-31..2026-04-30              109.27             3.28           112.55
+2026-04-30..2026-05-31              112.55             3.38           115.93
+2026-05-31..2026-06-30              115.93             3.48           119.41
+2026-06-30..2026-07-31              119.41             3.58           122.99
+2026-07-31..2026-08-31              122.99             3.69           126.68
+2026-08-31..2026-09-30              126.68             3.80           130.48
+2026-09-30..2026-10-31              130.48             3.91           134.39
+2026-10-31..2026-11-30              134.39             4.03           138.42
+2026-11-30..2026-12-31              138.42             4.15           142.58 *)

@@ -2,8 +2,8 @@ open Orcaset
 module S = Series.Make ()
 
 (* A three-statement financial model: Income Statement, Cash Flow Statement, and Balance Sheet.
-   Demonstrates circular dependencies (depreciation <-> PPE), point series accumulation for balance
-   sheet items, and Actual/360 day-count revenue growth. *)
+   Demonstrates circular dependencies (depreciation <-> PPE) and point series accumulation for balance
+   sheet items. *)
 
 let start_date = Date.make 2025 12 31
 let offset = Offset.make ~months:1 ~month_end:true ()
