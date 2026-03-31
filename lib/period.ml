@@ -16,10 +16,6 @@ let contains date period = Date.(date >= period.start_date && date < period.end_
 let shift offset period =
   { start_date = Date.shift offset period.start_date; end_date = Date.shift offset period.end_date }
 
-let compare p0 p1 =
-  let c = Date.compare p0.start_date p1.start_date in
-  if c <> 0 then c else Date.compare p0.end_date p1.end_date
-
 let equal p0 p1 = compare p0 p1 = 0
 let hash p = Hashtbl.hash (Date.hash p.start_date, Date.hash p.end_date)
 let to_string p = Date.to_string p.start_date ^ ".." ^ Date.to_string p.end_date

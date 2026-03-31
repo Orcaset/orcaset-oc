@@ -66,19 +66,6 @@ val diff : t -> t -> int
 val add_days : int -> t -> t
 (** [add_days n d] is the date [n] calendar days after [d]. [n] may be negative. *)
 
-val add_months : int -> t -> t
-(** [add_months n d] is the date [n] calendar months after [d]. When the resulting month has fewer
-    days than {!day}[ d], the day is clamped to the last day of the target month. [n] may be
-    negative.
-
-    {b Note.} Day clamping is lossy: [add_months (-1) (add_months 1 (make 2025 1 31))] yields
-    [2025-01-28], not the original [2025-01-31].
-
-    {[
-      Date.add_months 1 (Date.make 2025 1 31)
-      (* 2025-02-28: clamped from 31 to 28 *)
-    ]} *)
-
 (** {1:weekday Day of week} *)
 
 val weekday : t -> int

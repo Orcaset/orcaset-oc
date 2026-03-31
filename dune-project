@@ -18,9 +18,10 @@
  (description "Build strongly-type, composable financial models using OCaml")
  (depends
    (ocaml (>= 5.4.0))
+   (alcotest :with-test)
 
-  ;; Dev dependencies
-  (ocamlformat
+   ;; Dev dependencies
+   (ocamlformat
    (and
     (>= 0.29.0)
     :with-dev-setup))

@@ -52,9 +52,6 @@ val make_seq : start_date:Date.t -> offset:Offset.t -> t Seq.t
 
 (** {1:preds Predicates and comparisons} *)
 
-val compare : t -> t -> int
-(** [compare p0 p1] is a total order on periods, ordered by {!start_date} then {!end_date}. *)
-
 val equal : t -> t -> bool
 (** [equal p0 p1] is [true] iff both endpoints are equal. *)
 
