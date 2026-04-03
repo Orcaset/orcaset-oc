@@ -69,6 +69,15 @@ module type S = sig
     val accum :
       label:string -> start_date:Date.t -> initial_value:float -> 'c period_t Lazy.t -> 'c t
 
+    val map2 :
+      label:string -> (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+
+    val neg : label:string -> 'c t Lazy.t -> 'c t
+    val sum : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+
     val id : 'c t -> int
     val query : Date.t -> 'c t -> 'c Point_cell.t option
     val query_many : Date.t list -> 'c t -> 'c Point_cell.t option list
@@ -196,6 +205,36 @@ module Make () = struct
 
     let accum ~label ~start_date ~initial_value changes =
       let s = Point_series.accum ~start_date ~initial_value changes in
+      register_label (Point_series.id s) label;
+      s
+
+    let map2 ~label f s1 s2 =
+      let s = Point_series.map2 f s1 s2 in
+      register_label (Point_series.id s) label;
+      s
+
+    let neg ~label inner =
+      let s = Point_series.neg inner in
+      register_label (Point_series.id s) label;
+      s
+
+    let sum ~label s1 s2 =
+      let s = Point_series.sum s1 s2 in
+      register_label (Point_series.id s) label;
+      s
+
+    let sub ~label s1 s2 =
+      let s = Point_series.sub s1 s2 in
+      register_label (Point_series.id s) label;
+      s
+
+    let mul ~label s1 s2 =
+      let s = Point_series.mul s1 s2 in
+      register_label (Point_series.id s) label;
+      s
+
+    let div ~label s1 s2 =
+      let s = Point_series.div s1 s2 in
       register_label (Point_series.id s) label;
       s
 

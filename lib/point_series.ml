@@ -21,6 +21,15 @@ let const value = TConst { id = fresh_id (); value }
 let map f s = TMap { id = fresh_id (); inner = s; f }
 let convert f s = TConvert { id = fresh_id (); inner = s; f }
 
+let dep2 f s1 s2 = TDep2 { id = fresh_id (); s1; s2; f }
+let map2 = dep2
+let fill_zero = Option.value ~default:0.0
+let neg s = TMap { id = fresh_id (); inner = s; f = (fun x -> -.x) }
+let sum s1 s2 = dep2 (fun a b -> fill_zero a +. fill_zero b) s1 s2
+let sub s1 s2 = dep2 (fun a b -> fill_zero a -. fill_zero b) s1 s2
+let mul s1 s2 = dep2 (fun a b -> fill_zero a *. fill_zero b) s1 s2
+let div s1 s2 = dep2 (fun a b -> fill_zero a /. fill_zero b) s1 s2
+
 let accum ~start_date ~initial_value changes =
   TAccum { id = fresh_id (); start_date; initial_value; changes }
 
@@ -29,6 +38,7 @@ let id = function
   | TConst { id; _ } -> id
   | TMap { id; _ } -> id
   | TConvert { id; _ } -> id
+  | TDep2 { id; _ } -> id
   | TAccum { id; _ } -> id
 
 (*  Evaluation *)
@@ -55,6 +65,10 @@ let rec eval_query : type c.
               eval_query ~eval_period cache (cast_point_series (Lazy.force inner)) date
             in
             match inner_cell with None -> None | Some cell -> Some (Point_cell.convert cell f))
+        | TDep2 { s1; s2; f; _ } ->
+            let c1 = eval_query ~eval_period cache (Lazy.force s1) date in
+            let c2 = eval_query ~eval_period cache (Lazy.force s2) date in
+            Some (Point_cell.dep2 c1 c2 date f)
         | TAccum { start_date; initial_value; changes; _ } ->
             if Date.compare date start_date <= 0 then Some (Point_cell.const date initial_value)
             else

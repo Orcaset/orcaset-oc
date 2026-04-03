@@ -114,6 +114,8 @@ let series s =
       | Series_types.TConst _ -> acc
       | Series_types.TMap { inner; _ } -> go_point acc (Lazy.force inner)
       | Series_types.TConvert { inner; _ } -> go_point acc (cast_point_series (Lazy.force inner))
+      | Series_types.TDep2 { s1; s2; _ } ->
+          go_point (go_point acc (Lazy.force s1)) (Lazy.force s2)
       | Series_types.TAccum { changes; _ } -> go_period acc (Lazy.force changes)
     end
   in
@@ -168,6 +170,7 @@ let pp_dot ppf roots =
     | Series_types.TConst _ -> Printf.sprintf "PtConst(%d)" sid
     | Series_types.TMap _ -> Printf.sprintf "PtMap(%d)" sid
     | Series_types.TConvert _ -> Printf.sprintf "PtConvert(%d)" sid
+    | Series_types.TDep2 _ -> Printf.sprintf "PtDep2(%d)" sid
     | Series_types.TAccum _ -> Printf.sprintf "PtAccum(%d)" sid
   in
 
@@ -216,6 +219,7 @@ let pp_dot ppf roots =
           | Series_types.TConst _ -> []
           | Series_types.TMap { inner; _ } -> [ Lazy.force inner ]
           | Series_types.TConvert { inner; _ } -> [ cast_point_series (Lazy.force inner) ]
+          | Series_types.TDep2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
           | Series_types.TAccum { changes; _ } ->
               let child_id = visit_period (Lazy.force changes) in
               edges := (did, child_id) :: !edges;

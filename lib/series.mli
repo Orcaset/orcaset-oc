@@ -84,6 +84,25 @@ module type S = sig
     val accum :
       label:string -> start_date:Date.t -> initial_value:float -> 'c period_t Lazy.t -> 'c t
 
+    val map2 :
+      label:string -> (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    (** Combine two series with a binary function. Each input is passed as [float option] — [None]
+        when the underlying series has no value at the query date. *)
+
+    val neg : label:string -> 'c t Lazy.t -> 'c t
+
+    val sum : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    (** Elementwise addition. Missing values are filled with [0.0]. *)
+
+    val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    (** Elementwise subtraction. Missing values are filled with [0.0]. *)
+
+    val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    (** Elementwise multiplication. Missing values are filled with [0.0]. *)
+
+    val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    (** Elementwise division. Missing values are filled with [0.0]. *)
+
     val id : 'c t -> int
 
     val query : Date.t -> 'c t -> 'c Point_cell.t option

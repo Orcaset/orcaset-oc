@@ -117,6 +117,15 @@ let common_stock = S.Point.const ~label:"Common Stock" 5000.0
 let retained_earnings =
   S.Point.accum ~label:"Retained Earnings" ~start_date ~initial_value:6000.0 (lazy net_income)
 
+(* Total Assets: Cash + PPE Net. *)
+let total_assets = S.Point.sum ~label:"Total Assets" (lazy cash) (lazy ppe_net)
+
+(* Total Equity: Common Stock + Retained Earnings. *)
+let total_equity = S.Point.sum ~label:"Total Equity" (lazy common_stock) (lazy retained_earnings)
+
+(* Balance Check: Total Assets - Total Equity (should be zero). *)
+let balance_check = S.Point.sub ~label:"Balance Check" (lazy total_assets) (lazy total_equity)
+
 (* --- Evaluation & Output ----------------------------------------------------- *)
 
 let num_months = 12
@@ -155,6 +164,9 @@ let () =
   let ppe_cells = S.Point.query_many end_dates ppe_net in
   let common_stock_cells = S.Point.query_many end_dates common_stock in
   let re_cells = S.Point.query_many end_dates retained_earnings in
+  let total_assets_cells = S.Point.query_many end_dates total_assets in
+  let total_equity_cells = S.Point.query_many end_dates total_equity in
+  let balance_check_cells = S.Point.query_many end_dates balance_check in
   (* Build evaluation groups: one group per period containing all cells for that column. *)
   let rows =
     List.init num_months (fun i ->
@@ -169,8 +181,11 @@ let () =
             [
               List.nth cash_cells i;
               List.nth ppe_cells i;
+              List.nth total_assets_cells i;
               List.nth common_stock_cells i;
               List.nth re_cells i;
+              List.nth total_equity_cells i;
+              List.nth balance_check_cells i;
             ]
         in
         period_row @ point_row)
@@ -197,26 +212,18 @@ let () =
       ("Balance Sheet", "");
       ("  Cash", "point");
       ("  PPE Net", "point");
+      ("  Total Assets", "point");
       ("  Common Stock", "point");
       ("  Retained Earnings", "point");
-      ("  Balance Check", "check");
+      ("  Total Equity", "point");
+      ("  Balance Check", "point");
     ]
   in
   (* Extract values by line item (transpose results). *)
-  let num_value_items = 13 + 4 in
+  let num_value_items = 13 + 7 in
   let values_by_item =
     List.init num_value_items (fun item_idx ->
         List.map (fun period_values -> List.nth period_values item_idx) results)
-  in
-  (* Compute balance check: (Cash + PPE) - (Common Stock + Retained Earnings). *)
-  let balance_check =
-    let cash_vals = List.nth values_by_item 13 in
-    let ppe_vals = List.nth values_by_item 14 in
-    let cs_vals = List.nth values_by_item 15 in
-    let re_vals = List.nth values_by_item 16 in
-    List.map2
-      (fun (c, p) (s, r) -> c +. p -. s -. r)
-      (List.combine cash_vals ppe_vals) (List.combine cs_vals re_vals)
   in
   (* Print table. *)
   let cw = 12 in
@@ -229,10 +236,6 @@ let () =
     (fun (label, kind) ->
       match kind with
       | "" -> Printf.printf "\n%s\n" label
-      | "check" ->
-          Printf.printf "%-22s" label;
-          List.iter (fun v -> Printf.printf " %*.2f" cw v) balance_check;
-          Printf.printf "\n"
       | _ ->
           Printf.printf "%-22s" label;
           let vals = List.nth values_by_item !value_idx in

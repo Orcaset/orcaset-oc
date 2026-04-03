@@ -41,6 +41,12 @@ and 'c point_series =
       f : Date.t -> float -> float;
     }
       -> 'b point_series
+  | TDep2 of {
+      id : int;
+      s1 : 'c point_series Lazy.t;
+      s2 : 'c point_series Lazy.t;
+      f : float option -> float option -> float;
+    }
   | TAccum of {
       id : int;
       start_date : Date.t;
