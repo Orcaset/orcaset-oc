@@ -3,8 +3,8 @@
 
 (** Year fraction calculations for various day count conventions.
 
-    Each function computes the fraction of a year between two dates according to a specific day count
-    convention.
+    Each function computes the fraction of a year between two dates according to a specific day
+    count convention.
 
     {1 Day count conventions} *)
 
@@ -19,6 +19,6 @@ val thirty_360 : Date.t -> Date.t -> float
 
 val cmonthly : Date.t -> Date.t -> float
 (** [cmonthly dt1 dt2] calculates the year fraction from [dt1] to [dt2] assuming each calendar month
-    is 1/12th of a year using month-end dates. Partial months are based on the number of days elapsed
-    over the total number of days in the calendar month. The fraction is calculated on a month-end
-    basis,from but excluding [dt1] to and including [dt2]. *)
+    is 1/12th of a year using month-end dates. Partial months are based on the number of days
+    elapsed over the total number of days in the calendar month. The fraction is calculated on a
+    month-end basis,from but excluding [dt1] to and including [dt2]. *)

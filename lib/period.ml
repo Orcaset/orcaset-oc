@@ -29,3 +29,23 @@ let make_seq ~start_date ~offset =
       let next_period = shift offset period in
       Some (period, next_period))
     initial_period
+
+let seq_to_dates periods =
+  let rec aux last remaining () =
+    match remaining () with
+    | Seq.Nil -> (
+        match last with
+        | None -> Seq.Nil
+        | Some last_period -> Seq.Cons (end_date last_period, Seq.empty))
+    | Seq.Cons (period, next) -> (
+        match last with
+        | None -> Seq.Cons (start_date period, aux (Some period) next)
+        | Some last_period ->
+            if Date.equal (end_date last_period) (start_date period) then
+              Seq.Cons (end_date period, aux (Some period) next)
+            else
+              Seq.Cons
+                ( end_date last_period,
+                  fun () -> Seq.Cons (start_date period, aux (Some period) next) ))
+  in
+  aux None periods

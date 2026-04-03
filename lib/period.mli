@@ -50,6 +50,9 @@ val make_seq : start_date:Date.t -> offset:Offset.t -> t Seq.t
     starts at [start_date] and ends at [Date.shift offset start_date]. Each subsequent period starts
     where the previous one ended. *)
 
+val seq_to_dates : t Seq.t -> Date.t Seq.t
+(** [seq_to_dates periods] is a sequence of dates in [periods] with equal adjacent start/end dates deduplicated. *)
+
 (** {1:preds Predicates and comparisons} *)
 
 val equal : t -> t -> bool
