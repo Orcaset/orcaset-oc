@@ -3,8 +3,8 @@
 
 (** Evaluation cache for period and point-in-time cells.
 
-    Stores intermediate and final cell values during fixed-point iteration. Period cells are keyed by
-    cell ID and period; point cells are keyed by cell ID.
+    Stores intermediate and final cell values during fixed-point iteration. Period cells are keyed
+    by cell ID and period; point cells are keyed by cell ID.
 
     {1 Types} *)
 

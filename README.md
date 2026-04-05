@@ -48,20 +48,21 @@ Line items exist within a generative series module which enforces isolation betw
 
 ### Query values
 
-Materialize and evaluate a model by querying over a date range.
+Materialize and evaluate a model by querying over a date range. `S.Period.query` retrieves unevaluated cells for a list of bounding periods, and `S.eval_many` runs the fixed-point solver to produce an `eval_result` whose values carry the phantom currency tag as `'c amount`.
 
 ```ocaml
-let query_period = Period.make (Date.make 2026 1 15) (Date.make 2026 6 15)
-
-(* Print out total accrued value. *)
 let () =
-  let income_cells = S.Period.query query_period [ income ] |> List.hd in
-  let total = Seq.fold_left (fun acc cell -> acc +. Eval.one (PeriodCell cell)) 0.0 income_cells in
-  Printf.printf "Total income over %s: %.2f\n" (Period.to_string query_period) total
-  (* Total income over 2026-01-15..2026-06-15: 1184.94 *)
+  let query_period = Period.make (Date.make 2026 1 15) (Date.make 2026 2 15) in
+  let query_result = S.Period.query [ query_period ] income in
+  let eval_result = S.eval_many query_result in
+  match eval_result with
+  | [ S.Period { label; value = Amount v; _ } ] ->
+      Printf.printf "%s for %s: %f\n" label (Period.to_string query_period) v
+  | _ -> ()
+(* Income for 2026-01-15..2026-02-15: 241.111111 *)
 ```
 
-Notice that the query periods can be any arbitrary dates. Orcaset will automatically interpolate partial underlying periods. In this example, accrual periods are defined on calendar quarters, but the query period bounds are mid-month.
+Notice that the query periods can cover any arbitrary dates. Orcaset will automatically interpolate partial underlying periods. In this example, accrual periods are defined on calendar quarters, but the query period bounds are mid-month.
 
 ## License
 

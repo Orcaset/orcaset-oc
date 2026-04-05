@@ -3,18 +3,16 @@
 
 open Cell_types
 
-type cell = Cell_types.cell =
-  | PeriodCell : 'c Cell_types.period_cell -> cell
-  | PointCell : 'c Cell_types.point_cell -> cell
-
 (* Cache dispatch helpers *)
 
-let find_in_cache cache = function
+let find_in_cache cache (cell : Cell_types.cell) =
+  match cell with
   | PeriodCell pc ->
       Cell_cache.find_period cache (Period_cell.id pc) (Period_cell.period pc) |> Option.map snd
   | PointCell tc -> Cell_cache.find_point cache (Point_cell.id tc)
 
-let store_in_cache cache status = function
+let store_in_cache cache status (cell : Cell_types.cell) =
+  match cell with
   | PeriodCell pc ->
       Cell_cache.store_period cache (Period_cell.id pc) (Period_cell.period pc) status
   | PointCell tc -> Cell_cache.store_point cache (Point_cell.id tc) status
@@ -191,18 +189,3 @@ let read_result cache cell =
   | Some (Cell_cache.Resolved v) -> v
   | Some (Cell_cache.Unresolved (v, _)) -> v
   | None -> failwith "Solver.read_result: cell not found in cache after iteration"
-
-(* Public API *)
-
-let one cell =
-  let cache = Cell_cache.create () in
-  prime_tree cache cell;
-  iterate cache [ cell ] 1;
-  read_result cache cell
-
-let many groups =
-  let cache = Cell_cache.create () in
-  let all_cells = List.concat groups in
-  List.iter (prime_tree cache) all_cells;
-  iterate cache all_cells 1;
-  List.map (List.map (read_result cache)) groups

@@ -50,11 +50,7 @@ val id : 'c t -> int
 (** {1 Evaluation} *)
 
 val eval_query :
-  eval_period:'c eval_period_fn ->
-  Series_types.cache ->
-  'c t ->
-  Date.t ->
-  'c Point_cell.t option
+  eval_period:'c eval_period_fn -> Series_types.cache -> 'c t -> Date.t -> 'c Point_cell.t option
 (** Materialize a point series at a given date into a point cell. Accepts an [eval_period] callback
     for resolving period series dependencies (e.g. in [TAccum]). The callback is provided by
     {!Series} to tie the knot between point and period evaluation without circular module

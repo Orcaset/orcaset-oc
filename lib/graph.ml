@@ -9,9 +9,9 @@ open Cell_types
     was already visited on the current path, preventing infinite recursion when circular
     dependencies exist. *)
 type cell_dep_tree =
-  | Leaf of Eval.cell
-  | Node of Eval.cell * cell_dep_tree list
-  | Cycle of Eval.cell
+  | Leaf of Cell_types.cell
+  | Node of Cell_types.cell * cell_dep_tree list
+  | Cycle of Cell_types.cell
 
 type series =
   | PeriodSeries : _ Series_types.period_series -> series
@@ -23,11 +23,11 @@ let pack_point s = PointSeries s
 (** Return the dependency tree rooted at [cell]. Circular dependencies are detected via physical
     identity ([==]) on a visited set and represented as [Cycle] nodes rather than recursing
     infinitely. *)
-let cells (cell : Eval.cell) =
-  let pack_cell = function PeriodCell c -> Eval.PeriodCell c | PointCell c -> Eval.PointCell c in
-  let rec go_period : type c. Eval.cell list -> c period_cell -> cell_dep_tree =
+let cells (cell : Cell_types.cell) =
+  let pack_cell (c : Cell_types.cell) = c in
+  let rec go_period : type c. Cell_types.cell list -> c period_cell -> cell_dep_tree =
    fun visited c ->
-    let wrapped = Eval.PeriodCell c in
+    let wrapped = PeriodCell c in
     if List.exists (fun v -> v == wrapped) visited then Cycle wrapped
     else
       let visited = wrapped :: visited in
@@ -44,9 +44,9 @@ let cells (cell : Eval.cell) =
       | RClip { inner; _ } -> Node (wrapped, [ go_period visited inner ])
       | RRef { cell = Some inner; _ } -> Node (wrapped, [ go_period visited inner ])
       | RRef { cell = None; _ } -> Leaf wrapped
-  and go_point : type c. Eval.cell list -> c point_cell -> cell_dep_tree =
+  and go_point : type c. Cell_types.cell list -> c point_cell -> cell_dep_tree =
    fun visited c ->
-    let wrapped = Eval.PointCell c in
+    let wrapped = PointCell c in
     if List.exists (fun v -> v == wrapped) visited then Cycle wrapped
     else
       let visited = wrapped :: visited in
@@ -63,8 +63,8 @@ let cells (cell : Eval.cell) =
           let children = List.of_seq (Seq.map (go_period visited) changes) in
           Node (wrapped, children)
   and go visited = function
-    | Eval.PeriodCell c -> go_period visited c
-    | Eval.PointCell c -> go_point visited c
+    | PeriodCell c -> go_period visited c
+    | PointCell c -> go_point visited c
   in
   go [] cell
 
@@ -114,8 +114,7 @@ let series s =
       | Series_types.TConst _ -> acc
       | Series_types.TMap { inner; _ } -> go_point acc (Lazy.force inner)
       | Series_types.TConvert { inner; _ } -> go_point acc (cast_point_series (Lazy.force inner))
-      | Series_types.TDep2 { s1; s2; _ } ->
-          go_point (go_point acc (Lazy.force s1)) (Lazy.force s2)
+      | Series_types.TDep2 { s1; s2; _ } -> go_point (go_point acc (Lazy.force s1)) (Lazy.force s2)
       | Series_types.TAccum { changes; _ } -> go_period acc (Lazy.force changes)
     end
   in

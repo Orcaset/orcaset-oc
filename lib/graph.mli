@@ -9,13 +9,13 @@
 (** {1 Cell dependency trees} *)
 
 type cell_dep_tree =
-  | Leaf of Eval.cell
-  | Node of Eval.cell * cell_dep_tree list
-  | Cycle of Eval.cell
+  | Leaf of Cell_types.cell
+  | Node of Cell_types.cell * cell_dep_tree list
+  | Cycle of Cell_types.cell
       (** A tree representing the dependency structure of a cell. [Cycle] marks a back-edge to a
           cell that was already visited on the current path. *)
 
-val cells : Eval.cell -> cell_dep_tree
+val cells : Cell_types.cell -> cell_dep_tree
 (** [cells cell] is the dependency tree rooted at [cell]. Handles both period and point cells.
     Circular dependencies are detected via physical identity and represented as [Cycle] nodes. *)
 

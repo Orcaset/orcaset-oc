@@ -126,120 +126,68 @@ let total_equity = S.Point.sum ~label:"Total Equity" (lazy common_stock) (lazy r
 (* Balance Check: Total Assets - Total Equity (should be zero). *)
 let balance_check = S.Point.sub ~label:"Balance Check" (lazy total_assets) (lazy total_equity)
 
-(* --- Evaluation & Output ----------------------------------------------------- *)
+(* --- Output ----------------------------------------------------------------- *)
 
-let num_months = 12
+let num_periods = 6
+let query_periods = List.of_seq (Seq.take num_periods months)
+let period_end_dates = List.map Period.end_date query_periods
+let balance_dates = start_date :: period_end_dates
+
+let extract_value (r : _ S.eval_result) =
+  match r with
+  | Period { value = Amount v; _ } -> v
+  | Point { point = Some (_, Amount v); _ } -> v
+  | Point { point = None; _ } -> 0.0
+
+let format_number v =
+  let s = Printf.sprintf "%.0f" (Float.abs v) in
+  let len = String.length s in
+  let buf = Buffer.create (len + len / 3) in
+  String.iteri
+    (fun i c ->
+      if i > 0 && (len - i) mod 3 = 0 then Buffer.add_char buf ',';
+      Buffer.add_char buf c)
+    s;
+  let formatted = Buffer.contents buf in
+  if v < -0.5 then "(" ^ formatted ^ ")" else formatted
+
+let lw = 24
+let cw = 14
+let pad_right n s = if String.length s >= n then s else s ^ String.make (n - String.length s) ' '
+let pad_left n s = if String.length s >= n then s else String.make (n - String.length s) ' ' ^ s
+
+let print_table title dates rows =
+  Printf.printf "\n=== %s ===\n\n" title;
+  Printf.printf "%s" (pad_right lw "");
+  List.iter (fun d -> Printf.printf "%s" (pad_left cw (Date.to_string d))) dates;
+  print_newline ();
+  Printf.printf "%s\n" (String.make (lw + cw * List.length dates) '-');
+  List.iter
+    (fun (label, values) ->
+      Printf.printf "%s" (pad_right lw label);
+      List.iter (fun v -> Printf.printf "%s" (pad_left cw (format_number v))) values;
+      print_newline ())
+    rows
+
+let eval_period_rows series =
+  List.map
+    (fun s ->
+      (S.Period.label s, List.map extract_value (S.eval_many (S.Period.query query_periods s))))
+    series
+
+let eval_point_rows series =
+  List.map
+    (fun s ->
+      (S.Point.label s, List.map extract_value (S.eval_many (S.Point.query_many balance_dates s))))
+    series
 
 let () =
-  (* Materialize all period series with shared cache. *)
-  let all_period_series =
-    [
-      revenue;
-      cogs;
-      gross_profit;
-      opex;
-      depreciation;
-      ebt;
-      tax;
-      net_income;
-      dep_add_back;
-      cf_operations;
-      capex;
-      cf_financing;
-      net_cash_change;
-    ]
-  in
-  let period_seqs = S.Period.to_seq all_period_series in
-  let period_cells_by_series =
-    List.map (fun seq -> seq |> Seq.take num_months |> List.of_seq) period_seqs
-  in
-  (* Extract end dates from the first series for point queries. *)
-  let end_dates =
-    match period_cells_by_series with
-    | first :: _ -> List.map (fun c -> Period.end_date (Period_cell.period c)) first
-    | _ -> assert false
-  in
-  (* Query point series at each period end date. *)
-  let cash_cells = S.Point.query_many end_dates cash in
-  let ppe_cells = S.Point.query_many end_dates ppe_net in
-  let common_stock_cells = S.Point.query_many end_dates common_stock in
-  let re_cells = S.Point.query_many end_dates retained_earnings in
-  let total_assets_cells = S.Point.query_many end_dates total_assets in
-  let total_equity_cells = S.Point.query_many end_dates total_equity in
-  let balance_check_cells = S.Point.query_many end_dates balance_check in
-  (* Build evaluation groups: one group per period containing all cells for that column. *)
-  let rows =
-    List.init num_months (fun i ->
-        let period_row =
-          List.map
-            (fun series_cells -> Eval.PeriodCell (List.nth series_cells i))
-            period_cells_by_series
-        in
-        let point_row =
-          List.filter_map
-            (Option.map (fun c -> Eval.PointCell c))
-            [
-              List.nth cash_cells i;
-              List.nth ppe_cells i;
-              List.nth total_assets_cells i;
-              List.nth common_stock_cells i;
-              List.nth re_cells i;
-              List.nth total_equity_cells i;
-              List.nth balance_check_cells i;
-            ]
-        in
-        period_row @ point_row)
-  in
-  let results = Eval.many rows in
-  (* Line item labels and section structure. *)
-  let labels =
-    [
-      ("Income Statement", "");
-      ("  Revenue", "period");
-      ("  COGS", "period");
-      ("  Gross Profit", "period");
-      ("  Opex", "period");
-      ("  Depreciation", "period");
-      ("  EBT", "period");
-      ("  Tax", "period");
-      ("  Net Income", "period");
-      ("Cash Flow Statement", "");
-      ("  Dep Add Back", "period");
-      ("  CF Operations", "period");
-      ("  Capex", "period");
-      ("  CF Financing", "period");
-      ("  Net Cash Change", "period");
-      ("Balance Sheet", "");
-      ("  Cash", "point");
-      ("  PPE Net", "point");
-      ("  Total Assets", "point");
-      ("  Common Stock", "point");
-      ("  Retained Earnings", "point");
-      ("  Total Equity", "point");
-      ("  Balance Check", "point");
-    ]
-  in
-  (* Extract values by line item (transpose results). *)
-  let num_value_items = 13 + 7 in
-  let values_by_item =
-    List.init num_value_items (fun item_idx ->
-        List.map (fun period_values -> List.nth period_values item_idx) results)
-  in
-  (* Print table. *)
-  let cw = 12 in
-  Printf.printf "%-22s" "";
-  List.iter (fun d -> Printf.printf " %*s" cw (Date.to_string d)) end_dates;
-  Printf.printf "\n";
-  Printf.printf "%s\n" (String.make (22 + (num_months * (cw + 1))) '-');
-  let value_idx = ref 0 in
-  List.iter
-    (fun (label, kind) ->
-      match kind with
-      | "" -> Printf.printf "\n%s\n" label
-      | _ ->
-          Printf.printf "%-22s" label;
-          let vals = List.nth values_by_item !value_idx in
-          List.iter (fun v -> Printf.printf " %*.2f" cw v) vals;
-          Printf.printf "\n";
-          incr value_idx)
-    labels
+  print_table "Income Statement" period_end_dates
+    (eval_period_rows
+       [ revenue; cogs; gross_profit; opex; depreciation; ebt; tax; net_income ]);
+  print_table "Cash Flow Statement" period_end_dates
+    (eval_period_rows [ cf_operations; capex; cf_financing; net_cash_change ]);
+  print_table "Balance Sheet" balance_dates
+    (eval_point_rows
+       [ cash; ppe_net; total_assets; common_stock; retained_earnings; total_equity; balance_check ]);
+  print_newline ()

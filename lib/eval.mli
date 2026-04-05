@@ -1,21 +1,19 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-(** Fixed-point solver for cell evaluation.
+(** Internal fixed-point solver for cell evaluation.
 
-    Implements iterative evaluation over a dependency graph of period and point-in-time cells.
-    Handles both cell types through the {!cell} sum type, computing values for all cell variants. *)
+    Implements iterative evaluation over a dependency graph of period and point-in-time cells. This
+    module is used internally by {!Series} — users should not call these functions directly. *)
 
-type cell = PeriodCell : 'c Period_cell.t -> cell | PointCell : 'c Point_cell.t -> cell
+val prime_tree : Cell_cache.t -> Cell_types.cell -> unit
+(** [prime_tree cache cell] walks the dependency tree rooted at [cell], initialising each node in
+    [cache] with either a resolved constant or an unresolved placeholder. *)
 
-val one : cell -> float
-(** [one cell] forces the computation tree rooted at [cell] and returns its float value. Creates a
-    fresh cache, primes the dependency tree, iterates until convergence, and reads the result.
+val iterate : Cell_cache.t -> Cell_types.cell list -> int -> unit
+(** [iterate cache roots iteration] runs the fixed-point solver from [iteration] until convergence
+    or the maximum iteration count is reached. *)
 
-    Note: each call creates a fresh cache. When evaluating many cells that share dependencies,
-    prefer {!many} for cache sharing. *)
-
-val many : cell list list -> float list list
-(** [many groups] evaluates grouped lists of cells using a single shared cache, so common
-    sub-dependencies are computed only once. Returns results in the same shape as the input — one
-    float list per group. *)
+val read_result : Cell_cache.t -> Cell_types.cell -> float
+(** [read_result cache cell] extracts the final float value for [cell] from [cache]. Raises if the
+    cell was never primed. *)

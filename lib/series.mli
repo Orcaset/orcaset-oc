@@ -3,13 +3,13 @@
 
 (** Scoped series module providing both period and point-in-time series with compile-time scope
     isolation. Each call to {!Make} produces a fresh module whose series types are incompatible with
-    those from other calls, preventing accidental cross-model mixing.
-
-    The dispatch pattern parallels {!Eval} at the cell level: {!Series_types} defines the shared
-    types, {!Period_series} and {!Point_series} contain the logic, and each functor instance
-    provides the callbacks that route evaluation across the period/point boundary. *)
+    those from other calls, preventing accidental cross-model mixing. *)
 
 (** {1 Shared types} *)
+
+(** A numeric value tagged with phantom type ['c] (typically a currency or unit). The [[@@unboxed]]
+    annotation ensures zero runtime overhead — the representation is identical to a bare [float]. *)
+type 'c amount = Amount of float [@@unboxed]
 
 type reduce = float list -> float
 
@@ -30,6 +30,23 @@ module type S = sig
   type 'c period_t
   type 'c point_t
   type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
+
+  (** {1 Query and evaluation types} *)
+
+  type 'c q_result =
+    | QRPeriod of { label : string; period : Period.t; cells : 'c Period_cell.t list }
+    | QRPoint of { label : string; cell : 'c Point_cell.t option }
+        (** The result of querying a series. [QRPeriod] holds the bounding query period and the
+            materialized cells that fall within it. [QRPoint] holds the cell for a single date, or
+            [None] if the series has no value there. *)
+
+  type 'c eval_result =
+    | Period of { label : string; period : Period.t; value : 'c amount }
+    | Point of { label : string; point : (Date.t * 'c amount) option }
+        (** The result of evaluating a query result. [Period] collapses the cell list to a single
+            value via sum reduction. [Point] resolves the cell to a dated value, or [None] if the
+            query had no cell. The phantom type ['c] is preserved from the originating series so
+            that callers can dispatch on it for currency-aware formatting. *)
 
   (** {1 Period series} *)
 
@@ -63,9 +80,12 @@ module type S = sig
     val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val id : 'c t -> int
+    val label : 'c t -> string
 
-    val query : Period.t -> 'c t list -> 'c Period_cell.t Seq.t list
-    (** Retrieve the cells corresponding to a specific period. *)
+    val query : Period.t list -> 'c t -> 'c q_result list
+    (** [query periods series] retrieves the cells corresponding to each period in [periods] for the
+        given series, returning one {!q_result} per period. All periods share a single evaluation
+        cache. *)
 
     val to_seq : 'c t list -> 'c Period_cell.t Seq.t list
     (** Materialize a list of series into corresponding lazy cell sequences. All series in the list
@@ -104,14 +124,28 @@ module type S = sig
     (** Elementwise division. Missing values are filled with [0.0]. *)
 
     val id : 'c t -> int
+    val label : 'c t -> string
 
-    val query : Date.t -> 'c t -> 'c Point_cell.t option
-    (** Retrieve the cell corresponding to a specific date. *)
+    val query : Date.t -> 'c t -> 'c q_result
+    (** [query date series] retrieves the cell for [date], returning a {!q_result}. *)
 
-    val query_many : Date.t list -> 'c t -> 'c Point_cell.t option list
-    (** Retrieve cells for multiple dates from a single series, sharing an evaluation cache across
-        all queries. *)
+    val query_many : Date.t list -> 'c t -> 'c q_result list
+    (** [query_many dates series] retrieves one {!q_result} per date, sharing an evaluation cache
+        across all queries. *)
   end
+
+  (** {1 Evaluation} *)
+
+  val eval : 'c q_result -> 'c eval_result
+  (** [eval qr] runs the fixed-point solver on the cells in [qr] and returns an {!eval_result}. For
+      period query results, the cell values are sum-reduced to a single ['c amount]. For point query
+      results, the cell is resolved to a dated value (or [None] if absent). The phantom type ['c] is
+      preserved so callers can dispatch on the currency or unit tag. *)
+
+  val eval_many : 'c q_result list -> 'c eval_result list
+  (** [eval_many qrs] evaluates a list of query results, sharing a single solver cache across all of
+      them so that common dependencies are computed only once. Equivalent to mapping {!eval} over
+      the list, but more efficient when the query results share underlying cells. *)
 
   (** {1 Label inspection} *)
 

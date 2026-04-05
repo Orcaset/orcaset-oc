@@ -7,6 +7,7 @@
     route evaluation across the period/point boundary. Each call to {!Make} produces a fresh module
     with abstract types, preventing accidental cross-scope mixing at compile time. *)
 
+type 'c amount = Amount of float [@@unboxed]
 type reduce = Series_types.reduce
 
 type dep_query = Series_types.dep_query =
@@ -24,6 +25,14 @@ module type S = sig
   type 'c period_t
   type 'c point_t
   type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
+
+  type 'c q_result =
+    | QRPeriod of { label : string; period : Period.t; cells : 'c Period_cell.t list }
+    | QRPoint of { label : string; cell : 'c Point_cell.t option }
+
+  type 'c eval_result =
+    | Period of { label : string; period : Period.t; value : 'c amount }
+    | Point of { label : string; point : (Date.t * 'c amount) option }
 
   module Period : sig
     type 'c t = 'c period_t
@@ -55,7 +64,8 @@ module type S = sig
     val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val id : 'c t -> int
-    val query : Period.t -> 'c t list -> 'c Period_cell.t Seq.t list
+    val label : 'c t -> string
+    val query : Period.t list -> 'c t -> 'c q_result list
     val to_seq : 'c t list -> 'c Period_cell.t Seq.t list
   end
 
@@ -77,12 +87,14 @@ module type S = sig
     val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
-
     val id : 'c t -> int
-    val query : Date.t -> 'c t -> 'c Point_cell.t option
-    val query_many : Date.t list -> 'c t -> 'c Point_cell.t option list
+    val label : 'c t -> string
+    val query : Date.t -> 'c t -> 'c q_result
+    val query_many : Date.t list -> 'c t -> 'c q_result list
   end
 
+  val eval : 'c q_result -> 'c eval_result
+  val eval_many : 'c q_result list -> 'c eval_result list
   val labels : unit -> string list
   val period_to_graph : 'c Period.t -> Graph.series
   val point_to_graph : 'c Point.t -> Graph.series
@@ -91,12 +103,15 @@ end
 module Make () = struct
   (* Label store — maps label string to series id for diagnostics *)
   let label_store : (string, int) Hashtbl.t = Hashtbl.create 16
+  let id_to_label : (int, string) Hashtbl.t = Hashtbl.create 16
 
   let register_label id label =
     match Hashtbl.find_opt label_store label with
     | Some existing_id ->
         raise (Series_types.Duplicate_label { label; existing_series_id = existing_id })
-    | None -> Hashtbl.add label_store label id
+    | None ->
+        Hashtbl.add label_store label id;
+        Hashtbl.add id_to_label id label
 
   let labels () = Hashtbl.fold (fun label _ acc -> label :: acc) label_store []
 
@@ -107,6 +122,16 @@ module Make () = struct
   type 'c series_dep = 'c Series_types.series_dep =
     | Period_dep of 'c Period_series.t Lazy.t
     | Point_dep of 'c Point_series.t Lazy.t
+
+  type 'c q_result =
+    | QRPeriod of { label : string; period : Period.t; cells : 'c Period_cell.t list }
+    | QRPoint of { label : string; cell : 'c Point_cell.t option }
+
+  type 'c eval_result =
+    | Period of { label : string; period : Period.t; value : 'c amount }
+    | Point of { label : string; point : (Date.t * 'c amount) option }
+
+  let find_label id = Hashtbl.find id_to_label id
 
   (* Mutually recursive eval callbacks — same as before *)
   let rec eval_point cache date point_series =
@@ -175,10 +200,17 @@ module Make () = struct
       s
 
     let id = Period_series.id
+    let label s = find_label (Period_series.id s)
 
-    let query period series_list =
+    let query periods series =
       let cache = Series_types.create_cache () in
-      List.map (Period_series.eval_query ~eval_point cache period) series_list
+      let lbl = find_label (Period_series.id series) in
+      List.map
+        (fun period ->
+          let seq = Period_series.eval_query ~eval_point cache period series in
+          let cells = List.of_seq seq in
+          QRPeriod { label = lbl; period; cells })
+        periods
 
     let to_seq series_list =
       let cache = Series_types.create_cache () in
@@ -239,15 +271,76 @@ module Make () = struct
       s
 
     let id = Point_series.id
+    let label s = find_label (Point_series.id s)
 
     let query date series =
       let cache = Series_types.create_cache () in
-      Point_series.eval_query ~eval_period cache series date
+      let cell = Point_series.eval_query ~eval_period cache series date in
+      let lbl = find_label (Point_series.id series) in
+      QRPoint { label = lbl; cell }
 
     let query_many dates series =
       let cache = Series_types.create_cache () in
-      List.map (fun date -> Point_series.eval_query ~eval_period cache series date) dates
+      let lbl = find_label (Point_series.id series) in
+      List.map
+        (fun date ->
+          let cell = Point_series.eval_query ~eval_period cache series date in
+          QRPoint { label = lbl; cell })
+        dates
   end
+
+  (* Evaluation — wraps the internal Eval module so users never touch it directly *)
+
+  let eval (type c) (qr : c q_result) : c eval_result =
+    match qr with
+    | QRPeriod { label; period; cells } ->
+        let wrapped = List.map (fun c -> Cell_types.PeriodCell c) cells in
+        let cache = Cell_cache.create () in
+        List.iter (Eval.prime_tree cache) wrapped;
+        Eval.iterate cache wrapped 1;
+        let value = List.fold_left (fun acc c -> acc +. Eval.read_result cache c) 0.0 wrapped in
+        Period { label; period; value = Amount value }
+    | QRPoint { label; cell } -> (
+        match cell with
+        | None -> Point { label; point = None }
+        | Some c ->
+            let wrapped = Cell_types.PointCell c in
+            let cache = Cell_cache.create () in
+            Eval.prime_tree cache wrapped;
+            Eval.iterate cache [ wrapped ] 1;
+            let value = Eval.read_result cache wrapped in
+            let date = Point_cell.date c in
+            Point { label; point = Some (date, Amount value) })
+
+  let eval_many (type c) (qrs : c q_result list) : c eval_result list =
+    (* Collect every cell from every query result into a flat list for shared solving. *)
+    let all_cells =
+      List.concat_map
+        (fun (qr : c q_result) ->
+          match qr with
+          | QRPeriod { cells; _ } -> List.map (fun c -> Cell_types.PeriodCell c) cells
+          | QRPoint { cell = Some c; _ } -> [ Cell_types.PointCell c ]
+          | QRPoint { cell = None; _ } -> [])
+        qrs
+    in
+    let cache = Cell_cache.create () in
+    List.iter (Eval.prime_tree cache) all_cells;
+    Eval.iterate cache all_cells 1;
+    (* Read back results per query result. *)
+    List.map
+      (fun (qr : c q_result) ->
+        match qr with
+        | QRPeriod { label; period; cells } ->
+            let wrapped = List.map (fun c -> Cell_types.PeriodCell c) cells in
+            let value = List.fold_left (fun acc c -> acc +. Eval.read_result cache c) 0.0 wrapped in
+            Period { label; period; value = Amount value }
+        | QRPoint { label; cell = None } -> Point { label; point = None }
+        | QRPoint { label; cell = Some c } ->
+            let wrapped = Cell_types.PointCell c in
+            let value = Eval.read_result cache wrapped in
+            let date = Point_cell.date c in
+            Point { label; point = Some (date, Amount value) })
+      qrs
 
   (* Graph bridge functions *)
   let period_to_graph (s : 'c Period.t) : Graph.series = Graph.pack_period s

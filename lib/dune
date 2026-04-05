@@ -16,4 +16,10 @@
   point_series
   series
   yf)
- (private_modules cell_cache cell_types period_series point_series series_types))
+ (private_modules
+  cell_cache
+  cell_types
+  eval
+  period_series
+  point_series
+  series_types))

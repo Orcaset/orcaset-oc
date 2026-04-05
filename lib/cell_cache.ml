@@ -21,9 +21,9 @@ type t = {
 
 let create () = { period = Hashtbl.create 16; point = Hashtbl.create 16 }
 
-(** Look up or create the per-cell cache for a given cell ID in the period cache. Then look up
-    the period in the per-cell cache. Returns [Some (period, status)] on a hit, [None] on a miss
-    (after ensuring the per-cell cache exists). *)
+(** Look up or create the per-cell cache for a given cell ID in the period cache. Then look up the
+    period in the per-cell cache. Returns [Some (period, status)] on a hit, [None] on a miss (after
+    ensuring the per-cell cache exists). *)
 let find_period cache id period =
   let cell_cache =
     match Hashtbl.find_opt cache.period id with

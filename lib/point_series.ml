@@ -20,7 +20,6 @@ type 'c eval_period_fn =
 let const value = TConst { id = fresh_id (); value }
 let map f s = TMap { id = fresh_id (); inner = s; f }
 let convert f s = TConvert { id = fresh_id (); inner = s; f }
-
 let dep2 f s1 s2 = TDep2 { id = fresh_id (); s1; s2; f }
 let map2 = dep2
 let fill_zero = Option.value ~default:0.0
@@ -44,11 +43,7 @@ let id = function
 (*  Evaluation *)
 
 let rec eval_query : type c.
-    eval_period:c eval_period_fn ->
-    Series_types.cache ->
-    c t ->
-    Date.t ->
-    c Point_cell.t option =
+    eval_period:c eval_period_fn -> Series_types.cache -> c t -> Date.t -> c Point_cell.t option =
  fun ~eval_period cache series date ->
   let series_id = id series in
   match Hashtbl.find_opt cache.point (series_id, date) with
