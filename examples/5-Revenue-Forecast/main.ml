@@ -41,7 +41,7 @@ let units : [ `Units ] S.Period.t =
   in
   S.Period.unfold ~label:"Units" ~deps:[] (Seq.append seeds (forecast 0 last_period))
 
-let revenue : [ `Revenue ] S.Period.t =
+let revenue : [ `USD ] S.Period.t =
   let seeds = Seq.map to_seed (List.to_seq historical_revenue) in
   let last_period = (List.rev historical_revenue |> List.hd).period in
   let rec forecast prev_period () =
