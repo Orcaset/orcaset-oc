@@ -81,11 +81,11 @@ let rec split_cell : type c. c t -> Date.t -> c t * c t =
       let lr, rr = split period f date in
       ( RConst { id; period = lr.period; f = lr.f; split = lr.split },
         RConst { id; period = rr.period; f = rr.f; split = rr.split } )
-  (* TODO: Consider whether just narrowing the period range is the right split behavior *)
-  | RDeps { id; period; deps; f } ->
+  | RDeps _ ->
       let left_period = Period.make (Period.start_date period) date in
       let right_period = Period.make date (Period.end_date period) in
-      (RDeps { id; period = left_period; deps; f }, RDeps { id; period = right_period; deps; f })
+      ( RClip { id = fresh_id (); inner = cell; period = left_period },
+        RClip { id = fresh_id (); inner = cell; period = right_period } )
   | RMap { id; inner; f } ->
       let left, right = split_cell inner date in
       (RMap { id; inner = left; f }, RMap { id; inner = right; f })
@@ -137,7 +137,7 @@ and expand_to_period : type c. c t -> Period.t -> c t option =
             trim_const left
         in
         Some (trim_const cell)
-    | RDeps { id; deps; f; _ } -> Some (RDeps { id; period = target_period; deps; f })
+    | RDeps _ -> None
     | RMap { id; inner; f } ->
         expand_to_period inner target_period |> Option.map (fun inner -> RMap { id; inner; f })
     | RConvert { id; inner; f } ->

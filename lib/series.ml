@@ -43,6 +43,7 @@ module type S = sig
 
     val const : label:string -> 'c Period_cell.t Seq.t -> 'c t
     val unfold : label:string -> deps:'c series_dep list -> 'c unfold_cell Seq.t -> 'c t
+    val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
     val reduce_sum : reduce
     val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
     val convert : label:string -> (Period.t -> float -> float) -> 'a t Lazy.t -> 'b t
@@ -154,6 +155,11 @@ module Make () = struct
 
     let unfold ~label ~deps cells =
       let s = Period_series.unfold ~deps cells in
+      register_label (Period_series.id s) label;
+      s
+
+    let extend ~label base cont =
+      let s = Period_series.extend base cont in
       register_label (Period_series.id s) label;
       s
 

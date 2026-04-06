@@ -59,6 +59,11 @@ module type S = sig
 
     val const : label:string -> 'c Period_cell.t Seq.t -> 'c t
     val unfold : label:string -> deps:'c series_dep list -> 'c unfold_cell Seq.t -> 'c t
+
+    val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
+    (** [extend ~label base cont] evaluates [base] (which must be finite), passes the last
+        period to [cont], and returns the concatenation of both series. *)
+
     val reduce_sum : reduce
     val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
     val convert : label:string -> (Period.t -> float -> float) -> 'a t Lazy.t -> 'b t

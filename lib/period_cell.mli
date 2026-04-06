@@ -74,6 +74,11 @@ val split_cell : 'c t -> Date.t -> 'c t * 'c t
 (** [split_cell cell date] splits [cell] at [date], producing two cells covering [\[start, date)]
     and [\[date, end)]. Split cells inherit their parent's identity for caching purposes. *)
 
+val expand_to_period : 'c t -> Period.t -> 'c t option
+(** [expand_to_period cell period] attempts to produce a cell that covers exactly [period] by
+    splitting or trimming [cell]. Returns [None] when the cell cannot be structurally narrowed
+    (e.g. dependency cells whose value is computed from other cells). *)
+
 val clip : 'c t -> Period.t -> 'c t
 (** [clip cell period] returns a new cell with period start and end dates clipped to [period],
     splitting the cell using its interpolation method. *)

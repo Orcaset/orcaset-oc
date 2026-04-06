@@ -104,6 +104,7 @@ let series s =
       | Series_types.PConvert { inner; _ } -> go_period acc (cast_period_series (Lazy.force inner))
       | Series_types.PMap2 { s1; s2; _ } ->
           go_period (go_period acc (Lazy.force s1)) (Lazy.force s2)
+      | Series_types.PExtend { base; _ } -> go_period acc base
     end
   and go_point acc s =
     if is_point_visited s then acc
@@ -162,6 +163,7 @@ let pp_dot ppf roots =
     | Series_types.PMap _ -> Printf.sprintf "Map(%d)" sid
     | Series_types.PConvert _ -> Printf.sprintf "Convert(%d)" sid
     | Series_types.PMap2 _ -> Printf.sprintf "Map2(%d)" sid
+    | Series_types.PExtend _ -> Printf.sprintf "Extend(%d)" sid
   in
   let point_label s =
     let sid = Point_series.id s in
@@ -199,6 +201,7 @@ let pp_dot ppf roots =
           | Series_types.PMap { inner; _ } -> [ Lazy.force inner ]
           | Series_types.PConvert { inner; _ } -> [ cast_period_series (Lazy.force inner) ]
           | Series_types.PMap2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
+          | Series_types.PExtend { base; _ } -> [ base ]
         in
         List.iter
           (fun child ->

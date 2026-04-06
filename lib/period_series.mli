@@ -39,6 +39,10 @@ val unfold : deps:'c Series_types.series_dep list -> 'c Series_types.unfold_cell
     {!Series_types.Step}, which are derived from the declared [deps]. This makes it impossible to
     silently bypass series-level dependency tracking or erase cell-level dependency connections. *)
 
+val extend : 'c t -> (Period.t -> 'c t) -> 'c t
+(** [extend base cont] evaluates [base] (which must be finite), passes the last period to [cont],
+    and returns the concatenation of both series. If [base] is empty, returns an empty series. *)
+
 val reduce_sum : Series_types.reduce
 (** A reduce function that sums all cell values: [List.fold_left (+.) 0.0]. *)
 

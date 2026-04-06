@@ -1,0 +1,10 @@
+digraph deps {
+  rankdir=TB;
+  node [shape=box, style=filled, fillcolor=lightyellow];
+  n0 [label="Map2(2)"];
+  n1 [label="Const(0)"];
+  n2 [label="Map(1)"];
+  n0 -> n1;
+  n2 -> n1;
+  n0 -> n2;
+}

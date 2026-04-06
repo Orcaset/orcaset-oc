@@ -1,0 +1,14 @@
+{
+  "sheetName": "Model",
+  "allow_overwrite": true,
+  "cells": {
+    "B9": {
+      "formula": "=-10000*0.10/12",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      },
+      "note": "Period 1: uses opening PPE of $10,000. Periods 2+: uses prior period PPE Net."
+    }
+  }
+}

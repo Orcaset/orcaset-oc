@@ -1,0 +1,65 @@
+{
+  "sheetName": "Model",
+  "cells": {
+    "B5": {
+      "formula": "=1000*(1+$E$3)^((B2-$C$3)/360)",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "B6": {
+      "formula": "=-B5*0.30",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "B7": {
+      "formula": "=B5+B6",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    },
+    "B8": {
+      "formula": "=-200",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#0000FF"
+      }
+    },
+    "B9": {
+      "formula": "=-B26*0.10/12",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      },
+      "note": "Uses prior period PPE. For period 1, references opening PPE in B26 (which is the starting $10,000)."
+    },
+    "B10": {
+      "formula": "=B7+B8+B9",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    },
+    "B11": {
+      "formula": "=-B10*$G$3",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "B12": {
+      "formula": "=B10+B11",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    }
+  }
+}

@@ -142,7 +142,7 @@ let extract_value (r : _ S.eval_result) =
 let format_number v =
   let s = Printf.sprintf "%.0f" (Float.abs v) in
   let len = String.length s in
-  let buf = Buffer.create (len + len / 3) in
+  let buf = Buffer.create (len + (len / 3)) in
   String.iteri
     (fun i c ->
       if i > 0 && (len - i) mod 3 = 0 then Buffer.add_char buf ',';
@@ -161,7 +161,7 @@ let print_table title dates rows =
   Printf.printf "%s" (pad_right lw "");
   List.iter (fun d -> Printf.printf "%s" (pad_left cw (Date.to_string d))) dates;
   print_newline ();
-  Printf.printf "%s\n" (String.make (lw + cw * List.length dates) '-');
+  Printf.printf "%s\n" (String.make (lw + (cw * List.length dates)) '-');
   List.iter
     (fun (label, values) ->
       Printf.printf "%s" (pad_right lw label);
@@ -183,8 +183,7 @@ let eval_point_rows series =
 
 let () =
   print_table "Income Statement" period_end_dates
-    (eval_period_rows
-       [ revenue; cogs; gross_profit; opex; depreciation; ebt; tax; net_income ]);
+    (eval_period_rows [ revenue; cogs; gross_profit; opex; depreciation; ebt; tax; net_income ]);
   print_table "Cash Flow Statement" period_end_dates
     (eval_period_rows [ cf_operations; capex; cf_financing; net_cash_change ]);
   print_table "Balance Sheet" balance_dates

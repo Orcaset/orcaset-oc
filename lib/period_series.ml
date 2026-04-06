@@ -22,6 +22,18 @@ let reduce_sum = List.fold_left ( +. ) 0.0
 
 let const cells = PConst { id = fresh_id (); cells }
 let unfold ~deps cells = PUnfold { id = fresh_id (); deps; cells }
+
+let extend base cont =
+  let memo = ref None in
+  let cont p =
+    match !memo with
+    | Some s -> s
+    | None ->
+        let s = cont p in
+        memo := Some s;
+        s
+  in
+  PExtend { id = fresh_id (); base; cont }
 let map f s = PMap { id = fresh_id (); inner = s; f }
 let convert f s = PConvert { id = fresh_id (); inner = s; f }
 let map2 f s1 s2 = PMap2 { id = fresh_id (); s1; s2; f }
@@ -72,7 +84,8 @@ let const_ann_growth ~start ~value ~rate ~offset ~yf =
 (* ACCESSORS *)
 
 let id = function
-  | PConst { id; _ } | PUnfold { id; _ } | PMap { id; _ } | PConvert { id; _ } | PMap2 { id; _ } ->
+  | PConst { id; _ } | PUnfold { id; _ } | PMap { id; _ } | PConvert { id; _ } | PMap2 { id; _ }
+  | PExtend { id; _ } ->
       id
 
 (* QUERY HELPERS *)
@@ -141,8 +154,15 @@ let rec eval_seq : type c.
 
         (* Query resolution helpers. Self queries read directly from the placeholder sequence so
            that same-series forward or simultaneous references can discover cells without forcing
-           their resolution order. External dependencies continue through eval_query. *)
-        let self_query period = clipped_cells period placeholder_seq in
+           their resolution order. When this series is the continuation of a PExtend, prefix cells
+           from the base are included so that Self queries can look back into the base. *)
+        let self_query_scope =
+          match Hashtbl.find_opt cache.prefix series_id with
+          | Some (Pack_period_seq seq) ->
+              Seq.memoize (Seq.append (cast_period_seq seq) placeholder_seq)
+          | None -> placeholder_seq
+        in
+        let self_query period = clipped_cells period self_query_scope in
         let dep_queries =
           List.map
             (fun dep ->
@@ -238,6 +258,36 @@ let rec eval_seq : type c.
           Seq.map (fun (cell_opt1, cell_opt2) -> Period_cell.map2 cell_opt1 cell_opt2 f) aligned_seq
         in
         let memo_seq = Seq.memoize seq in
+        Hashtbl.replace cache.period (id series) (Pack_period_seq memo_seq);
+        memo_seq
+    | PExtend { base; cont; _ } ->
+        let base_seq = eval_seq ~eval_point cache base in
+        let last_period = ref None in
+        let base_list =
+          List.of_seq
+            (Seq.map
+               (fun cell ->
+                 last_period := Some (Period_cell.period cell);
+                 cell)
+               base_seq)
+        in
+        let memo_seq =
+          match !last_period with
+          | None -> Seq.memoize Seq.empty
+          | Some p ->
+              let cont_series = cont p in
+              (* Combine any prefix from an enclosing extend with our base cells,
+                 so the continuation's Self queries can see the full history. *)
+              let own_prefix =
+                match Hashtbl.find_opt cache.prefix (id series) with
+                | Some (Pack_period_seq seq) -> List.of_seq (cast_period_seq seq)
+                | None -> []
+              in
+              Hashtbl.replace cache.prefix (id cont_series)
+                (Pack_period_seq (List.to_seq (own_prefix @ base_list)));
+              let cont_seq = eval_seq ~eval_point cache cont_series in
+              Seq.memoize (Seq.append (List.to_seq base_list) cont_seq)
+        in
         Hashtbl.replace cache.period (id series) (Pack_period_seq memo_seq);
         memo_seq
   in

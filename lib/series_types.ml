@@ -31,6 +31,7 @@ type 'c period_series =
       s2 : 'c period_series Lazy.t;
       f : float option -> float option -> float;
     }
+  | PExtend of { id : int; base : 'c period_series; cont : Period.t -> 'c period_series }
 
 and 'c point_series =
   | TConst of { id : int; value : float }
@@ -63,8 +64,10 @@ type packed_point_cell = Pack_point_cell : 'c Point_cell.t -> packed_point_cell
 type cache = {
   period : (int, packed_period_seq) Hashtbl.t;
   point : (int * Date.t, packed_point_cell) Hashtbl.t;
+  prefix : (int, packed_period_seq) Hashtbl.t;
 }
 
-let create_cache () = { period = Hashtbl.create 16; point = Hashtbl.create 16 }
+let create_cache () =
+  { period = Hashtbl.create 16; point = Hashtbl.create 16; prefix = Hashtbl.create 4 }
 
 exception Duplicate_label of { label : string; existing_series_id : int }

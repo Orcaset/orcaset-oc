@@ -1,0 +1,209 @@
+{
+  "sheetName": "Model",
+  "cells": {
+    "A1": {
+      "value": "Three-Statement Financial Model",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "fontSize": 14
+      }
+    },
+    "A2": {
+      "value": "Period Ending",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "B2": {
+      "value": "2026-01-31",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "numberFormat": "mmm-yy",
+        "horizontalAlignment": "center"
+      }
+    },
+    "C2": {
+      "value": "2026-02-28",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "numberFormat": "mmm-yy",
+        "horizontalAlignment": "center"
+      }
+    },
+    "D2": {
+      "value": "2026-03-31",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "numberFormat": "mmm-yy",
+        "horizontalAlignment": "center"
+      }
+    },
+    "E2": {
+      "value": "2026-04-30",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "numberFormat": "mmm-yy",
+        "horizontalAlignment": "center"
+      }
+    },
+    "F2": {
+      "value": "2026-05-31",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "numberFormat": "mmm-yy",
+        "horizontalAlignment": "center"
+      }
+    },
+    "G2": {
+      "value": "2026-06-30",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "numberFormat": "mmm-yy",
+        "horizontalAlignment": "center"
+      }
+    },
+    "A4": {
+      "value": "INCOME STATEMENT",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "fontLine": "underline"
+      }
+    },
+    "A5": {
+      "value": "  Revenue",
+      "cellStyles": {
+        "fontColor": "#0000FF"
+      }
+    },
+    "A6": {
+      "value": "  COGS"
+    },
+    "A7": {
+      "value": "Gross Profit",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A8": {
+      "value": "  Opex",
+      "cellStyles": {
+        "fontColor": "#0000FF"
+      }
+    },
+    "A9": {
+      "value": "  Depreciation"
+    },
+    "A10": {
+      "value": "Earnings Before Tax",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A11": {
+      "value": "  Tax"
+    },
+    "A12": {
+      "value": "Net Income",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A14": {
+      "value": "CASH FLOW STATEMENT",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "fontLine": "underline"
+      }
+    },
+    "A15": {
+      "value": "  Net Income"
+    },
+    "A16": {
+      "value": "  Depreciation Add Back"
+    },
+    "A17": {
+      "value": "CF Operations",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A18": {
+      "value": "  Capex"
+    },
+    "A19": {
+      "value": "CF Investing",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A20": {
+      "value": "  CF Financing",
+      "cellStyles": {
+        "fontColor": "#0000FF"
+      }
+    },
+    "A21": {
+      "value": "Net Cash Change",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A23": {
+      "value": "BALANCE SHEET",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "fontLine": "underline"
+      }
+    },
+    "A24": {
+      "value": "Assets",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "fontStyle": "italic"
+      }
+    },
+    "A25": {
+      "value": "  Cash"
+    },
+    "A26": {
+      "value": "  PPE Net"
+    },
+    "A27": {
+      "value": "Total Assets",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A28": {
+      "value": "Liabilities & Equity",
+      "cellStyles": {
+        "fontWeight": "bold",
+        "fontStyle": "italic"
+      }
+    },
+    "A29": {
+      "value": "  Common Stock",
+      "cellStyles": {
+        "fontColor": "#0000FF"
+      }
+    },
+    "A30": {
+      "value": "  Retained Earnings"
+    },
+    "A31": {
+      "value": "Total Liabilities & Equity",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    },
+    "A32": {
+      "value": ""
+    },
+    "A33": {
+      "value": "Balance Check",
+      "cellStyles": {
+        "fontWeight": "bold"
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "sheetName": "Model",
+  "cells": {
+    "C5": {
+      "formula": "=1000*(1+$E$3)^((C2-$C$3)/360)",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "C6": {
+      "formula": "=-C5*0.30",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "C7": {
+      "formula": "=C5+C6",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    },
+    "C8": {
+      "formula": "=-200",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#0000FF"
+      }
+    },
+    "C9": {
+      "formula": "=-B26*0.10/12",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "C10": {
+      "formula": "=C7+C8+C9",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    },
+    "C11": {
+      "formula": "=-C10*$G$3",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "C12": {
+      "formula": "=C10+C11",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    }
+  },
+  "copyToRange": "D5:G12"
+}

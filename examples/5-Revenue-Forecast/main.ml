@@ -9,6 +9,7 @@ let historical_units =
     { period = Period.make (Date.make 2025 3 31) (Date.make 2025 6 30); value = 1_100. };
     { period = Period.make (Date.make 2025 6 30) (Date.make 2025 9 30); value = 1_200. };
     { period = Period.make (Date.make 2025 9 30) (Date.make 2025 12 31); value = 1_300. };
+    { period = Period.make (Date.make 2025 12 31) (Date.make 2026 3 31); value = 1_400. };
   ]
 
 let historical_revenue =
@@ -21,46 +22,60 @@ let historical_revenue =
 
 let forecast_stride = Offset.make ~months:3 ~month_end:true ()
 let forecast_lookback = Offset.make ~months:(-3) ~month_end:true ()
-let to_seed h = S.Period.Seed { period = h.period; f = (fun () -> h.value) }
-
-let growth_step rate period =
-  S.Period.Step
-    {
-      period;
-      queries = [ Self { period = Period.shift forecast_lookback period; reduce = S.Period.reduce_sum } ];
-      f = (fun values -> match values with [ prev ] -> prev *. (1.0 +. rate) | _ -> 0.0);
-    }
+let to_cell h = Period_cell.const h.period (fun () -> h.value) Period_cell.proportional_split
 
 let units : [ `Units ] S.Period.t =
-  let seeds = Seq.map to_seed (List.to_seq historical_units) in
-  let last_period = (List.rev historical_units |> List.hd).period in
-  let rec forecast n prev_period () =
-    let p = Period.shift forecast_stride prev_period in
-    let step = if n < 4 then growth_step 0.05 p else growth_step 0.02 p in
-    Seq.Cons (step, forecast (n + 1) p)
+  let units_hist : [ `Units ] S.Period.t =
+    S.Period.const ~label:"Units (historical)" (List.to_seq historical_units |> Seq.map to_cell)
   in
-  S.Period.unfold ~label:"Units" ~deps:[] (Seq.append seeds (forecast 0 last_period))
+  let growth_step rate period =
+    S.Period.Step
+      {
+        period;
+        queries =
+          [ Self { period = Period.shift forecast_lookback period; reduce = S.Period.reduce_sum } ];
+        f = (fun values -> match values with [ prev ] -> prev *. (1.0 +. rate) | _ -> 0.0);
+      }
+  in
+  let units_forecast last_period =
+    S.Period.unfold ~label:"Units (forecast)" ~deps:[]
+      (let rec forecast n prev_period () =
+         let p = Period.shift forecast_stride prev_period in
+         let step = if n < 4 then growth_step 0.05 p else growth_step 0.02 p in
+         Seq.Cons (step, forecast (n + 1) p)
+       in
+       forecast 0 last_period)
+  in
+  S.Period.extend ~label:"Units" units_hist units_forecast
 
 let revenue : [ `USD ] S.Period.t =
-  let seeds = Seq.map to_seed (List.to_seq historical_revenue) in
-  let last_period = (List.rev historical_revenue |> List.hd).period in
-  let rec forecast prev_period () =
-    let p = Period.shift forecast_stride prev_period in
-    let step =
-      S.Period.Step
-        {
-          period = p;
-          queries = [ Dep { index = 0; period = p; reduce = S.Period.reduce_sum } ];
-          f = (fun values -> match values with [ u ] -> u *. 10.0 | _ -> 0.0);
-        }
-    in
-    Seq.Cons (step, forecast p)
+  let hist =
+    S.Period.const ~label:"Revenue (historical)" (List.to_seq historical_revenue |> Seq.map to_cell)
   in
-  S.Period.unfold ~label:"Revenue"
-    ~deps:[ Period_dep (lazy (S.Period.convert ~label:"Units to revenue" (fun _ value -> value) (lazy units))) ]
-    (Seq.append seeds (forecast last_period))
+  let conversion = S.Period.convert ~label:"Units to revenue" (fun _ value -> value) (lazy units) in
+  let forecast last_period =
+    S.Period.unfold ~label:"Revenue (forecast)"
+      ~deps:[ Period_dep (lazy conversion) ]
+      (let rec forecast prev_period () =
+         let p = Period.shift forecast_stride prev_period in
+         let step =
+           S.Period.Step
+             {
+               period = p;
+               queries = [ Dep { index = 0; period = p; reduce = S.Period.reduce_sum } ];
+               f = (fun values -> match values with [ u ] -> u *. 10.0 | _ -> 0.0);
+             }
+         in
+         Seq.Cons (step, forecast p)
+       in
+       forecast last_period)
+  in
+  S.Period.extend ~label:"Revenue" hist forecast
 
-let output_periods = Period.make_seq ~start_date:(Date.make 2024 12 31) ~offset:forecast_stride |> Seq.take 6
+(* ---- Print output --- *)
+
+let output_periods =
+  Period.make_seq ~start_date:(Date.make 2024 12 31) ~offset:forecast_stride |> Seq.take 6
 
 let () =
   let periods = List.of_seq output_periods in

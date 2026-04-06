@@ -1,0 +1,58 @@
+{
+  "sheetName": "Model",
+  "cells": {
+    "C15": {
+      "formula": "=C12",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#008000"
+      }
+    },
+    "C16": {
+      "formula": "=-C9",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "C17": {
+      "formula": "=C15+C16",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    },
+    "C18": {
+      "formula": "=-C5*0.05",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#000000"
+      }
+    },
+    "C19": {
+      "formula": "=C18",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    },
+    "C20": {
+      "formula": "=0",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontColor": "#0000FF"
+      }
+    },
+    "C21": {
+      "formula": "=C17+C19+C20",
+      "cellStyles": {
+        "numberFormat": "$#,##0;($#,##0);\"-\"",
+        "fontWeight": "bold",
+        "fontColor": "#000000"
+      }
+    }
+  },
+  "copyToRange": "D15:G21"
+}

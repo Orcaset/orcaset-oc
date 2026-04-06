@@ -53,7 +53,10 @@ let rec prime_tree cache cell =
               store (Cell_cache.Unresolved (0.0, 0));
               match inner with
               | RRef { cell = None; _ } -> ()
-              | _ -> prime_tree cache (PeriodCell (Period_cell.clip inner period))))
+              | _ -> (
+                  match Period_cell.expand_to_period inner period with
+                  | Some expanded -> prime_tree cache (PeriodCell expanded)
+                  | None -> prime_tree cache (PeriodCell inner))))
       | PointCell tc -> (
           let store status = Cell_cache.store_point cache (Point_cell.id tc) status in
           match tc with
@@ -129,7 +132,16 @@ and compute_value cache iteration = function
       | RClip { inner; period; _ } -> (
           match inner with
           | RRef { cell = None; _ } -> (0.0, 0.0)
-          | _ -> eval_cell cache iteration (PeriodCell (Period_cell.clip inner period)))
+          | _ -> (
+              match Period_cell.expand_to_period inner period with
+              | Some expanded -> eval_cell cache iteration (PeriodCell expanded)
+              | None ->
+                  let v, d = eval_cell cache iteration (PeriodCell inner) in
+                  let scale =
+                    float_of_int (Period.days period)
+                    /. float_of_int (Period.days (Period_cell.period inner))
+                  in
+                  (v *. scale, d)))
       | RRef { cell = Some c; _ } -> eval_cell cache iteration (PeriodCell c)
       | RRef { cell = None; _ } -> (0.0, 0.0))
   | PointCell tc -> (
