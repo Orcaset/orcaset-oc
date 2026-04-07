@@ -18,7 +18,7 @@ let revenue_step curr_period last_period =
   S.Period.Step
     {
       period = curr_period;
-      queries = [ Self_query { period = last_period; reduce = S.Period.reduce_sum } ];
+      queries = [ S.Period.self ~period:last_period ~reduce:S.Period.reduce_sum ];
       f =
         (fun values ->
           let yf = Yf.cmonthly (Period.start_date curr_period) (Period.end_date curr_period) in
@@ -31,10 +31,12 @@ let revenue =
     let current_period = Period.shift offset last_period in
     Seq.Cons (revenue_step current_period last_period, generate_cells current_period)
   in
-  S.Period.unfold ~label:"Revenue" ~deps:[]
-    (Seq.cons
-       (S.Period.Const { period = initial_period; f = (fun () -> initial_value) })
-       (generate_cells initial_period))
+  S.Period.unfold ~label:"Revenue"
+    ~deps:(fun _ctx -> ())
+    ~cells:(fun () ->
+      Seq.cons
+        (S.Period.Const { period = initial_period; f = (fun () -> initial_value) })
+        (generate_cells initial_period))
 
 (* let revenue =
   let periods = Period.make_seq ~start_date:initial_start_date ~offset in

@@ -13,17 +13,19 @@ let rate = 0.03
 let periods = Period.make_seq ~start_date ~offset
 
 (* Interest: each month's interest = balance at period start * rate. *)
-let interest_step period =
+let interest_step balance period =
   S.Period.Step
     {
       period;
-      queries = [ Point_query { index = 0; date = Period.start_date period } ];
+      queries = [ S.Period.point_query balance ~date:(Period.start_date period) ];
       f = (fun values -> match values with [ v ] -> v *. rate | _ -> 0.0);
     }
 
 let rec interest =
   lazy
-    (S.Period.unfold ~label:"Interest" ~deps:[ Point_dep balance ] (Seq.map interest_step periods))
+    (S.Period.unfold ~label:"Interest"
+       ~deps:(fun ctx -> S.Period.require_point ctx balance)
+       ~cells:(fun balance -> Seq.map (interest_step balance) periods))
 
 (* Balance: initial value + accumulated interest over time. *)
 and balance = lazy (S.Point.accum ~label:"Balance" ~start_date ~initial_value:100.0 interest)

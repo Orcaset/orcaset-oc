@@ -21,7 +21,7 @@ let revenue_step period =
     {
       period;
       queries =
-        [ Self_query { period = Period.shift revenue_lookback period; reduce = S.Period.reduce_sum } ];
+        [ S.Period.self ~period:(Period.shift revenue_lookback period) ~reduce:S.Period.reduce_sum ];
       f =
         (fun values ->
           match values with [ last_value ] -> last_value *. ((1.0 +. 0.05) ** yf) | _ -> 0.0);
@@ -32,10 +32,12 @@ let revenue =
     let current_period = Period.shift offset last_period in
     Seq.Cons (revenue_step current_period, generate_cells current_period)
   in
-  S.Period.unfold ~label:"Revenue" ~deps:[]
-    (Seq.cons
-       (S.Period.Const { period = initial_period; f = (fun () -> 1000.0) })
-       (generate_cells initial_period))
+  S.Period.unfold ~label:"Revenue"
+    ~deps:(fun _ctx -> ())
+    ~cells:(fun () ->
+      Seq.cons
+        (S.Period.Const { period = initial_period; f = (fun () -> 1000.0) })
+        (generate_cells initial_period))
 
 (* COGS: 30% of revenue. *)
 let cogs = S.Period.map ~label:"COGS" (fun r -> r *. -0.30) (lazy revenue)
@@ -45,8 +47,10 @@ let gross_profit = S.Period.sum ~label:"Gross Profit" (lazy revenue) (lazy cogs)
 
 (* Opex: constant -$200/month. *)
 let opex =
-  S.Period.unfold ~label:"Opex" ~deps:[]
-    (Seq.map (fun period -> S.Period.Const { period; f = (fun () -> -200.0) }) months)
+  S.Period.unfold ~label:"Opex"
+    ~deps:(fun _ctx -> ())
+    ~cells:(fun () ->
+      Seq.map (fun period -> S.Period.Const { period; f = (fun () -> -200.0) }) months)
 
 (* Capex: 5% of revenue (negative = cash outflow). *)
 let capex = S.Period.map ~label:"Capex" (fun r -> r *. -0.05) (lazy revenue)
@@ -56,16 +60,19 @@ let capex = S.Period.map ~label:"Capex" (fun r -> r *. -0.05) (lazy revenue)
    PPE Net starts at $10,000, increases by capex additions, decreases by depreciation. *)
 let rec depreciation =
   lazy
-    (S.Period.unfold ~label:"Depreciation" ~deps:[ Point_dep ppe_net ]
-       (Seq.map
-          (fun period ->
-            S.Period.Step
-              {
-                period;
-                queries = [ Point_query { index = 0; date = Period.start_date period } ];
-                f = (fun values -> match values with [ ppe ] -> ppe *. (-0.10 /. 12.0) | _ -> 0.0);
-              })
-          months))
+    (S.Period.unfold ~label:"Depreciation"
+       ~deps:(fun ctx -> S.Period.require_point ctx ppe_net)
+       ~cells:(fun ppe_net ->
+         Seq.map
+           (fun period ->
+             S.Period.Step
+               {
+                 period;
+                 queries = [ S.Period.point_query ppe_net ~date:(Period.start_date period) ];
+                 f =
+                   (fun values -> match values with [ ppe ] -> ppe *. (-0.10 /. 12.0) | _ -> 0.0);
+               })
+           months))
 
 and ppe_net =
   lazy
@@ -97,8 +104,9 @@ let cf_operations = S.Period.sum ~label:"CF Operations" (lazy net_income) (lazy 
 
 (* CF Financing: constant $0. *)
 let cf_financing =
-  S.Period.unfold ~label:"CF Financing" ~deps:[]
-    (Seq.map (fun period -> S.Period.Const { period; f = (fun () -> 0.0) }) months)
+  S.Period.unfold ~label:"CF Financing"
+    ~deps:(fun _ctx -> ())
+    ~cells:(fun () -> Seq.map (fun period -> S.Period.Const { period; f = (fun () -> 0.0) }) months)
 
 (* Net Cash Change: CF Operations + Capex + CF Financing. *)
 let net_cash_change =

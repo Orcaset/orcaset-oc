@@ -26,19 +26,25 @@ module type S = sig
   module Period : sig
     type 'c t = 'c period_t
     type reduce = Series_types.reduce
-    type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
-
-    type dep_query =
-      | Self_query of { period : Period.t; reduce : reduce }
-      | Period_query of { index : int; period : Period.t; reduce : reduce }
-      | Point_query of { index : int; date : Date.t }
+    type 'c deps_ctx
+    type 'c dep
+    type 'c point_dep
+    type dep_query
 
     type 'c unfold_cell =
       | Const of { period : Period.t; f : unit -> float }
       | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
     val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
-    val unfold : label:string -> deps:'c series_dep list -> 'c unfold_cell Seq.t -> 'c t
+    val require : 'c deps_ctx -> 'c t Lazy.t -> 'c dep
+    val require_point : 'c deps_ctx -> 'c point_t Lazy.t -> 'c point_dep
+    val self : period:Period.t -> reduce:reduce -> dep_query
+    val period_query : 'c dep -> period:Period.t -> reduce:reduce -> dep_query
+    val point_query : 'c point_dep -> date:Date.t -> dep_query
+
+    val unfold :
+      label:string -> deps:('c deps_ctx -> 'deps) -> cells:('deps -> 'c unfold_cell Seq.t) -> 'c t
+
     val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
     val reduce_sum : reduce
     val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
@@ -137,26 +143,55 @@ module Make () = struct
     type 'c t = 'c period_t
     type reduce = Series_types.reduce
 
-    type 'c series_dep = 'c Series_types.series_dep =
-      | Period_dep of 'c Period_series.t Lazy.t
-      | Point_dep of 'c Point_series.t Lazy.t
+    type 'c deps_ctx = {
+      mutable sealed : bool;
+      mutable next_index : int;
+      mutable deps_rev : 'c Series_types.series_dep list;
+    }
 
-    type dep_query = Series_types.dep_query =
-      | Self_query of { period : Period.t; reduce : reduce }
-      | Period_query of { index : int; period : Period.t; reduce : reduce }
-      | Point_query of { index : int; date : Date.t }
+    type 'c dep = { index : int }
+    type 'c point_dep = { index : int }
+    type dep_query = Series_types.dep_query
 
     type 'c unfold_cell = 'c Series_types.unfold_cell =
       | Const of { period : Period.t; f : unit -> float }
       | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+
+    let ensure_collecting who ctx =
+      if ctx.sealed then invalid_arg (Printf.sprintf "Series.Period.%s: deps context is sealed" who)
+
+    let require (ctx : 'c deps_ctx) (dep : 'c t Lazy.t) : 'c dep =
+      ensure_collecting "require" ctx;
+      let index = ctx.next_index in
+      ctx.next_index <- index + 1;
+      ctx.deps_rev <- Series_types.Period_dep dep :: ctx.deps_rev;
+      { index }
+
+    let require_point (ctx : 'c deps_ctx) (dep : 'c point_t Lazy.t) : 'c point_dep =
+      ensure_collecting "require_point" ctx;
+      let index = ctx.next_index in
+      ctx.next_index <- index + 1;
+      ctx.deps_rev <- Series_types.Point_dep dep :: ctx.deps_rev;
+      { index }
+
+    let self ~period ~reduce = Series_types.Self_query { period; reduce }
+
+    let period_query (dep : 'c dep) ~period ~reduce =
+      Series_types.Period_query { index = dep.index; period; reduce }
+
+    let point_query (dep : 'c point_dep) ~date =
+      Series_types.Point_query { index = dep.index; date }
 
     let of_seq ~label cells =
       let s = Period_series.of_seq cells in
       register_label (Period_series.id s) label;
       s
 
-    let unfold ~label ~deps cells =
-      let s = Period_series.unfold ~deps cells in
+    let unfold ~label ~deps ~cells =
+      let ctx = { sealed = false; next_index = 0; deps_rev = [] } in
+      let deps_value = deps ctx in
+      ctx.sealed <- true;
+      let s = Period_series.unfold ~deps:(List.rev ctx.deps_rev) (cells deps_value) in
       register_label (Period_series.id s) label;
       s
 

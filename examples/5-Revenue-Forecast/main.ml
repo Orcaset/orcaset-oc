@@ -33,18 +33,24 @@ let units : [ `Units ] S.Period.t =
       {
         period;
         queries =
-          [ Self_query { period = Period.shift forecast_lookback period; reduce = S.Period.reduce_sum } ];
+          [
+            S.Period.self
+              ~period:(Period.shift forecast_lookback period)
+              ~reduce:S.Period.reduce_sum;
+          ];
         f = (fun values -> match values with [ prev ] -> prev *. (1.0 +. rate) | _ -> 0.0);
       }
   in
   let units_forecast last_period =
-    S.Period.unfold ~label:"Units (forecast)" ~deps:[]
-      (let rec forecast n prev_period () =
-         let p = Period.shift forecast_stride prev_period in
-         let step = if n < 4 then growth_step 0.05 p else growth_step 0.02 p in
-         Seq.Cons (step, forecast (n + 1) p)
-       in
-       forecast 0 last_period)
+    S.Period.unfold ~label:"Units (forecast)"
+      ~deps:(fun _ctx -> ())
+      ~cells:(fun () ->
+        let rec forecast n prev_period () =
+          let p = Period.shift forecast_stride prev_period in
+          let step = if n < 4 then growth_step 0.05 p else growth_step 0.02 p in
+          Seq.Cons (step, forecast (n + 1) p)
+        in
+        forecast 0 last_period)
   in
   S.Period.extend ~label:"Units" units_hist units_forecast
 
@@ -55,20 +61,21 @@ let revenue : [ `USD ] S.Period.t =
   let conversion = S.Period.convert ~label:"Units to revenue" (fun _ value -> value) (lazy units) in
   let forecast last_period =
     S.Period.unfold ~label:"Revenue (forecast)"
-      ~deps:[ Period_dep (lazy conversion) ]
-      (let rec forecast prev_period () =
-         let p = Period.shift forecast_stride prev_period in
-         let step =
-           S.Period.Step
-             {
-               period = p;
-               queries = [ Period_query { index = 0; period = p; reduce = S.Period.reduce_sum } ];
-               f = (fun values -> match values with [ u ] -> u *. 10.0 | _ -> 0.0);
-             }
-         in
-         Seq.Cons (step, forecast p)
-       in
-       forecast last_period)
+      ~deps:(fun ctx -> S.Period.require ctx (lazy conversion))
+      ~cells:(fun conversion ->
+        let rec forecast prev_period () =
+          let p = Period.shift forecast_stride prev_period in
+          let step =
+            S.Period.Step
+              {
+                period = p;
+                queries = [ S.Period.period_query conversion ~period:p ~reduce:S.Period.reduce_sum ];
+                f = (fun values -> match values with [ u ] -> u *. 10.0 | _ -> 0.0);
+              }
+          in
+          Seq.Cons (step, forecast p)
+        in
+        forecast last_period)
   in
   S.Period.extend ~label:"Revenue" hist forecast
 

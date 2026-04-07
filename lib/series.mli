@@ -41,23 +41,33 @@ module type S = sig
   module Period : sig
     type 'c t = 'c period_t
     type reduce = float list -> float
-    type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
-
-    type dep_query =
-      | Self_query of { period : Period.t; reduce : reduce }
-      | Period_query of { index : int; period : Period.t; reduce : reduce }
-      | Point_query of { index : int; date : Date.t }
+    type 'c deps_ctx
+    type 'c dep
+    type 'c point_dep
+    type dep_query
 
     type 'c unfold_cell =
       | Const of { period : Period.t; f : unit -> float }
       | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
     val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
-    val unfold : label:string -> deps:'c series_dep list -> 'c unfold_cell Seq.t -> 'c t
+    val require : 'c deps_ctx -> 'c t Lazy.t -> 'c dep
+    val require_point : 'c deps_ctx -> 'c point_t Lazy.t -> 'c point_dep
+    val self : period:Period.t -> reduce:reduce -> dep_query
+    val period_query : 'c dep -> period:Period.t -> reduce:reduce -> dep_query
+    val point_query : 'c point_dep -> date:Date.t -> dep_query
+
+    val unfold :
+      label:string -> deps:('c deps_ctx -> 'deps) -> cells:('deps -> 'c unfold_cell Seq.t) -> 'c t
+    (** [unfold ~label ~deps ~cells] constructs a series in two phases. [deps] runs eagerly once to
+        register a finite set of series dependencies via {!require} / {!require_point}; it returns
+        an arbitrary value (for example a tuple or labeled tuple of handles) that is then passed to
+        the lazy [cells] builder. This keeps series-level dependency inspection finite and eager
+        while removing positional indexing from user code. *)
 
     val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
-    (** [extend ~label base cont] evaluates [base] (which must be finite), passes the last
-        period to [cont], and returns the concatenation of both series. *)
+    (** [extend ~label base cont] evaluates [base] (which must be finite), passes the last period to
+        [cont], and returns the concatenation of both series. *)
 
     val reduce_sum : reduce
     val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
