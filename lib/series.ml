@@ -8,23 +8,12 @@
     with abstract types, preventing accidental cross-scope mixing at compile time. *)
 
 type 'c amount = Amount of float [@@unboxed]
-type reduce = Series_types.reduce
-
-type dep_query = Series_types.dep_query =
-  | Self of { period : Period.t; reduce : reduce }
-  | Dep of { index : int; period : Period.t; reduce : reduce }
-  | Point_dep of { index : int; date : Date.t }
-
-type 'c unfold_cell = 'c Series_types.unfold_cell =
-  | Seed of { period : Period.t; f : unit -> float }
-  | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
 exception Duplicate_label = Series_types.Duplicate_label
 
 module type S = sig
   type 'c period_t
   type 'c point_t
-  type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
 
   type 'c q_result =
     | QRPeriod of { label : string; period : Period.t; cells : 'c Period_cell.t list }
@@ -36,12 +25,19 @@ module type S = sig
 
   module Period : sig
     type 'c t = 'c period_t
+    type reduce = Series_types.reduce
+    type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
 
-    type nonrec 'c unfold_cell = 'c unfold_cell =
-      | Seed of { period : Period.t; f : unit -> float }
+    type dep_query =
+      | Self_query of { period : Period.t; reduce : reduce }
+      | Period_query of { index : int; period : Period.t; reduce : reduce }
+      | Point_query of { index : int; date : Date.t }
+
+    type 'c unfold_cell =
+      | Const of { period : Period.t; f : unit -> float }
       | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
-    val const : label:string -> 'c Period_cell.t Seq.t -> 'c t
+    val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
     val unfold : label:string -> deps:'c series_dep list -> 'c unfold_cell Seq.t -> 'c t
     val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
     val reduce_sum : reduce
@@ -120,10 +116,6 @@ module Make () = struct
   type 'c period_t = 'c Period_series.t
   type 'c point_t = 'c Point_series.t
 
-  type 'c series_dep = 'c Series_types.series_dep =
-    | Period_dep of 'c Period_series.t Lazy.t
-    | Point_dep of 'c Point_series.t Lazy.t
-
   type 'c q_result =
     | QRPeriod of { label : string; period : Period.t; cells : 'c Period_cell.t list }
     | QRPoint of { label : string; cell : 'c Point_cell.t option }
@@ -143,13 +135,23 @@ module Make () = struct
 
   module Period = struct
     type 'c t = 'c period_t
+    type reduce = Series_types.reduce
+
+    type 'c series_dep = 'c Series_types.series_dep =
+      | Period_dep of 'c Period_series.t Lazy.t
+      | Point_dep of 'c Point_series.t Lazy.t
+
+    type dep_query = Series_types.dep_query =
+      | Self_query of { period : Period.t; reduce : reduce }
+      | Period_query of { index : int; period : Period.t; reduce : reduce }
+      | Point_query of { index : int; date : Date.t }
 
     type 'c unfold_cell = 'c Series_types.unfold_cell =
-      | Seed of { period : Period.t; f : unit -> float }
+      | Const of { period : Period.t; f : unit -> float }
       | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
-    let const ~label cells =
-      let s = Period_series.const cells in
+    let of_seq ~label cells =
+      let s = Period_series.of_seq cells in
       register_label (Period_series.id s) label;
       s
 

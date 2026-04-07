@@ -26,14 +26,14 @@ let to_cell h = Period_cell.const h.period (fun () -> h.value) Period_cell.propo
 
 let units : [ `Units ] S.Period.t =
   let units_hist : [ `Units ] S.Period.t =
-    S.Period.const ~label:"Units (historical)" (List.to_seq historical_units |> Seq.map to_cell)
+    S.Period.of_seq ~label:"Units (historical)" (List.to_seq historical_units |> Seq.map to_cell)
   in
   let growth_step rate period =
     S.Period.Step
       {
         period;
         queries =
-          [ Self { period = Period.shift forecast_lookback period; reduce = S.Period.reduce_sum } ];
+          [ Self_query { period = Period.shift forecast_lookback period; reduce = S.Period.reduce_sum } ];
         f = (fun values -> match values with [ prev ] -> prev *. (1.0 +. rate) | _ -> 0.0);
       }
   in
@@ -50,7 +50,7 @@ let units : [ `Units ] S.Period.t =
 
 let revenue : [ `USD ] S.Period.t =
   let hist =
-    S.Period.const ~label:"Revenue (historical)" (List.to_seq historical_revenue |> Seq.map to_cell)
+    S.Period.of_seq ~label:"Revenue (historical)" (List.to_seq historical_revenue |> Seq.map to_cell)
   in
   let conversion = S.Period.convert ~label:"Units to revenue" (fun _ value -> value) (lazy units) in
   let forecast last_period =
@@ -62,7 +62,7 @@ let revenue : [ `USD ] S.Period.t =
            S.Period.Step
              {
                period = p;
-               queries = [ Dep { index = 0; period = p; reduce = S.Period.reduce_sum } ];
+               queries = [ Period_query { index = 0; period = p; reduce = S.Period.reduce_sum } ];
                f = (fun values -> match values with [ u ] -> u *. 10.0 | _ -> 0.0);
              }
          in

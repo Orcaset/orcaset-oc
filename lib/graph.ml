@@ -92,7 +92,7 @@ let series s =
       period_visited := s :: !period_visited;
       let acc = PeriodSeries s :: acc in
       match s with
-      | Series_types.PConst _ -> acc
+      | Series_types.POfSeq _ -> acc
       | Series_types.PUnfold { deps; _ } ->
           List.fold_left
             (fun acc dep ->
@@ -158,7 +158,7 @@ let pp_dot ppf roots =
   let period_label s =
     let sid = Period_series.id s in
     match s with
-    | Series_types.PConst _ -> Printf.sprintf "Const(%d)" sid
+    | Series_types.POfSeq _ -> Printf.sprintf "OfSeq(%d)" sid
     | Series_types.PUnfold _ -> Printf.sprintf "Unfold(%d)" sid
     | Series_types.PMap _ -> Printf.sprintf "Map(%d)" sid
     | Series_types.PConvert _ -> Printf.sprintf "Convert(%d)" sid
@@ -185,7 +185,7 @@ let pp_dot ppf roots =
         nodes := (did, period_label s) :: !nodes;
         let children =
           match s with
-          | Series_types.PConst _ -> []
+          | Series_types.POfSeq _ -> []
           | Series_types.PUnfold { deps; _ } ->
               List.iter
                 (fun dep ->

@@ -11,17 +11,6 @@
     annotation ensures zero runtime overhead — the representation is identical to a bare [float]. *)
 type 'c amount = Amount of float [@@unboxed]
 
-type reduce = float list -> float
-
-type dep_query =
-  | Self of { period : Period.t; reduce : reduce }
-  | Dep of { index : int; period : Period.t; reduce : reduce }
-  | Point_dep of { index : int; date : Date.t }
-
-type 'c unfold_cell =
-  | Seed of { period : Period.t; f : unit -> float }
-  | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
-
 exception Duplicate_label of { label : string; existing_series_id : int }
 
 (** {1 Scoped series module} *)
@@ -29,7 +18,6 @@ exception Duplicate_label of { label : string; existing_series_id : int }
 module type S = sig
   type 'c period_t
   type 'c point_t
-  type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
 
   (** {1 Query and evaluation types} *)
 
@@ -52,12 +40,19 @@ module type S = sig
 
   module Period : sig
     type 'c t = 'c period_t
+    type reduce = float list -> float
+    type 'c series_dep = Period_dep of 'c period_t Lazy.t | Point_dep of 'c point_t Lazy.t
 
-    type nonrec 'c unfold_cell = 'c unfold_cell =
-      | Seed of { period : Period.t; f : unit -> float }
+    type dep_query =
+      | Self_query of { period : Period.t; reduce : reduce }
+      | Period_query of { index : int; period : Period.t; reduce : reduce }
+      | Point_query of { index : int; date : Date.t }
+
+    type 'c unfold_cell =
+      | Const of { period : Period.t; f : unit -> float }
       | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
 
-    val const : label:string -> 'c Period_cell.t Seq.t -> 'c t
+    val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
     val unfold : label:string -> deps:'c series_dep list -> 'c unfold_cell Seq.t -> 'c t
 
     val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t

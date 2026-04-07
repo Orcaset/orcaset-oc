@@ -30,7 +30,7 @@ let end_date = Date.make 2026 3 31
 
 (* Helper function to create a constant series with a given value and phantom type tag *)
 let const_series (type c) ~label (value : float) : c S.Period.t =
-  S.Period.const ~label
+  S.Period.of_seq ~label
     (Seq.return
        (Period_cell.const (Period.make start_date end_date)
           (fun () -> value)

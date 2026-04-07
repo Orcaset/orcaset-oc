@@ -18,7 +18,7 @@ let revenue_step curr_period last_period =
   S.Period.Step
     {
       period = curr_period;
-      queries = [ Self { period = last_period; reduce = S.Period.reduce_sum } ];
+      queries = [ Self_query { period = last_period; reduce = S.Period.reduce_sum } ];
       f =
         (fun values ->
           let yf = Yf.cmonthly (Period.start_date curr_period) (Period.end_date curr_period) in
@@ -33,7 +33,7 @@ let revenue =
   in
   S.Period.unfold ~label:"Revenue" ~deps:[]
     (Seq.cons
-       (S.Period.Seed { period = initial_period; f = (fun () -> initial_value) })
+       (S.Period.Const { period = initial_period; f = (fun () -> initial_value) })
        (generate_cells initial_period))
 
 (* let revenue =
@@ -46,7 +46,7 @@ let revenue =
         Period_cell.const period (fun () -> initial_value *. growth) Period_cell.proportional_split)
       periods
   in
-  S.Period.const ~label:"Revenue" revenue_cells *)
+  S.Period.of_seq ~label:"Revenue" revenue_cells *)
 
 let expenses = S.Period.map ~label:"Expenses" (fun r -> r *. expense_margin) (lazy revenue)
 let income = S.Period.sum ~label:"Income" (lazy revenue) (lazy expenses)

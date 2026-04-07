@@ -17,7 +17,7 @@ let interest_step period =
   S.Period.Step
     {
       period;
-      queries = [ Point_dep { index = 0; date = Period.start_date period } ];
+      queries = [ Point_query { index = 0; date = Period.start_date period } ];
       f = (fun values -> match values with [ v ] -> v *. rate | _ -> 0.0);
     }
 

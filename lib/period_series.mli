@@ -20,14 +20,14 @@ type 'c eval_point_fn =
 
 (** {1 Constructors} *)
 
-val const : 'c Period_cell.t Seq.t -> 'c t
+val of_seq : 'c Period_cell.t Seq.t -> 'c t
 (** A series backed by a pre-built cell sequence. *)
 
 val unfold : deps:'c Series_types.series_dep list -> 'c Series_types.unfold_cell Seq.t -> 'c t
 (** [unfold ~deps cells] builds a series from a declarative sequence of {!Series_types.unfold_cell}
     values.
 
-    Each element in [cells] is either a {!Series_types.Seed} (constant, no dependencies) or a
+    Each element in [cells] is either a {!Series_types.Const} (constant, no dependencies) or a
     {!Series_types.Step} (declares queries against [deps] or the series' own earlier output). The
     system resolves queries and constructs the underlying {!Period_cell.t} values automatically.
 

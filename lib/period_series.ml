@@ -20,7 +20,7 @@ let reduce_sum = List.fold_left ( +. ) 0.0
 
 (* CONSTRUCTORS *)
 
-let const cells = PConst { id = fresh_id (); cells }
+let of_seq cells = POfSeq { id = fresh_id (); cells }
 let unfold ~deps cells = PUnfold { id = fresh_id (); deps; cells }
 
 let extend base cont =
@@ -79,12 +79,12 @@ let const_ann_growth ~start ~value ~rate ~offset ~yf =
   in
   let initial_period = Period.make start (Date.shift offset start) in
   let initial_cell = Period_cell.const initial_period (fun () -> value) split_fn in
-  PConst { id = fresh_id (); cells = Seq.cons initial_cell (generate_cells initial_period value) }
+  POfSeq { id = fresh_id (); cells = Seq.cons initial_cell (generate_cells initial_period value) }
 
 (* ACCESSORS *)
 
 let id = function
-  | PConst { id; _ } | PUnfold { id; _ } | PMap { id; _ } | PConvert { id; _ } | PMap2 { id; _ }
+  | POfSeq { id; _ } | PUnfold { id; _ } | PMap { id; _ } | PConvert { id; _ } | PMap2 { id; _ }
   | PExtend { id; _ } ->
       id
 
@@ -126,7 +126,7 @@ let rec eval_seq : type c.
  fun ~eval_point cache series ->
   let seq =
     match series with
-    | PConst { cells; _ } ->
+    | POfSeq { cells; _ } ->
         let memo_seq = Seq.memoize cells in
         Hashtbl.replace cache.period (id series) (Pack_period_seq memo_seq);
         memo_seq
@@ -141,7 +141,7 @@ let rec eval_seq : type c.
           Seq.memoize
             (Seq.map
                (fun uc ->
-                 let period = match uc with Seed { period; _ } | Step { period; _ } -> period in
+                 let period = match uc with Const { period; _ } | Step { period; _ } -> period in
                  (Period_cell.cell_ref period, uc))
                memo_cells)
         in
@@ -175,18 +175,18 @@ let rec eval_seq : type c.
             deps
         in
         let resolve_query = function
-          | Self { period; reduce } ->
+          | Self_query { period; reduce } ->
               let cells = self_query period |> List.of_seq in
               (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
-          | Dep { index; period; reduce } ->
+          | Period_query { index; period; reduce } ->
               let cells = (List.nth dep_queries index) period |> List.of_seq in
               (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
-          | Point_dep { index; date } ->
+          | Point_query { index; date } ->
               let point_series =
                 match List.nth deps index with
                 | Point_dep ps -> Lazy.force ps
                 | Period_dep _ ->
-                    failwith "Point_dep query references a period series dep: use Dep instead"
+                    failwith "Point_query references a period series dep: use Period_query instead"
               in
               let cells =
                 match eval_point cache date point_series with
@@ -197,7 +197,7 @@ let rec eval_seq : type c.
               (cells, reduce_sum)
         in
         let resolve_unfold_cell = function
-          | Seed { period; f } -> Period_cell.const period f Period_cell.proportional_split
+          | Const { period; f } -> Period_cell.const period f Period_cell.proportional_split
           | Step { period; queries; f } ->
               let inner_cells =
                 List.map
