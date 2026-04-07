@@ -29,22 +29,14 @@ let units : [ `Units ] S.Period.t =
     S.Period.of_seq ~label:"Units (historical)" (List.to_seq historical_units |> Seq.map to_cell)
   in
   let growth_step rate period =
-    S.Period.Step
-      {
-        period;
-        queries =
-          [
-            S.Period.self
-              ~period:(Period.shift forecast_lookback period)
-              ~reduce:S.Period.reduce_sum;
-          ];
-        f = (fun values -> match values with [ prev ] -> prev *. (1.0 +. rate) | _ -> 0.0);
-      }
+    S.Period.step ~period
+      (S.Period.Query.self
+         ~period:(Period.shift forecast_lookback period)
+         ~reduce:S.Period.reduce_sum)
+      (fun prev -> prev *. (1.0 +. rate))
   in
   let units_forecast last_period =
-    S.Period.unfold ~label:"Units (forecast)"
-      ~deps:(fun _ctx -> ())
-      ~cells:(fun () ->
+    S.Period.unfold_self ~label:"Units (forecast)" ~cells:(fun () ->
         let rec forecast n prev_period () =
           let p = Period.shift forecast_stride prev_period in
           let step = if n < 4 then growth_step 0.05 p else growth_step 0.02 p in
@@ -61,17 +53,14 @@ let revenue : [ `USD ] S.Period.t =
   let conversion = S.Period.convert ~label:"Units to revenue" (fun _ value -> value) (lazy units) in
   let forecast last_period =
     S.Period.unfold ~label:"Revenue (forecast)"
-      ~deps:(fun ctx -> S.Period.require ctx (lazy conversion))
+      ~deps:(S.Period.dep_period (lazy conversion))
       ~cells:(fun conversion ->
         let rec forecast prev_period () =
           let p = Period.shift forecast_stride prev_period in
           let step =
-            S.Period.Step
-              {
-                period = p;
-                queries = [ S.Period.period_query conversion ~period:p ~reduce:S.Period.reduce_sum ];
-                f = (fun values -> match values with [ u ] -> u *. 10.0 | _ -> 0.0);
-              }
+            S.Period.step ~period:p
+              (S.Period.Query.period conversion ~period:p ~reduce:S.Period.reduce_sum) (fun u ->
+                u *. 10.0)
           in
           Seq.Cons (step, forecast p)
         in

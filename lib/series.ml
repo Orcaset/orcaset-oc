@@ -26,25 +26,37 @@ module type S = sig
   module Period : sig
     type 'c t = 'c period_t
     type reduce = Series_types.reduce
-    type 'c deps_ctx
     type 'c dep
     type 'c point_dep
-    type dep_query
+    type 'c cell
+    type ('a, 'c) deps
 
-    type 'c unfold_cell =
-      | Const of { period : Period.t; f : unit -> float }
-      | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+    val no_deps : (unit, 'c) deps
+    val dep_period : 'c t Lazy.t -> ('c dep, 'c) deps
+    val dep_point : 'c point_t Lazy.t -> ('c point_dep, 'c) deps
+    val both : ('a, 'c) deps -> ('b, 'c) deps -> ('a * 'b, 'c) deps
+    val ( let+ ) : ('a, 'c) deps -> ('a -> 'b) -> ('b, 'c) deps
+    val ( and+ ) : ('a, 'c) deps -> ('b, 'c) deps -> ('a * 'b, 'c) deps
+
+    module Query : sig
+      type ('a, 'c) t
+
+      val pure : 'a -> ('a, 'c) t
+      val self : period:Period.t -> reduce:reduce -> (float, 'c) t
+      val period : 'c dep -> period:Period.t -> reduce:reduce -> (float, 'c) t
+      val point : 'c point_dep -> date:Date.t -> (float option, 'c) t
+      val point_or : default:float -> 'c point_dep -> date:Date.t -> (float, 'c) t
+      val map : ('a -> 'b) -> ('a, 'c) t -> ('b, 'c) t
+      val both : ('a, 'c) t -> ('b, 'c) t -> ('a * 'b, 'c) t
+      val ( let+ ) : ('a, 'c) t -> ('a -> 'b) -> ('b, 'c) t
+      val ( and+ ) : ('a, 'c) t -> ('b, 'c) t -> ('a * 'b, 'c) t
+    end
 
     val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
-    val require : 'c deps_ctx -> 'c t Lazy.t -> 'c dep
-    val require_point : 'c deps_ctx -> 'c point_t Lazy.t -> 'c point_dep
-    val self : period:Period.t -> reduce:reduce -> dep_query
-    val period_query : 'c dep -> period:Period.t -> reduce:reduce -> dep_query
-    val point_query : 'c point_dep -> date:Date.t -> dep_query
-
-    val unfold :
-      label:string -> deps:('c deps_ctx -> 'deps) -> cells:('deps -> 'c unfold_cell Seq.t) -> 'c t
-
+    val const : period:Period.t -> (unit -> float) -> 'c cell
+    val step : period:Period.t -> ('a, 'c) Query.t -> ('a -> float) -> 'c cell
+    val unfold : label:string -> deps:('deps, 'c) deps -> cells:('deps -> 'c cell Seq.t) -> 'c t
+    val unfold_self : label:string -> cells:(unit -> 'c cell Seq.t) -> 'c t
     val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
     val reduce_sum : reduce
     val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
@@ -142,45 +154,116 @@ module Make () = struct
   module Period = struct
     type 'c t = 'c period_t
     type reduce = Series_types.reduce
+    type 'c dep = 'c t Lazy.t
+    type 'c point_dep = 'c point_t Lazy.t
+    type 'c dep_query = 'c Series_types.dep_query
+    type 'c cell = 'c Series_types.unfold_cell
 
-    type 'c deps_ctx = {
-      mutable sealed : bool;
-      mutable next_index : int;
-      mutable deps_rev : 'c Series_types.series_dep list;
+    type ('a, 'c) compiled_query = {
+      queries : 'c dep_query list;
+      decode : float list -> 'a * float list;
     }
 
-    type 'c dep = { index : int }
-    type 'c point_dep = { index : int }
-    type dep_query = Series_types.dep_query
+    let take_one name = function
+      | value :: rest -> (value, rest)
+      | [] -> invalid_arg ("Series.Period.Query." ^ name ^ ": internal decode mismatch")
 
-    type 'c unfold_cell = 'c Series_types.unfold_cell =
-      | Const of { period : Period.t; f : unit -> float }
-      | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+    let decode_all name decode values =
+      let value, rest = decode values in
+      match rest with
+      | [] -> value
+      | _ -> invalid_arg ("Series.Period." ^ name ^ ": internal decode mismatch")
 
-    let ensure_collecting who ctx =
-      if ctx.sealed then invalid_arg (Printf.sprintf "Series.Period.%s: deps context is sealed" who)
+    module Query = struct
+      type ('a, 'c) t = ('a, 'c) compiled_query
 
-    let require (ctx : 'c deps_ctx) (dep : 'c t Lazy.t) : 'c dep =
-      ensure_collecting "require" ctx;
-      let index = ctx.next_index in
-      ctx.next_index <- index + 1;
-      ctx.deps_rev <- Series_types.Period_dep dep :: ctx.deps_rev;
-      { index }
+      let pure value = { queries = []; decode = (fun xs -> (value, xs)) }
 
-    let require_point (ctx : 'c deps_ctx) (dep : 'c point_t Lazy.t) : 'c point_dep =
-      ensure_collecting "require_point" ctx;
-      let index = ctx.next_index in
-      ctx.next_index <- index + 1;
-      ctx.deps_rev <- Series_types.Point_dep dep :: ctx.deps_rev;
-      { index }
+      let map f q =
+        {
+          queries = q.queries;
+          decode =
+            (fun xs ->
+              let value, rest = q.decode xs in
+              (f value, rest));
+        }
 
-    let self ~period ~reduce = Series_types.Self_query { period; reduce }
+      let both qa qb =
+        {
+          queries = qa.queries @ qb.queries;
+          decode =
+            (fun xs ->
+              let a, xs = qa.decode xs in
+              let b, xs = qb.decode xs in
+              ((a, b), xs));
+        }
 
-    let period_query (dep : 'c dep) ~period ~reduce =
-      Series_types.Period_query { index = dep.index; period; reduce }
+      let ( let+ ) q f = map f q
+      let ( and+ ) = both
 
-    let point_query (dep : 'c point_dep) ~date =
-      Series_types.Point_query { index = dep.index; date }
+      let self ~period ~reduce =
+        { queries = [ Series_types.Self_query { period; reduce } ]; decode = take_one "self" }
+
+      let period (dep : 'c dep) ~period ~reduce =
+        {
+          queries = [ Series_types.Period_query { dep; period; reduce } ];
+          decode = take_one "period";
+        }
+
+      let point (dep : 'c point_dep) ~date =
+        {
+          queries =
+            [
+              Series_types.Point_present_query { dep; date }; Series_types.Point_query { dep; date };
+            ];
+          decode =
+            (fun xs ->
+              let present, xs = take_one "point" xs in
+              let value, xs = take_one "point" xs in
+              ((if Float.equal present 0.0 then None else Some value), xs));
+        }
+
+      let point_or ~default dep ~date = map (Option.value ~default) (point dep ~date)
+    end
+
+    type ('a, 'c) deps = { run : unit -> 'a * 'c Series_types.series_dep list }
+
+    let no_deps = { run = (fun () -> ((), [])) }
+
+    let dep_period (s : 'c t Lazy.t) : ('c dep, 'c) deps =
+      { run = (fun () -> (s, [ Series_types.Period_dep s ])) }
+
+    let dep_point (s : 'c point_t Lazy.t) : ('c point_dep, 'c) deps =
+      { run = (fun () -> (s, [ Series_types.Point_dep s ])) }
+
+    let both (a : ('a, 'c) deps) (b : ('b, 'c) deps) : ('a * 'b, 'c) deps =
+      {
+        run =
+          (fun () ->
+            let va, da = a.run () in
+            let vb, db = b.run () in
+            ((va, vb), da @ db));
+      }
+
+    let map (f : 'a -> 'b) (a : ('a, 'c) deps) : ('b, 'c) deps =
+      {
+        run =
+          (fun () ->
+            let v, d = a.run () in
+            (f v, d));
+      }
+
+    let ( let+ ) a f = map f a
+    let ( and+ ) = both
+    let const ~period f = Series_types.Const { period; f }
+
+    let step ~period (query : ('a, 'c) Query.t) f =
+      Series_types.Step
+        {
+          period;
+          queries = query.queries;
+          f = (fun values -> f (decode_all "step" query.decode values));
+        }
 
     let of_seq ~label cells =
       let s = Period_series.of_seq cells in
@@ -188,12 +271,12 @@ module Make () = struct
       s
 
     let unfold ~label ~deps ~cells =
-      let ctx = { sealed = false; next_index = 0; deps_rev = [] } in
-      let deps_value = deps ctx in
-      ctx.sealed <- true;
-      let s = Period_series.unfold ~deps:(List.rev ctx.deps_rev) (cells deps_value) in
+      let deps_value, dep_list = deps.run () in
+      let s = Period_series.unfold ~deps:dep_list (cells deps_value) in
       register_label (Period_series.id s) label;
       s
+
+    let unfold_self ~label ~cells = unfold ~label ~deps:no_deps ~cells
 
     let extend ~label base cont =
       let s = Period_series.extend base cont in

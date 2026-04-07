@@ -10,16 +10,17 @@ val fresh_id : unit -> int
 
 type reduce = float list -> float
 
-type dep_query =
+type 'c dep_query =
   | Self_query of { period : Period.t; reduce : reduce }
-  | Period_query of { index : int; period : Period.t; reduce : reduce }
-  | Point_query of { index : int; date : Date.t }
+  | Period_query of { dep : 'c period_series Lazy.t; period : Period.t; reduce : reduce }
+  | Point_query of { dep : 'c point_series Lazy.t; date : Date.t }
+  | Point_present_query of { dep : 'c point_series Lazy.t; date : Date.t }
 
-type 'c unfold_cell =
+and 'c unfold_cell =
   | Const of { period : Period.t; f : unit -> float }
-  | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+  | Step of { period : Period.t; queries : 'c dep_query list; f : float list -> float }
 
-type 'c period_series =
+and 'c period_series =
   | POfSeq of { id : int; cells : 'c Period_cell.t Seq.t }
   | PUnfold of { id : int; deps : 'c series_dep list; cells : 'c unfold_cell Seq.t }
   | PMap of { id : int; inner : 'c period_series Lazy.t; f : float -> float }

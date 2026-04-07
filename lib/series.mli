@@ -41,29 +41,62 @@ module type S = sig
   module Period : sig
     type 'c t = 'c period_t
     type reduce = float list -> float
-    type 'c deps_ctx
     type 'c dep
     type 'c point_dep
-    type dep_query
+    type 'c cell
 
-    type 'c unfold_cell =
-      | Const of { period : Period.t; f : unit -> float }
-      | Step of { period : Period.t; queries : dep_query list; f : float list -> float }
+    (** {2 Dependency applicative} *)
+
+    type ('a, 'c) deps
+    (** A declarative description of the series dependencies needed by an {!unfold} cell builder.
+        Compose with {!dep_period}, {!dep_point}, {!both}, and the binding-operator aliases [let+] /
+        [and+]. The resulting value is interpreted internally by {!unfold} — the user never has
+        access to a registration context, so dependencies cannot be added outside the declaration.
+    *)
+
+    val no_deps : (unit, 'c) deps
+    val dep_period : 'c t Lazy.t -> ('c dep, 'c) deps
+    val dep_point : 'c point_t Lazy.t -> ('c point_dep, 'c) deps
+    val both : ('a, 'c) deps -> ('b, 'c) deps -> ('a * 'b, 'c) deps
+    val ( let+ ) : ('a, 'c) deps -> ('a -> 'b) -> ('b, 'c) deps
+    val ( and+ ) : ('a, 'c) deps -> ('b, 'c) deps -> ('a * 'b, 'c) deps
+
+    (** {2 Cell query applicative} *)
+
+    module Query : sig
+      type ('a, 'c) t
+      (** A declarative description of the cell-local data needed to compute one {!step}. Queries
+          are combined applicatively and then lowered to explicit cell dependencies internally. *)
+
+      val pure : 'a -> ('a, 'c) t
+      val self : period:Period.t -> reduce:reduce -> (float, 'c) t
+      val period : 'c dep -> period:Period.t -> reduce:reduce -> (float, 'c) t
+      val point : 'c point_dep -> date:Date.t -> (float option, 'c) t
+      val point_or : default:float -> 'c point_dep -> date:Date.t -> (float, 'c) t
+      val map : ('a -> 'b) -> ('a, 'c) t -> ('b, 'c) t
+      val both : ('a, 'c) t -> ('b, 'c) t -> ('a * 'b, 'c) t
+      val ( let+ ) : ('a, 'c) t -> ('a -> 'b) -> ('b, 'c) t
+      val ( and+ ) : ('a, 'c) t -> ('b, 'c) t -> ('a * 'b, 'c) t
+    end
+
+    (** {2 Construction} *)
 
     val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
-    val require : 'c deps_ctx -> 'c t Lazy.t -> 'c dep
-    val require_point : 'c deps_ctx -> 'c point_t Lazy.t -> 'c point_dep
-    val self : period:Period.t -> reduce:reduce -> dep_query
-    val period_query : 'c dep -> period:Period.t -> reduce:reduce -> dep_query
-    val point_query : 'c point_dep -> date:Date.t -> dep_query
+    val const : period:Period.t -> (unit -> float) -> 'c cell
+    val step : period:Period.t -> ('a, 'c) Query.t -> ('a -> float) -> 'c cell
 
-    val unfold :
-      label:string -> deps:('c deps_ctx -> 'deps) -> cells:('deps -> 'c unfold_cell Seq.t) -> 'c t
-    (** [unfold ~label ~deps ~cells] constructs a series in two phases. [deps] runs eagerly once to
-        register a finite set of series dependencies via {!require} / {!require_point}; it returns
-        an arbitrary value (for example a tuple or labeled tuple of handles) that is then passed to
-        the lazy [cells] builder. This keeps series-level dependency inspection finite and eager
-        while removing positional indexing from user code. *)
+    val unfold : label:string -> deps:('deps, 'c) deps -> cells:('deps -> 'c cell Seq.t) -> 'c t
+    (** [unfold ~label ~deps ~cells] constructs a series in two phases. [deps] is an applicative
+        description of the series dependencies built with {!dep_period} / {!dep_point} and
+        combinators; [unfold] interprets it to extract both the dependency list and a value of type
+        ['deps] (for example a tuple or labeled tuple of handles) that is passed to the [cells]
+        builder. The builder returns abstract cells constructed with {!const}, {!step}, and the
+        {!Query} applicative, so periods remain explicit while cell-local dependency wiring stays
+        declarative and inspectable. *)
+
+    val unfold_self : label:string -> cells:(unit -> 'c cell Seq.t) -> 'c t
+    (** Convenience wrapper for {!unfold} when the cell builder has no external period or point
+        series dependencies. Equivalent to [unfold ~label ~deps:no_deps ~cells]. *)
 
     val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
     (** [extend ~label base cont] evaluates [base] (which must be finite), passes the last period to

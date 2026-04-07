@@ -15,27 +15,20 @@ let growth_rate = 0.25
 let initial_period = Period.make initial_start_date (Date.shift offset initial_start_date)
 
 let revenue_step curr_period last_period =
-  S.Period.Step
-    {
-      period = curr_period;
-      queries = [ S.Period.self ~period:last_period ~reduce:S.Period.reduce_sum ];
-      f =
-        (fun values ->
-          let yf = Yf.cmonthly (Period.start_date curr_period) (Period.end_date curr_period) in
-          let growth = (1.0 +. growth_rate) ** yf in
-          match values with [ last_value ] -> last_value *. growth | _ -> 0.0);
-    }
+  S.Period.step ~period:curr_period
+    (S.Period.Query.self ~period:last_period ~reduce:S.Period.reduce_sum) (fun last_value ->
+      let yf = Yf.cmonthly (Period.start_date curr_period) (Period.end_date curr_period) in
+      let growth = (1.0 +. growth_rate) ** yf in
+      last_value *. growth)
 
 let revenue =
   let rec generate_cells last_period () =
     let current_period = Period.shift offset last_period in
     Seq.Cons (revenue_step current_period last_period, generate_cells current_period)
   in
-  S.Period.unfold ~label:"Revenue"
-    ~deps:(fun _ctx -> ())
-    ~cells:(fun () ->
+  S.Period.unfold_self ~label:"Revenue" ~cells:(fun () ->
       Seq.cons
-        (S.Period.Const { period = initial_period; f = (fun () -> initial_value) })
+        (S.Period.const ~period:initial_period (fun () -> initial_value))
         (generate_cells initial_period))
 
 (* let revenue =

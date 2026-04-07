@@ -34,6 +34,7 @@ let extend base cont =
         s
   in
   PExtend { id = fresh_id (); base; cont }
+
 let map f s = PMap { id = fresh_id (); inner = s; f }
 let convert f s = PConvert { id = fresh_id (); inner = s; f }
 let map2 f s1 s2 = PMap2 { id = fresh_id (); s1; s2; f }
@@ -84,7 +85,11 @@ let const_ann_growth ~start ~value ~rate ~offset ~yf =
 (* ACCESSORS *)
 
 let id = function
-  | POfSeq { id; _ } | PUnfold { id; _ } | PMap { id; _ } | PConvert { id; _ } | PMap2 { id; _ }
+  | POfSeq { id; _ }
+  | PUnfold { id; _ }
+  | PMap { id; _ }
+  | PConvert { id; _ }
+  | PMap2 { id; _ }
   | PExtend { id; _ } ->
       id
 
@@ -130,7 +135,7 @@ let rec eval_seq : type c.
         let memo_seq = Seq.memoize cells in
         Hashtbl.replace cache.period (id series) (Pack_period_seq memo_seq);
         memo_seq
-    | PUnfold { deps; cells; _ } ->
+    | PUnfold { cells; _ } ->
         let series_id = id series in
         let memo_cells = Seq.memoize cells in
 
@@ -163,38 +168,27 @@ let rec eval_seq : type c.
           | None -> placeholder_seq
         in
         let self_query period = clipped_cells period self_query_scope in
-        let dep_queries =
-          List.map
-            (fun dep ->
-              match dep with
-              | Period_dep ps -> fun period -> eval_query ~eval_point cache period (Lazy.force ps)
-              | Point_dep _ ->
-                  fun _period ->
-                    failwith
-                      "Period dep query on a point series dep: use Point_dep in dep_query instead")
-            deps
-        in
         let resolve_query = function
           | Self_query { period; reduce } ->
               let cells = self_query period |> List.of_seq in
               (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
-          | Period_query { index; period; reduce } ->
-              let cells = (List.nth dep_queries index) period |> List.of_seq in
+          | Period_query { dep; period; reduce } ->
+              let cells = eval_query ~eval_point cache period (Lazy.force dep) |> List.of_seq in
               (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
-          | Point_query { index; date } ->
-              let point_series =
-                match List.nth deps index with
-                | Point_dep ps -> Lazy.force ps
-                | Period_dep _ ->
-                    failwith "Point_query references a period series dep: use Period_query instead"
-              in
+          | Point_query { dep; date } ->
               let cells =
-                match eval_point cache date point_series with
+                match eval_point cache date (Lazy.force dep) with
                 | Some cell -> [ Cell_types.PointCell cell ]
                 | None -> []
               in
-              (* TODO: This effectively fills N/A's for query dates outside the series range with zeros. *)
               (cells, reduce_sum)
+          | Point_present_query { dep; date } ->
+              let cells, reduce =
+                match eval_point cache date (Lazy.force dep) with
+                | Some cell -> ([ Cell_types.PointCell cell ], fun _ -> 1.0)
+                | None -> ([], fun _ -> 0.0)
+              in
+              (cells, reduce)
         in
         let resolve_unfold_cell = function
           | Const { period; f } -> Period_cell.const period f Period_cell.proportional_split
