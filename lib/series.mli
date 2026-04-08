@@ -195,6 +195,10 @@ module type S = sig
   val labels : unit -> string list
   (** Return all registered labels in this scope. *)
 
+  val label_of_id : int -> string
+  (** [label_of_id id] returns the label for the series with the given [id].
+      @raise Not_found if no label is registered for [id]. *)
+
   (** {1 Graph bridge} *)
 
   val period_to_graph : 'c Period.t -> Graph.series

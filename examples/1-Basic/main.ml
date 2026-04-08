@@ -100,6 +100,6 @@ let () =
   (* Write dependency graph for income to a dot file *)
   let oc = open_out "examples/1-Basic/income_deps.dot" in
   let ppf = Format.formatter_of_out_channel oc in
-  Graph.pp_dot ppf [ S.period_to_graph income ];
+  Graph.pp_dot ~label:S.label_of_id ppf [ S.period_to_graph income ];
   Format.pp_print_flush ppf ();
   close_out oc

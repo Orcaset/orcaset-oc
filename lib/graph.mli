@@ -37,6 +37,8 @@ val series : series -> series list
 
 (** {1 DOT output} *)
 
-val pp_dot : Format.formatter -> series list -> unit
+val pp_dot : ?label:(int -> string) -> Format.formatter -> series list -> unit
 (** Pretty-print a DOT digraph of the dependency structure of one or more series. Handles both
-    period and point series dependencies within the graph. *)
+    period and point series dependencies within the graph. When [~label] is provided, each node's
+    label includes the series name returned by the function (keyed by series id). Edges point from
+    dependencies to dependents. *)

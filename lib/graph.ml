@@ -130,11 +130,13 @@ let series s =
 
 (* DOT OUTPUT *)
 
-(** Pretty-print a DOT digraph of the dependency structure of one or more period series. Each
-    physically-distinct series node becomes a DOT node; edges point from a node to its dependencies.
-    Circular dependencies (e.g. self-referential [PUnfold] nodes) are handled via physical identity
-    and will appear as back-edges in the graph rather than causing infinite recursion. *)
-let pp_dot ppf roots =
+(** Pretty-print a DOT digraph of the dependency structure of one or more series. Each
+    physically-distinct series node becomes a DOT node; edges point from dependencies to dependents.
+    When [~label] is provided, each node includes the series name returned by the function (keyed by
+    series id). Circular dependencies (e.g. self-referential [PUnfold] nodes) are handled via
+    physical identity and will appear as back-edges in the graph rather than causing infinite
+    recursion. *)
+let pp_dot ?label ppf roots =
   (* SAFETY: Only changes the phantom type parameter 'c, which has no runtime
      representation. Needed so that PConvert/TConvert children (which have a
      different phantom type) can be compared by physical identity (==) against
@@ -155,24 +157,32 @@ let pp_dot ppf roots =
     incr next_dot_id;
     did
   in
+  let find_label sid =
+    match label with
+    | Some f -> ( match f sid with exception Not_found -> None | lbl -> Some lbl)
+    | None -> None
+  in
+  let format_node_label lbl kind =
+    match lbl with Some name -> Printf.sprintf "%s (%s)" name kind | None -> kind
+  in
   let period_label s =
-    let sid = Period_series.id s in
+    let lbl = find_label (Period_series.id s) in
     match s with
-    | Series_types.POfSeq _ -> Printf.sprintf "OfSeq(%d)" sid
-    | Series_types.PUnfold _ -> Printf.sprintf "Unfold(%d)" sid
-    | Series_types.PMap _ -> Printf.sprintf "Map(%d)" sid
-    | Series_types.PConvert _ -> Printf.sprintf "Convert(%d)" sid
-    | Series_types.PMap2 _ -> Printf.sprintf "Map2(%d)" sid
-    | Series_types.PExtend _ -> Printf.sprintf "Extend(%d)" sid
+    | Series_types.POfSeq _ -> format_node_label lbl "OfSeq"
+    | Series_types.PUnfold _ -> format_node_label lbl "Unfold"
+    | Series_types.PMap _ -> format_node_label lbl "Map"
+    | Series_types.PConvert _ -> format_node_label lbl "Convert"
+    | Series_types.PMap2 _ -> format_node_label lbl "Map2"
+    | Series_types.PExtend _ -> format_node_label lbl "Extend"
   in
   let point_label s =
-    let sid = Point_series.id s in
+    let lbl = find_label (Point_series.id s) in
     match s with
-    | Series_types.TConst _ -> Printf.sprintf "PtConst(%d)" sid
-    | Series_types.TMap _ -> Printf.sprintf "PtMap(%d)" sid
-    | Series_types.TConvert _ -> Printf.sprintf "PtConvert(%d)" sid
-    | Series_types.TDep2 _ -> Printf.sprintf "PtDep2(%d)" sid
-    | Series_types.TAccum _ -> Printf.sprintf "PtAccum(%d)" sid
+    | Series_types.TConst _ -> format_node_label lbl "PtConst"
+    | Series_types.TMap _ -> format_node_label lbl "PtMap"
+    | Series_types.TConvert _ -> format_node_label lbl "PtConvert"
+    | Series_types.TDep2 _ -> format_node_label lbl "PtDep2"
+    | Series_types.TAccum _ -> format_node_label lbl "PtAccum"
   in
 
   let edges : (int * int) list ref = ref [] in
@@ -249,5 +259,5 @@ let pp_dot ppf roots =
   List.iter
     (fun (did, label) -> Format.fprintf ppf "  n%d [label=%S];@ " did label)
     (List.rev !nodes);
-  List.iter (fun (src, dst) -> Format.fprintf ppf "  n%d -> n%d;@ " src dst) (List.rev !edges);
+  List.iter (fun (src, dst) -> Format.fprintf ppf "  n%d -> n%d;@ " dst src) (List.rev !edges);
   Format.fprintf ppf "}@]"

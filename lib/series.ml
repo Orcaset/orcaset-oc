@@ -111,6 +111,7 @@ module type S = sig
   val eval : 'c q_result -> 'c eval_result
   val eval_many : 'c q_result list -> 'c eval_result list
   val labels : unit -> string list
+  val label_of_id : int -> string
   val period_to_graph : 'c Period.t -> Graph.series
   val point_to_graph : 'c Point.t -> Graph.series
 end
@@ -479,6 +480,8 @@ module Make () = struct
             let date = Point_cell.date c in
             Point { label; point = Some (date, Amount value) })
       qrs
+
+  let label_of_id = find_label
 
   (* Graph bridge functions *)
   let period_to_graph (s : 'c Period.t) : Graph.series = Graph.pack_period s

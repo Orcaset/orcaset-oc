@@ -154,7 +154,7 @@ let print_dep_graph () =
   let dot_path = "examples/6-Depreciation/depreciation_deps.dot" in
   let oc = open_out dot_path in
   let ppf = Format.formatter_of_out_channel oc in
-  Graph.pp_dot ppf [ S.period_to_graph depreciation ];
+  Graph.pp_dot ~label:S.label_of_id ppf [ S.period_to_graph depreciation ];
   Format.pp_print_flush ppf ();
   close_out oc;
   Printf.printf "\n=== Dependency Graph ===\n\n";
