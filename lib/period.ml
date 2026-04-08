@@ -13,20 +13,31 @@ let end_date p = p.end_date
 let days p = Date.diff p.end_date p.start_date
 let contains date period = Date.(date >= period.start_date && date < period.end_date)
 
+(* Shifting *)
+
+let next offset period =
+  let derived_date = Date.shift offset (end_date period) in
+  if Date.(derived_date < end_date period) then
+    { start_date = derived_date; end_date = end_date period }
+  else { start_date = end_date period; end_date = derived_date }
+
+let prev offset period =
+  let derived_date = Date.shift offset (start_date period) in
+  if Date.(derived_date > start_date period) then
+    { start_date = start_date period; end_date = derived_date }
+  else { start_date = derived_date; end_date = start_date period }
+
 let shift offset period =
   { start_date = Date.shift offset period.start_date; end_date = Date.shift offset period.end_date }
 
-let equal p0 p1 = compare p0 p1 = 0
-let hash p = Hashtbl.hash (Date.hash p.start_date, Date.hash p.end_date)
-let to_string p = Date.to_string p.start_date ^ ".." ^ Date.to_string p.end_date
-let pp fmt p = Format.pp_print_string fmt (to_string p)
+(* Sequences *)
 
 let make_seq ~start_date ~offset =
   let end_date = Date.shift offset start_date in
   let initial_period = { start_date; end_date } in
   Seq.unfold
     (fun period ->
-      let next_period = shift offset period in
+      let next_period = next offset period in
       Some (period, next_period))
     initial_period
 
@@ -49,3 +60,10 @@ let seq_to_dates periods =
                   fun () -> Seq.Cons (start_date period, aux (Some period) next) ))
   in
   aux None periods
+
+(* Predicates and comparisons *)
+
+let equal p0 p1 = compare p0 p1 = 0
+let hash p = Hashtbl.hash (Date.hash p.start_date, Date.hash p.end_date)
+let to_string p = Date.to_string p.start_date ^ ".." ^ Date.to_string p.end_date
+let pp fmt p = Format.pp_print_string fmt (to_string p)

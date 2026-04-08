@@ -38,7 +38,7 @@ let units : [ `Units ] S.Period.t =
   let units_forecast last_period =
     S.Period.unfold_self ~label:"Units (forecast)" ~cells:(fun () ->
         let rec forecast n prev_period () =
-          let p = Period.shift forecast_stride prev_period in
+          let p = Period.next forecast_stride prev_period in
           let step = if n < 4 then growth_step 0.05 p else growth_step 0.02 p in
           Seq.Cons (step, forecast (n + 1) p)
         in
@@ -56,7 +56,7 @@ let revenue : [ `USD ] S.Period.t =
       ~deps:(S.Period.dep_period (lazy conversion))
       ~cells:(fun conversion ->
         let rec forecast prev_period () =
-          let p = Period.shift forecast_stride prev_period in
+          let p = Period.next forecast_stride prev_period in
           let step =
             S.Period.step ~period:p
               (S.Period.Query.period conversion ~period:p ~reduce:S.Period.reduce_sum) (fun u ->

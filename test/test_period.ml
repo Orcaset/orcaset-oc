@@ -38,6 +38,62 @@ let test_contains_is_start_inclusive_end_exclusive () =
   check_bool "excludes before" false (Period.contains (Date.make 2024 12 31) p);
   check_bool "excludes after" false (Period.contains (Date.make 2025 2 2) p)
 
+let test_next_positive_offset () =
+  (* Positive offset: derived_date = end_date + offset > end_date,
+     so result is (end_date, derived_date). *)
+  let p = Period.make (Date.make 2025 1 1) (Date.make 2025 2 1) in
+  let offset = Offset.make ~months:1 () in
+  let result = Period.next offset p in
+  check_period "next +1m" (Period.make (Date.make 2025 2 1) (Date.make 2025 3 1)) result
+
+let test_next_negative_offset () =
+  (* Negative offset: derived_date = end_date + offset < end_date,
+     so result is (derived_date, end_date). *)
+  let p = Period.make (Date.make 2025 1 1) (Date.make 2025 2 1) in
+  let offset = Offset.make ~months:(-1) () in
+  let result = Period.next offset p in
+  check_period "next -1m" (Period.make (Date.make 2025 1 1) (Date.make 2025 2 1)) result
+
+let test_next_with_days_offset () =
+  let p = Period.make (Date.make 2025 3 1) (Date.make 2025 3 15) in
+  let offset = Offset.make ~days:10 () in
+  let result = Period.next offset p in
+  check_period "next +10d" (Period.make (Date.make 2025 3 15) (Date.make 2025 3 25)) result
+
+let test_next_month_end () =
+  let p = Period.make (Date.make 2025 1 31) (Date.make 2025 2 28) in
+  let offset = Offset.make ~months:1 ~month_end:true () in
+  let result = Period.next offset p in
+  check_period "next month_end" (Period.make (Date.make 2025 2 28) (Date.make 2025 3 31)) result
+
+let test_prev_negative_offset () =
+  (* Negative offset: derived_date = start_date + offset < start_date,
+     so result is (derived_date, start_date). *)
+  let p = Period.make (Date.make 2025 2 1) (Date.make 2025 3 1) in
+  let offset = Offset.make ~months:(-1) () in
+  let result = Period.prev offset p in
+  check_period "prev -1m" (Period.make (Date.make 2025 1 1) (Date.make 2025 2 1)) result
+
+let test_prev_positive_offset () =
+  (* Positive offset: derived_date = start_date + offset > start_date,
+     so result is (start_date, derived_date). *)
+  let p = Period.make (Date.make 2025 2 1) (Date.make 2025 3 1) in
+  let offset = Offset.make ~months:1 () in
+  let result = Period.prev offset p in
+  check_period "prev +1m" (Period.make (Date.make 2025 2 1) (Date.make 2025 3 1)) result
+
+let test_prev_with_days_offset () =
+  let p = Period.make (Date.make 2025 3 15) (Date.make 2025 3 31) in
+  let offset = Offset.make ~days:(-10) () in
+  let result = Period.prev offset p in
+  check_period "prev -10d" (Period.make (Date.make 2025 3 5) (Date.make 2025 3 15)) result
+
+let test_prev_month_end () =
+  let p = Period.make (Date.make 2025 3 31) (Date.make 2025 4 30) in
+  let offset = Offset.make ~months:(-1) ~month_end:true () in
+  let result = Period.prev offset p in
+  check_period "prev month_end" (Period.make (Date.make 2025 2 28) (Date.make 2025 3 31)) result
+
 let test_shift () =
   let offset = Offset.make ~months:1 ~days:2 () in
   let p = Period.make (Date.make 2025 1 31) (Date.make 2025 2 28) in
@@ -145,6 +201,14 @@ let tests =
     Alcotest.test_case "make and accessors" `Quick test_make_and_accessors;
     Alcotest.test_case "to_tuple" `Quick test_to_tuple;
     Alcotest.test_case "contains semantics" `Quick test_contains_is_start_inclusive_end_exclusive;
+    Alcotest.test_case "next positive offset" `Quick test_next_positive_offset;
+    Alcotest.test_case "next negative offset" `Quick test_next_negative_offset;
+    Alcotest.test_case "next with days" `Quick test_next_with_days_offset;
+    Alcotest.test_case "next month_end" `Quick test_next_month_end;
+    Alcotest.test_case "prev negative offset" `Quick test_prev_negative_offset;
+    Alcotest.test_case "prev positive offset" `Quick test_prev_positive_offset;
+    Alcotest.test_case "prev with days" `Quick test_prev_with_days_offset;
+    Alcotest.test_case "prev month_end" `Quick test_prev_month_end;
     Alcotest.test_case "shift" `Quick test_shift;
     Alcotest.test_case "make_seq contiguous" `Quick test_make_seq_produces_contiguous_periods;
     Alcotest.test_case "equal and hash" `Quick test_equal_and_hash;

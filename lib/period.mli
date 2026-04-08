@@ -19,7 +19,7 @@ val make : Date.t -> Date.t -> t
 
     {b Note.} No validation is performed on date ordering. *)
 
-(** {1:accessors Accessors} *)
+(** {1 Accessors} *)
 
 val start_date : t -> Date.t
 (** [start_date p] is [p]'s start date. *)
@@ -38,12 +38,18 @@ val contains : Date.t -> t -> bool
 (** [contains d p] is [true] iff [start_date p <= d] and [d < end_date p]. Start-inclusive,
     end-exclusive. *)
 
-(** {1:shifting Shifting} *)
+(** {1 Shifting} *)
+
+val next : Offset.t -> t -> t
+(** [next offset p] is a new period with the dates [Period.end_date p] and [Date.shift offset (Period.end_date p)]. *)
+
+val prev : Offset.t -> t -> t
+(** [prev offset p] is a new period with the dates [Date.shift (Period.start_date p)] and [Period.start_date p]. *)
 
 val shift : Offset.t -> t -> t
-(** [shift offset p] is [p] with both endpoints advanced by [offset]. *)
+(** [shift offset p] is a new period with both start and end dates shifted by [offset]. *)
 
-(** {1:sequences Sequences} *)
+(** {1 Sequences} *)
 
 val make_seq : start_date:Date.t -> offset:Offset.t -> t Seq.t
 (** [make_seq ~start_date ~offset] is an infinite sequence of contiguous periods. The first period
@@ -53,7 +59,7 @@ val make_seq : start_date:Date.t -> offset:Offset.t -> t Seq.t
 val seq_to_dates : t Seq.t -> Date.t Seq.t
 (** [seq_to_dates periods] is a sequence of dates in [periods] with equal adjacent start/end dates deduplicated. *)
 
-(** {1:preds Predicates and comparisons} *)
+(** {1 Predicates and comparisons} *)
 
 val equal : t -> t -> bool
 (** [equal p0 p1] is [true] iff both endpoints are equal. *)

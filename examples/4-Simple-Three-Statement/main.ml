@@ -23,7 +23,7 @@ let revenue_step period =
 
 let revenue =
   let rec generate_cells last_period () =
-    let current_period = Period.shift offset last_period in
+    let current_period = Period.next offset last_period in
     Seq.Cons (revenue_step current_period, generate_cells current_period)
   in
   S.Period.unfold_self ~label:"Revenue" ~cells:(fun () ->
@@ -35,7 +35,7 @@ let revenue =
 let cogs = S.Period.map ~label:"COGS" (fun r -> r *. -0.30) (lazy revenue)
 
 (* Gross Profit: Revenue + COGS. *)
-let gross_profit = S.Period.sum ~label:"Gross Profit" (lazy revenue) (lazy cogs)
+let gross_profit = S.Period.sum ~label:"Gross Profit" [ lazy revenue; lazy cogs ]
 
 (* Opex: constant -$200/month. *)
 let opex =
@@ -61,7 +61,7 @@ let rec depreciation =
 and ppe_net =
   lazy
     (let neg_capex = S.Period.map ~label:"Neg Capex" (fun x -> -.x) (lazy capex) in
-     let ppe_change = S.Period.sum ~label:"PPE Change" (lazy neg_capex) depreciation in
+     let ppe_change = S.Period.sum ~label:"PPE Change" [ lazy neg_capex; depreciation ] in
      S.Point.accum ~label:"PPE Net" ~start_date ~initial_value:10000.0 (lazy ppe_change))
 
 let depreciation = Lazy.force depreciation
@@ -69,14 +69,14 @@ let ppe_net = Lazy.force ppe_net
 
 (* Earnings before tax: Gross Profit + Opex + Depreciation. *)
 let ebt =
-  let gp_opex = S.Period.sum ~label:"GP + Opex" (lazy gross_profit) (lazy opex) in
-  S.Period.sum ~label:"EBT" (lazy gp_opex) (lazy depreciation)
+  let gp_opex = S.Period.sum ~label:"GP + Opex" [ lazy gross_profit; lazy opex ] in
+  S.Period.sum ~label:"EBT" [ lazy gp_opex; lazy depreciation ]
 
 (* Tax: 20% of EBT (negative). *)
 let tax = S.Period.map ~label:"Tax" (fun x -> x *. -0.20) (lazy ebt)
 
 (* Net Income: EBT + Tax. *)
-let net_income = S.Period.sum ~label:"Net Income" (lazy ebt) (lazy tax)
+let net_income = S.Period.sum ~label:"Net Income" [ lazy ebt; lazy tax ]
 
 (* --- Cash Flow Statement ----------------------------------------------------- *)
 
@@ -84,7 +84,7 @@ let net_income = S.Period.sum ~label:"Net Income" (lazy ebt) (lazy tax)
 let dep_add_back = S.Period.map ~label:"Dep Add Back" (fun x -> -.x) (lazy depreciation)
 
 (* CF Operations: Net Income + Depreciation Add Back. *)
-let cf_operations = S.Period.sum ~label:"CF Operations" (lazy net_income) (lazy dep_add_back)
+let cf_operations = S.Period.sum ~label:"CF Operations" [ lazy net_income; lazy dep_add_back ]
 
 (* CF Financing: constant $0. *)
 let cf_financing =
@@ -93,8 +93,8 @@ let cf_financing =
 
 (* Net Cash Change: CF Operations + Capex + CF Financing. *)
 let net_cash_change =
-  let ops_plus_capex = S.Period.sum ~label:"Ops + Capex" (lazy cf_operations) (lazy capex) in
-  S.Period.sum ~label:"Net Cash Change" (lazy ops_plus_capex) (lazy cf_financing)
+  let ops_plus_capex = S.Period.sum ~label:"Ops + Capex" [ lazy cf_operations; lazy capex ] in
+  S.Period.sum ~label:"Net Cash Change" [ lazy ops_plus_capex; lazy cf_financing ]
 
 (* --- Balance Sheet ----------------------------------------------------------- *)
 

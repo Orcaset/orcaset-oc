@@ -23,7 +23,7 @@ let revenue_step curr_period last_period =
 
 let revenue =
   let rec generate_cells last_period () =
-    let current_period = Period.shift offset last_period in
+    let current_period = Period.next offset last_period in
     Seq.Cons (revenue_step current_period last_period, generate_cells current_period)
   in
   S.Period.unfold_self ~label:"Revenue" ~cells:(fun () ->
@@ -44,7 +44,7 @@ let revenue =
   S.Period.of_seq ~label:"Revenue" revenue_cells *)
 
 let expenses = S.Period.map ~label:"Expenses" (fun r -> r *. expense_margin) (lazy revenue)
-let income = S.Period.sum ~label:"Income" (lazy revenue) (lazy expenses)
+let income = S.Period.sum ~label:"Income" [ lazy revenue; lazy expenses ]
 
 (* ---- Print output --- *)
 let num_periods = 6
