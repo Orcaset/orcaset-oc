@@ -105,7 +105,7 @@ let rec take_cells_while s date =
       let cell_period = Period_cell.period cell in
       let period_end_comparison = Date.compare (Period.end_date cell_period) date in
       let straddles_date =
-        Date.compare (Period.start_date cell_period) date <= 0
+        Date.compare (Period.start_date cell_period) date < 0
         && Date.compare (Period.end_date cell_period) date > 0
       in
       if period_end_comparison < 0 then Seq.cons cell (take_cells_while rest date)
