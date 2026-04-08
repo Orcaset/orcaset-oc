@@ -118,9 +118,9 @@ module type S = sig
       yf:(Date.t -> Date.t -> float) ->
       'c t
 
-    val sum : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val sum : label:string -> 'c t Lazy.t list -> 'c t
     val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
-    val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val mul : label:string -> 'c t Lazy.t list -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val id : 'c t -> int
     val label : 'c t -> string

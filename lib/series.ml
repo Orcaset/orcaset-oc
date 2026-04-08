@@ -74,9 +74,9 @@ module type S = sig
       yf:(Date.t -> Date.t -> float) ->
       'c t
 
-    val sum : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val sum : label:string -> 'c t Lazy.t list -> 'c t
     val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
-    val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val mul : label:string -> 'c t Lazy.t list -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val id : 'c t -> int
     val label : 'c t -> string
@@ -305,8 +305,14 @@ module Make () = struct
       register_label (Period_series.id s) label;
       s
 
-    let sum ~label s1 s2 =
-      let s = Period_series.sum s1 s2 in
+    let sum ~label s_list =
+      let s =
+        match s_list with
+        | [] -> Period_series.of_seq Seq.empty
+        | [ single ] -> Lazy.force single
+        | first :: rest ->
+            List.fold_left (fun acc s -> Period_series.sum (lazy acc) s) (Lazy.force first) rest
+      in
       register_label (Period_series.id s) label;
       s
 
@@ -315,8 +321,14 @@ module Make () = struct
       register_label (Period_series.id s) label;
       s
 
-    let mul ~label s1 s2 =
-      let s = Period_series.mul s1 s2 in
+    let mul ~label s_list =
+      let s =
+        match s_list with
+        | [] -> Period_series.of_seq Seq.empty
+        | [ single ] -> Lazy.force single
+        | first :: rest ->
+            List.fold_left (fun acc s -> Period_series.mul (lazy acc) s) (Lazy.force first) rest
+      in
       register_label (Period_series.id s) label;
       s
 
