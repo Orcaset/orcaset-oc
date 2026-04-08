@@ -26,4 +26,12 @@ let rec interest =
 (* Balance: initial value + accumulated interest over time. *)
 and balance = lazy (S.Point.accum ~label:"Balance" ~start_date ~initial_value:100.0 interest)
 
-(* TODO: restore output once eval_many is available *)
+(* ── Output ───────────────────────────────────────────────────────────────── *)
+
+let num_periods = 6
+let query_periods = List.of_seq (Seq.take num_periods periods)
+
+let () =
+  let open S.Stmt in
+  let stmt = group [ period_line (Lazy.force interest); point_line (Lazy.force balance) ] in
+  print_string (pp stmt query_periods)

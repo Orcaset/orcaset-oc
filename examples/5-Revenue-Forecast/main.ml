@@ -75,14 +75,6 @@ let output_periods =
 
 let () =
   let periods = List.of_seq output_periods in
-  let print_results results =
-    List.iter
-      (fun r ->
-        match r with
-        | S.Period { label; period; value = Amount v; _ } ->
-            Printf.printf "%s for %s: %f\n" label (Period.to_string period) v
-        | _ -> ())
-      results
-  in
-  print_results (S.eval_many (S.Period.query periods units));
-  print_results (S.eval_many (S.Period.query periods revenue))
+  let open S.Stmt in
+  let stmt = group [ period_line units; period_line revenue ] in
+  print_string (pp stmt periods)

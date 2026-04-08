@@ -119,65 +119,44 @@ let balance_check = S.Point.sub ~label:"Balance Check" (lazy total_assets) (lazy
 
 (* --- Output ----------------------------------------------------------------- *)
 
-let num_periods = 6
+let num_periods =
+  let n = ref 4 in
+  Arg.parse
+    [
+      ("-n", Arg.Set_int n, "Number of periods to output");
+      ("--num-periods", Arg.Set_int n, "Number of periods to output");
+    ]
+    (fun _ -> ())
+    "Usage: main [-n <int>]";
+  !n
+
 let query_periods = List.of_seq (Seq.take num_periods months)
-let period_end_dates = List.map Period.end_date query_periods
-let balance_dates = start_date :: period_end_dates
-
-let extract_value (r : _ S.eval_result) =
-  match r with
-  | Period { value = Amount v; _ } -> v
-  | Point { point = Some (_, Amount v); _ } -> v
-  | Point { point = None; _ } -> 0.0
-
-let format_number v =
-  let s = Printf.sprintf "%.0f" (Float.abs v) in
-  let len = String.length s in
-  let buf = Buffer.create (len + (len / 3)) in
-  String.iteri
-    (fun i c ->
-      if i > 0 && (len - i) mod 3 = 0 then Buffer.add_char buf ',';
-      Buffer.add_char buf c)
-    s;
-  let formatted = Buffer.contents buf in
-  if v < -0.5 then "(" ^ formatted ^ ")" else formatted
-
-let lw = 24
-let cw = 14
-let pad_right n s = if String.length s >= n then s else s ^ String.make (n - String.length s) ' '
-let pad_left n s = if String.length s >= n then s else String.make (n - String.length s) ' ' ^ s
-
-let print_table title dates rows =
-  Printf.printf "\n=== %s ===\n\n" title;
-  Printf.printf "%s" (pad_right lw "");
-  List.iter (fun d -> Printf.printf "%s" (pad_left cw (Date.to_string d))) dates;
-  print_newline ();
-  Printf.printf "%s\n" (String.make (lw + (cw * List.length dates)) '-');
-  List.iter
-    (fun (label, values) ->
-      Printf.printf "%s" (pad_right lw label);
-      List.iter (fun v -> Printf.printf "%s" (pad_left cw (format_number v))) values;
-      print_newline ())
-    rows
-
-let eval_period_rows series =
-  List.map
-    (fun s ->
-      (S.Period.label s, List.map extract_value (S.eval_many (S.Period.query query_periods s))))
-    series
-
-let eval_point_rows series =
-  List.map
-    (fun s ->
-      (S.Point.label s, List.map extract_value (S.eval_many (S.Point.query_many balance_dates s))))
-    series
 
 let () =
-  print_table "Income Statement" period_end_dates
-    (eval_period_rows [ revenue; cogs; gross_profit; opex; depreciation; ebt; tax; net_income ]);
-  print_table "Cash Flow Statement" period_end_dates
-    (eval_period_rows [ cf_operations; capex; cf_financing; net_cash_change ]);
-  print_table "Balance Sheet" balance_dates
-    (eval_point_rows
-       [ cash; ppe_net; total_assets; common_stock; retained_earnings; total_equity; balance_check ]);
-  print_newline ()
+  let open S.Stmt in
+  let stmt =
+    group
+      [
+        group
+          [
+            period_total net_income
+              [
+                period_total gross_profit [ period_line revenue; period_line cogs ];
+                period_line opex;
+                period_line depreciation;
+                period_line tax;
+              ];
+          ];
+        group
+          [
+            period_total net_cash_change
+              [ period_line cf_operations; period_line capex; period_line cf_financing ];
+          ];
+        point_total balance_check
+          [
+            point_total total_assets [ point_line cash; point_line ppe_net ];
+            point_total total_equity [ point_line common_stock; point_line retained_earnings ];
+          ];
+      ]
+  in
+  print_string (pp stmt query_periods)

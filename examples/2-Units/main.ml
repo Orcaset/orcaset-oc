@@ -59,6 +59,11 @@ let costs : [ `USD ] S.Period.t = const_series ~label:"Costs (USD)" (-6_000.0)
 let usd_revenue = S.Period.convert ~label:"Revenue (USD)" (fun _ r -> r *. 1.34) (lazy revenue)
 let profit = S.Period.sum ~label:"Profit (USD)" [ lazy usd_revenue; lazy costs ]
 
-(* ── Print results ────────────────────────────────────────────────────────── *)
+(* ── Output ───────────────────────────────────────────────────────────────── *)
 
-(* TODO: restore output once eval_many is available *)
+let query_periods = [ Period.make start_date end_date ]
+
+let () =
+  let open S.Stmt in
+  let stmt = period_total profit [ period_line usd_revenue; period_line costs ] in
+  print_string (pp stmt query_periods)

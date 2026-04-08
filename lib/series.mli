@@ -36,6 +36,10 @@ module type S = sig
             query had no cell. The phantom type ['c] is preserved from the originating series so
             that callers can dispatch on it for currency-aware formatting. *)
 
+  type period = Period.t
+  (** The library {!Period.t} type, aliased so it remains accessible after the {!Period} submodule
+      shadows the library module name. Used by {!Stmt.pp}. *)
+
   (** {1 Period series} *)
 
   module Period : sig
@@ -203,6 +207,38 @@ module type S = sig
 
   val period_to_graph : 'c Period.t -> Graph.series
   val point_to_graph : 'c Point.t -> Graph.series
+
+  (** {1 Statement formatting} *)
+
+  module Stmt : sig
+    type t
+    (** A statement tree of line items and groups. *)
+
+    val period_line : 'c Period.t -> t
+    (** [period_line series] is a single row showing the values of the period [series]. *)
+
+    val point_line : 'c Point.t -> t
+    (** [point_line series] is a single row showing the values of a point [series]. *)
+
+    val period_total : 'c Period.t -> t list -> t
+    (** [period_total series children] is a total whose children are displayed above a separator
+        line followed by the total's own sum row, using a period [series] for the total. *)
+
+    val point_total : 'c Point.t -> t list -> t
+    (** [point_total series children] is a total whose children are displayed above a separator line
+        followed by the total's own sum row, using a point [series] for the total. *)
+
+    val group : t list -> t
+    (** [group children] is a container that holds a list of lines, totals, or nested groups. It
+        carries no series of its own and produces no sum row — it exists solely so that its children
+        can be evaluated together in a single shared cache pass via {!pp}. *)
+
+    val pp : t -> period list -> string
+    (** [pp stmt periods] pretty-prints the statement as a fixed-width table. The header row is
+        labeled ["Period end"] and contains dates derived from [periods] (including the initial
+        start date). Period series skip the first column; point series have values for every column.
+        Groups are formatted with a horizontal separator above the sum row. *)
+  end
 end
 
 module Make () : S

@@ -23,6 +23,8 @@ module type S = sig
     | Period of { label : string; period : Period.t; value : 'c amount }
     | Point of { label : string; point : (Date.t * 'c amount) option }
 
+  type period = Period.t
+
   module Period : sig
     type 'c t = 'c period_t
     type reduce = Series_types.reduce
@@ -114,6 +116,17 @@ module type S = sig
   val label_of_id : int -> string
   val period_to_graph : 'c Period.t -> Graph.series
   val point_to_graph : 'c Point.t -> Graph.series
+
+  module Stmt : sig
+    type t
+
+    val period_line : 'c Period.t -> t
+    val point_line : 'c Point.t -> t
+    val period_total : 'c Period.t -> t list -> t
+    val point_total : 'c Point.t -> t list -> t
+    val group : t list -> t
+    val pp : t -> period list -> string
+  end
 end
 
 module Make () = struct
@@ -151,6 +164,10 @@ module Make () = struct
 
   and eval_period cache period_series period =
     Period_series.eval_query ~eval_point cache period period_series
+
+  type period = Period.t
+
+  module LibPeriod = Period
 
   module Period = struct
     type 'c t = 'c period_t
@@ -486,4 +503,183 @@ module Make () = struct
   (* Graph bridge functions *)
   let period_to_graph (s : 'c Period.t) : Graph.series = Graph.pack_period s
   let point_to_graph (s : 'c Point.t) : Graph.series = Graph.pack_point s
+
+  module Stmt = struct
+    type packed_series =
+      | PackedPeriod : _ Period.t -> packed_series
+      | PackedPoint : _ Point.t -> packed_series
+
+    type t =
+      | Line of { label : string; series : packed_series }
+      | Total of { label : string; series : packed_series; children : t list }
+      | Group of { children : t list }
+
+    (** A column slot produced during the query phase. Holds either a list of period cells (to be
+        summed) or a single optional point cell. The cell cache is read later in the format phase.
+    *)
+    type col_slot = PeriodSlot of Cell_types.cell list | PointSlot of Cell_types.cell option
+
+    type row = Data of { indent : int; label : string; values : string list } | Sep
+
+    let period_line s = Line { label = Period.label s; series = PackedPeriod s }
+    let point_line s = Line { label = Point.label s; series = PackedPoint s }
+
+    let period_total s children =
+      Total { label = Period.label s; series = PackedPeriod s; children }
+
+    let point_total s children = Total { label = Point.label s; series = PackedPoint s; children }
+    let group children = Group { children }
+
+    let format_number v =
+      let s = Printf.sprintf "%.0f" (Float.abs v) in
+      let len = String.length s in
+      let buf = Buffer.create (len + (len / 3)) in
+      String.iteri
+        (fun i c ->
+          if i > 0 && (len - i) mod 3 = 0 then Buffer.add_char buf ',';
+          Buffer.add_char buf c)
+        s;
+      let formatted = Buffer.contents buf in
+      if v < -0.5 then "(" ^ formatted ^ ")" else formatted
+
+    (** Build column slots for a single series using a shared series-level cache. Returns one
+        [col_slot] per date/period column and accumulates every wrapped cell into [all_cells_acc]
+        for later batch solving. *)
+    let query_slots series_cache all_cells_acc periods dates packed =
+      match packed with
+      | PackedPeriod s ->
+          let slots =
+            List.map
+              (fun period ->
+                let seq = Period_series.eval_query ~eval_point series_cache period s in
+                let cells = List.of_seq seq in
+                let wrapped = List.map (fun c -> Cell_types.PeriodCell c) cells in
+                List.iter (fun c -> all_cells_acc := c :: !all_cells_acc) wrapped;
+                PeriodSlot wrapped)
+              periods
+          in
+          (* Period series get a leading None column for the start-date *)
+          PointSlot None :: slots
+      | PackedPoint s ->
+          List.map
+            (fun date ->
+              let cell = Point_series.eval_query ~eval_period series_cache s date in
+              let wrapped = Option.map (fun c -> Cell_types.PointCell c) cell in
+              Option.iter (fun c -> all_cells_acc := c :: !all_cells_acc) wrapped;
+              PointSlot wrapped)
+            dates
+
+    (** Phase 1: traverse the statement tree, query every series using a shared series cache, and
+        collect all cells. Returns a tree of [col_slot list] per node, mirroring the original [t]
+        structure. *)
+    type slot_tree =
+      | SLine of { indent : int; label : string; slots : col_slot list }
+      | STotal of { indent : int; label : string; slots : col_slot list }
+      | SSep
+
+    let rec collect_slots series_cache all_cells_acc periods dates indent = function
+      | Line { label; series } ->
+          let slots = query_slots series_cache all_cells_acc periods dates series in
+          [ SLine { indent; label; slots } ]
+      | Total { label; series; children } ->
+          let child_trees =
+            List.concat_map
+              (collect_slots series_cache all_cells_acc periods dates (indent + 1))
+              children
+          in
+          let slots = query_slots series_cache all_cells_acc periods dates series in
+          child_trees @ [ SSep; STotal { indent; label; slots } ]
+      | Group { children } ->
+          List.concat_map (collect_slots series_cache all_cells_acc periods dates indent) children
+
+    (** Phase 3: read solved values from the cell cache and format each slot. *)
+    let read_slot cell_cache = function
+      | PeriodSlot cells ->
+          let v = List.fold_left (fun acc c -> acc +. Eval.read_result cell_cache c) 0.0 cells in
+          Some v
+      | PointSlot None -> None
+      | PointSlot (Some c) -> Some (Eval.read_result cell_cache c)
+
+    let format_value = function None -> "" | Some v -> format_number v
+
+    let slot_tree_to_rows cell_cache =
+      List.map (function
+        | SLine { indent; label; slots } ->
+            let values = List.map (fun s -> format_value (read_slot cell_cache s)) slots in
+            Data { indent; label; values }
+        | STotal { indent; label; slots; _ } ->
+            let values = List.map (fun s -> format_value (read_slot cell_cache s)) slots in
+            Data { indent; label; values }
+        | SSep -> Sep)
+
+    let pp t (periods : period list) =
+      let dates =
+        match periods with
+        | [] -> []
+        | first :: _ -> LibPeriod.start_date first :: List.map LibPeriod.end_date periods
+      in
+      (* Phase 1: query all series with a shared series-level cache. *)
+      let series_cache = Series_types.create_cache () in
+      let all_cells_acc = ref [] in
+      let slot_trees = collect_slots series_cache all_cells_acc periods dates 0 t in
+      let all_cells = !all_cells_acc in
+      (* Phase 2: solve all cells with a single shared cell cache. *)
+      let cell_cache = Cell_cache.create () in
+      List.iter (Eval.prime_tree cell_cache) all_cells;
+      Eval.iterate cell_cache all_cells 1;
+      (* Phase 3: format rows by reading from the shared cell cache. *)
+      let rows = slot_tree_to_rows cell_cache slot_trees in
+      let indent_size = 2 in
+      let date_strs = List.map Date.to_string dates in
+      let header_label = "Period end" in
+      let label_width =
+        List.fold_left
+          (fun acc r ->
+            match r with
+            | Data { indent; label; _ } -> max acc (String.length label + (indent * indent_size))
+            | Sep -> acc)
+          (String.length header_label) rows
+        + 2
+      in
+      let col_width =
+        let max_val =
+          List.fold_left
+            (fun acc r ->
+              match r with
+              | Data { values; _ } -> List.fold_left (fun a v -> max a (String.length v)) acc values
+              | Sep -> acc)
+            0 rows
+        in
+        let max_date = List.fold_left (fun a d -> max a (String.length d)) 0 date_strs in
+        max max_val max_date + 2
+      in
+      let pad_right n s =
+        if String.length s >= n then s else s ^ String.make (n - String.length s) ' '
+      in
+      let pad_left n s =
+        if String.length s >= n then s else String.make (n - String.length s) ' ' ^ s
+      in
+      let num_cols = List.length dates in
+      let buf = Buffer.create 256 in
+      Buffer.add_string buf (pad_right label_width header_label);
+      List.iter (fun d -> Buffer.add_string buf (pad_left col_width d)) date_strs;
+      Buffer.add_char buf '\n';
+      Buffer.add_string buf (String.make (label_width + (col_width * num_cols)) '-');
+      Buffer.add_char buf '\n';
+      List.iter
+        (fun r ->
+          match r with
+          | Data { indent; label; values } ->
+              let lbl = String.make (indent * indent_size) ' ' ^ label in
+              Buffer.add_string buf (pad_right label_width lbl);
+              List.iter (fun v -> Buffer.add_string buf (pad_left col_width v)) values;
+              Buffer.add_char buf '\n'
+          | Sep ->
+              Buffer.add_string buf (String.make label_width ' ');
+              let dashes = String.make (col_width - 2) '-' in
+              List.iter (fun _ -> Buffer.add_string buf (pad_left col_width dashes)) dates;
+              Buffer.add_char buf '\n')
+        rows;
+      Buffer.contents buf
+  end
 end
