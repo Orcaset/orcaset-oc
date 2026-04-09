@@ -172,9 +172,7 @@ and compute_value cache iteration = function
           (f v1 v2, Float.max d1 d2)
       | TAccum { prev; changes; f; _ } ->
           let prev_value, prev_delta =
-            match prev with
-            | None -> (0.0, 0.0)
-            | Some p -> eval_cell cache iteration (PointCell p)
+            match prev with None -> (0.0, 0.0) | Some p -> eval_cell cache iteration (PointCell p)
           in
           let total_accum, max_delta =
             Seq.fold_left

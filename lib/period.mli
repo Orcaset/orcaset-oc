@@ -41,10 +41,12 @@ val contains : Date.t -> t -> bool
 (** {1 Shifting} *)
 
 val next : Offset.t -> t -> t
-(** [next offset p] is a new period with the dates [Period.end_date p] and [Date.shift offset (Period.end_date p)]. *)
+(** [next offset p] is a new period with the dates [Period.end_date p] and
+    [Date.shift offset (Period.end_date p)]. *)
 
 val prev : Offset.t -> t -> t
-(** [prev offset p] is a new period with the dates [Date.shift (Period.start_date p)] and [Period.start_date p]. *)
+(** [prev offset p] is a new period with the dates [Date.shift (Period.start_date p)] and
+    [Period.start_date p]. *)
 
 val shift : Offset.t -> t -> t
 (** [shift offset p] is a new period with both start and end dates shifted by [offset]. *)
@@ -57,7 +59,8 @@ val make_seq : start_date:Date.t -> offset:Offset.t -> t Seq.t
     where the previous one ended. *)
 
 val seq_to_dates : t Seq.t -> Date.t Seq.t
-(** [seq_to_dates periods] is a sequence of dates in [periods] with equal adjacent start/end dates deduplicated. *)
+(** [seq_to_dates periods] is a sequence of dates in [periods] with equal adjacent start/end dates
+    deduplicated. *)
 
 (** {1 Predicates and comparisons} *)
 
