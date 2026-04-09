@@ -37,6 +37,11 @@ and 'c period_series =
       f : float option -> float option -> float;
     }
   | PExtend of { id : int; base : 'c period_series; cont : Period.t -> 'c period_series }
+  | PFilter of {
+      id : int;
+      inner : 'c period_series Lazy.t;
+      f : 'c Period_cell.t Seq.t -> 'c Period_cell.t Seq.t;
+    }
 
 and 'c point_series =
   | TConst of { id : int; value : float }

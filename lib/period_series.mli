@@ -74,6 +74,18 @@ val sub : 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 val mul : 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 val div : 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 
+val filter : ('c Period_cell.t Seq.t -> 'c Period_cell.t Seq.t) -> 'c t Lazy.t -> 'c t
+(** [filter f s] applies a cell-sequence transformation [f] to the evaluated cells of [s]. The
+    transformation is applied lazily during evaluation, after the inner series has been fully
+    materialized. This is the general mechanism for operations that need to drop, clip, or rearrange
+    cells rather than just transforming their values. *)
+
+val after : Date.t -> 'c t Lazy.t -> 'c t
+(** [after date s] returns a series containing only cells that fall after [date]. Cells that end on
+    or before [date] are dropped. If [date] falls strictly within a cell's period (i.e. after the
+    start but before the end), that cell is split at [date] and only the right portion
+    [\[date, end)] is kept. Cells that start on or after [date] are included unchanged. *)
+
 (** {1 Accessors} *)
 
 val id : 'c t -> int

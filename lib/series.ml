@@ -80,6 +80,11 @@ module type S = sig
     val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val mul : label:string -> 'c t Lazy.t list -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+
+    val filter :
+      label:string -> ('c Period_cell.t Seq.t -> 'c Period_cell.t Seq.t) -> 'c t Lazy.t -> 'c t
+
+    val after : label:string -> Date.t -> 'c t Lazy.t -> 'c t
     val id : 'c t -> int
     val label : 'c t -> string
     val query : Period.t list -> 'c t -> 'c q_result list
@@ -352,6 +357,16 @@ module Make () = struct
 
     let div ~label s1 s2 =
       let s = Period_series.div s1 s2 in
+      register_label (Period_series.id s) label;
+      s
+
+    let filter ~label f inner =
+      let s = Period_series.filter f inner in
+      register_label (Period_series.id s) label;
+      s
+
+    let after ~label date inner =
+      let s = Period_series.after date inner in
       register_label (Period_series.id s) label;
       s
 

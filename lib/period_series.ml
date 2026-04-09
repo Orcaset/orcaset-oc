@@ -43,6 +43,21 @@ let sum s1 s2 = map2 (fun a b -> fill_zero a +. fill_zero b) s1 s2
 let sub s1 s2 = map2 (fun a b -> fill_zero a -. fill_zero b) s1 s2
 let mul s1 s2 = map2 (fun a b -> fill_zero a *. fill_zero b) s1 s2
 let div s1 s2 = map2 (fun a b -> fill_zero a /. fill_zero b) s1 s2
+let filter f s = PFilter { id = fresh_id (); inner = s; f }
+
+let after date s =
+  filter
+    (fun seq ->
+      Seq.filter_map
+        (fun cell ->
+          let p = Period_cell.period cell in
+          if Date.(Period.end_date p <= date) then None
+          else if Date.(Period.start_date p < date) then
+            let _, right = Period_cell.split_cell cell date in
+            Some right
+          else Some cell)
+        seq)
+    s
 
 let const_ann_growth ~start ~value ~rate ~offset ~yf =
   (* TODO: Create a split function that divides value based on the relative proportion of 
@@ -90,7 +105,8 @@ let id = function
   | PMap { id; _ }
   | PConvert { id; _ }
   | PMap2 { id; _ }
-  | PExtend { id; _ } ->
+  | PExtend { id; _ }
+  | PFilter { id; _ } ->
       id
 
 (* QUERY HELPERS *)
@@ -282,6 +298,12 @@ let rec eval_seq : type c.
               let cont_seq = eval_seq ~eval_point cache cont_series in
               Seq.memoize (Seq.append (List.to_seq base_list) cont_seq)
         in
+        Hashtbl.replace cache.period (id series) (Pack_period_seq memo_seq);
+        memo_seq
+    | PFilter { inner; f; _ } ->
+        let inner_seq = eval_seq ~eval_point cache (Lazy.force inner) in
+        let filtered_seq = f inner_seq in
+        let memo_seq = Seq.memoize filtered_seq in
         Hashtbl.replace cache.period (id series) (Pack_period_seq memo_seq);
         memo_seq
   in

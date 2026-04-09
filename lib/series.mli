@@ -126,6 +126,18 @@ module type S = sig
     val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val mul : label:string -> 'c t Lazy.t list -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+
+    val filter :
+      label:string -> ('c Period_cell.t Seq.t -> 'c Period_cell.t Seq.t) -> 'c t Lazy.t -> 'c t
+    (** [filter ~label f s] applies a cell-sequence transformation [f] to the evaluated cells of
+        [s]. The transformation is applied lazily during evaluation, after the inner series has been
+        fully materialized. *)
+
+    val after : label:string -> Date.t -> 'c t Lazy.t -> 'c t
+    (** [after ~label date s] returns a series containing only cells that fall after [date]. Cells
+        that end on or before [date] are dropped. If [date] falls strictly within a cell's period,
+        that cell is split at [date] and only the right portion [\[date, end)] is kept. *)
+
     val id : 'c t -> int
     val label : 'c t -> string
 
