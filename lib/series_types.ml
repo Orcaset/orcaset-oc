@@ -66,9 +66,15 @@ type cache = {
   period : (int, packed_period_seq) Hashtbl.t;
   point : (int * Date.t, packed_point_cell) Hashtbl.t;
   prefix : (int, packed_period_seq) Hashtbl.t;
+  accum_prev : (int, Date.t) Hashtbl.t;
 }
 
 let create_cache () =
-  { period = Hashtbl.create 16; point = Hashtbl.create 16; prefix = Hashtbl.create 4 }
+  {
+    period = Hashtbl.create 16;
+    point = Hashtbl.create 16;
+    prefix = Hashtbl.create 4;
+    accum_prev = Hashtbl.create 4;
+  }
 
 exception Duplicate_label of { label : string; existing_series_id : int }

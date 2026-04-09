@@ -70,6 +70,7 @@ type cache = {
   period : (int, packed_period_seq) Hashtbl.t;
   point : (int * Date.t, packed_point_cell) Hashtbl.t;
   prefix : (int, packed_period_seq) Hashtbl.t;
+  accum_prev : (int, Date.t) Hashtbl.t;
 }
 
 val create_cache : unit -> cache

@@ -59,9 +59,12 @@ let cells (cell : Cell_types.cell) =
             List.filter_map (fun opt -> Option.map (go_point visited) opt) [ c1; c2 ]
           in
           Node (wrapped, children)
-      | TAccum { changes; _ } ->
-          let children = List.of_seq (Seq.map (go_period visited) changes) in
-          Node (wrapped, children)
+      | TAccum { prev; changes; _ } ->
+          let prev_children =
+            match prev with Some p -> [ go_point visited p ] | None -> []
+          in
+          let change_children = List.of_seq (Seq.map (go_period visited) changes) in
+          Node (wrapped, prev_children @ change_children)
   and go visited = function
     | PeriodCell c -> go_period visited c
     | PointCell c -> go_point visited c

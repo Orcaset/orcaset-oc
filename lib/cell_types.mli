@@ -39,7 +39,13 @@ and 'c point_cell =
       c2 : 'c point_cell option;
       f : float option -> float option -> float;
     }
-  | TAccum of { id : int; date : Date.t; changes : 'c period_cell Seq.t; f : float -> float }
+  | TAccum of {
+      id : int;
+      date : Date.t;
+      prev : 'c point_cell option;
+      changes : 'c period_cell Seq.t;
+      f : float -> float;
+    }
 
 and cell = PeriodCell : 'c period_cell -> cell | PointCell : 'c point_cell -> cell
 

@@ -72,8 +72,9 @@ let rec prime_tree cache cell =
               List.iter
                 (fun dep -> prime_tree cache (PointCell dep))
                 (List.filter_map Fun.id [ c1; c2 ])
-          | TAccum { changes; _ } ->
+          | TAccum { prev; changes; _ } ->
               store (Cell_cache.Unresolved (0.0, 0));
+              (match prev with Some p -> prime_tree cache (PointCell p) | None -> ());
               Seq.iter (fun dep -> prime_tree cache (PeriodCell dep)) changes))
 
 (* Evaluation *)
@@ -169,13 +170,18 @@ and compute_value cache iteration = function
                 (Some v, d)
           in
           (f v1 v2, Float.max d1 d2)
-      | TAccum { changes; f; _ } ->
+      | TAccum { prev; changes; f; _ } ->
+          let prev_value, prev_delta =
+            match prev with
+            | None -> (0.0, 0.0)
+            | Some p -> eval_cell cache iteration (PointCell p)
+          in
           let total_accum, max_delta =
             Seq.fold_left
               (fun (acc_v, acc_d) change ->
                 let v, d = eval_cell cache iteration (PeriodCell change) in
                 (acc_v +. v, Float.max acc_d d))
-              (0.0, 0.0) changes
+              (prev_value, prev_delta) changes
           in
           (f total_accum, max_delta))
 

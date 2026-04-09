@@ -68,9 +68,27 @@ let rec eval_query : type c.
             if Date.compare date start_date <= 0 then Some (Point_cell.const date initial_value)
             else
               let change_series = Lazy.force changes in
-              let query_period = Period.make start_date date in
+              let prev, query_start =
+                match Hashtbl.find_opt cache.accum_prev series_id with
+                | Some prev_date
+                  when Date.compare prev_date start_date > 0
+                       && Date.compare prev_date date < 0 ->
+                    let (Pack_point_cell cell) =
+                      Hashtbl.find cache.point (series_id, prev_date)
+                    in
+                    (Some (cast_point_cell cell), prev_date)
+                | _ -> (None, start_date)
+              in
+              let query_period = Period.make query_start date in
               let cells = eval_period cache change_series query_period in
-              Some (Point_cell.accum cells date (fun total -> initial_value +. total))
+              let f =
+                match prev with
+                | None -> fun total -> initial_value +. total
+                | Some _ -> Fun.id
+              in
+              let cell = Point_cell.accum ?prev cells date f in
+              Hashtbl.replace cache.accum_prev series_id date;
+              Some cell
       in
       match value with
       | None -> value
