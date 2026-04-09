@@ -24,6 +24,17 @@ val accum : start_date:Date.t -> initial_value:float -> 'c Series_types.period_s
 (** [accum ~start_date ~initial_value changes] accumulates period series values from [start_date] to
     the query date, adding them to [initial_value]. *)
 
+val of_list : (Date.t * float) list -> 'c t
+(** [of_list cells] creates a series from a list of [(date, value)] pairs. At evaluation, returns
+    the value for the queried date if one exists, or [None] otherwise. Dates are compared with
+    {!Date.equal}. *)
+
+val extend : 'c t -> (Date.t -> 'c t) -> 'c t
+(** [extend base cont] queries [base] first. If [base] produces a value, that value is returned.
+    Otherwise [cont] is called with the query date to obtain a continuation series, and the
+    continuation is queried at the same date. The continuation constructor is memoized — [cont] is
+    called at most once, on the first date where [base] returns no value. *)
+
 val map2 : (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 (** Combine two series with a binary function. Each input is passed as [float option] — [None] when
     the underlying series has no value at the query date. *)

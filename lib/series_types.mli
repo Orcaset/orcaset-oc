@@ -64,6 +64,8 @@ and 'c point_series =
       initial_value : float;
       changes : 'c period_series Lazy.t;
     }
+  | TExtend of { id : int; base : 'c point_series; cont : Date.t -> 'c point_series }
+  | TOfList of { id : int; cells : (Date.t * float) list }
 
 and 'c series_dep = Period_dep of 'c period_series Lazy.t | Point_dep of 'c point_series Lazy.t
 

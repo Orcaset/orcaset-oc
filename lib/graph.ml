@@ -119,6 +119,8 @@ let series s =
       | Series_types.TConvert { inner; _ } -> go_point acc (cast_point_series (Lazy.force inner))
       | Series_types.TDep2 { s1; s2; _ } -> go_point (go_point acc (Lazy.force s1)) (Lazy.force s2)
       | Series_types.TAccum { changes; _ } -> go_period acc (Lazy.force changes)
+      | Series_types.TExtend { base; _ } -> go_point acc base
+      | Series_types.TOfList _ -> acc
     end
   in
   (* SAFETY: The existential type from PeriodSeries/PointSeries constructors is erased
@@ -186,6 +188,8 @@ let pp_dot ?label ppf roots =
     | Series_types.TConvert _ -> format_node_label lbl "PtConvert"
     | Series_types.TDep2 _ -> format_node_label lbl "PtDep2"
     | Series_types.TAccum _ -> format_node_label lbl "PtAccum"
+    | Series_types.TExtend _ -> format_node_label lbl "PtExtend"
+    | Series_types.TOfList _ -> format_node_label lbl "PtOfList"
   in
 
   let edges : (int * int) list ref = ref [] in
@@ -240,6 +244,8 @@ let pp_dot ?label ppf roots =
               let child_id = visit_period (Lazy.force changes) in
               edges := (did, child_id) :: !edges;
               []
+          | Series_types.TExtend { base; _ } -> [ base ]
+          | Series_types.TOfList _ -> []
         in
         List.iter
           (fun child ->

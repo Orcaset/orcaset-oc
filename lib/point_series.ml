@@ -32,6 +32,20 @@ let div s1 s2 = dep2 (fun a b -> fill_zero a /. fill_zero b) s1 s2
 let accum ~start_date ~initial_value changes =
   TAccum { id = fresh_id (); start_date; initial_value; changes }
 
+let extend base cont =
+  let memo = ref None in
+  let cont d =
+    match !memo with
+    | Some s -> s
+    | None ->
+        let s = cont d in
+        memo := Some s;
+        s
+  in
+  TExtend { id = fresh_id (); base; cont }
+
+let of_list cells = TOfList { id = fresh_id (); cells }
+
 (*  Accessors *)
 let id = function
   | TConst { id; _ } -> id
@@ -39,6 +53,8 @@ let id = function
   | TConvert { id; _ } -> id
   | TDep2 { id; _ } -> id
   | TAccum { id; _ } -> id
+  | TExtend { id; _ } -> id
+  | TOfList { id; _ } -> id
 
 (*  Evaluation *)
 
@@ -84,6 +100,16 @@ let rec eval_query : type c.
               let cell = Point_cell.accum ?prev cells date f in
               Hashtbl.replace cache.accum_prev series_id date;
               Some cell
+        | TExtend { base; cont; _ } -> (
+            match eval_query ~eval_period cache base date with
+            | Some _ as result -> result
+            | None ->
+                let cont_series = cont date in
+                eval_query ~eval_period cache cont_series date)
+        | TOfList { cells; _ } -> (
+            match List.find_opt (fun (d, _) -> Date.equal d date) cells with
+            | Some (_, v) -> Some (Point_cell.const date v)
+            | None -> None)
       in
       match value with
       | None -> value

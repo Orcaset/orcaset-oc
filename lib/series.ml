@@ -109,6 +109,8 @@ module type S = sig
     val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+    val of_list : label:string -> (Date.t * float) list -> 'c t
+    val extend : label:string -> 'c t -> (Date.t -> 'c t) -> 'c t
     val id : 'c t -> int
     val label : 'c t -> string
     val query : Date.t -> 'c t -> 'c q_result
@@ -438,6 +440,16 @@ module Make () = struct
 
     let div ~label s1 s2 =
       let s = Point_series.div s1 s2 in
+      register_label (Point_series.id s) label;
+      s
+
+    let of_list ~label cells =
+      let s = Point_series.of_list cells in
+      register_label (Point_series.id s) label;
+      s
+
+    let extend ~label base cont =
+      let s = Point_series.extend base cont in
       register_label (Point_series.id s) label;
       s
 

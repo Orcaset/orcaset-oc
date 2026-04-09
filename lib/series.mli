@@ -182,6 +182,17 @@ module type S = sig
     val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
     (** Elementwise division. Missing values are filled with [0.0]. *)
 
+    val of_list : label:string -> (Date.t * float) list -> 'c t
+    (** [of_list ~label cells] creates a series from a list of [(date, value)] pairs. At evaluation,
+        returns the value for the queried date if one exists, or [None] otherwise. Dates are
+        compared with {!Date.equal}. *)
+
+    val extend : label:string -> 'c t -> (Date.t -> 'c t) -> 'c t
+    (** [extend ~label base cont] queries [base] first. If [base] produces a value, that value is
+        returned. Otherwise [cont] is called with the query date to obtain a continuation series,
+        and the continuation is queried at the same date. The continuation constructor is memoized —
+        [cont] is called at most once, on the first date where [base] returns no value. *)
+
     val id : 'c t -> int
     val label : 'c t -> string
 
