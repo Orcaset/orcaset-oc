@@ -20,46 +20,35 @@ type 'c eval_point_fn =
 
 (** {1 Constructors} *)
 
-val of_seq : 'c Period_cell.t Seq.t -> 'c t
+val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
 (** A series backed by a pre-built cell sequence. *)
 
-val unfold : deps:'c Series_types.series_dep list -> 'c Series_types.unfold_cell Seq.t -> 'c t
-(** [unfold ~deps cells] builds a series from a declarative sequence of {!Series_types.unfold_cell}
-    values.
+val unfold :
+  label:string -> deps:'c Series_types.series_dep list -> 'c Series_types.unfold_cell Seq.t -> 'c t
+(** [unfold ~label ~deps cells] builds a series from a declarative sequence of
+    {!Series_types.unfold_cell} values. *)
 
-    Each element in [cells] is either a {!Series_types.Const} (constant, no dependencies) or a
-    {!Series_types.Step} (declares queries against [deps] or the series' own earlier output). The
-    system resolves queries and constructs the underlying {!Period_cell.t} values automatically.
-
-    Dependencies are wrapped in {!Series_types.series_dep} to support both period and point series
-    dependencies. Lazy values are only forced during evaluation, not at construction time.
-
-    Because the callback never receives raw query functions or {!Period_cell.t} constructors, the
-    only way to express dependencies is through {!Series_types.dep_query} values in
-    {!Series_types.Step}, which are derived from the declared [deps]. This makes it impossible to
-    silently bypass series-level dependency tracking or erase cell-level dependency connections. *)
-
-val extend : 'c t -> (Period.t -> 'c t) -> 'c t
-(** [extend base cont] evaluates [base] (which must be finite), passes the last period to [cont],
-    and returns the concatenation of both series. If [base] is empty, returns an empty series. *)
+val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
+(** [extend ~label base cont] evaluates [base] (which must be finite), passes the last period to
+    [cont], and returns the concatenation of both series. If [base] is empty, returns an empty
+    series. *)
 
 val reduce_sum : Series_types.reduce
 (** A reduce function that sums all cell values: [List.fold_left (+.) 0.0]. *)
 
-val map : (float -> float) -> 'c t Lazy.t -> 'c t
-(** [map f s] applies [f] to each cell's float value. The dependency is wrapped in [Lazy.t] to
-    support mutually recursive series definitions via [let rec]. The lazy value is forced during
-    evaluation, not at construction. *)
+val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
+(** [map ~label f s] applies [f] to each cell's float value. *)
 
-val convert : (Period.t -> float -> float) -> 'a t Lazy.t -> 'b t
-(** [convert f s] applies [f period v] to each cell's float value, where [period] is the cell's
-    period and [v] is its evaluated result. Unlike {!map}, the phantom type of the result may differ
-    from the input, allowing unit/currency conversions. *)
+val convert : label:string -> (Period.t -> float -> float) -> 'a t Lazy.t -> 'b t
+(** [convert ~label f s] applies [f period v] to each cell's float value, allowing unit/currency
+    conversions. *)
 
-val map2 : (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
-(** [map2 f s1 s2] combines two series cell-by-cell, aligning periods. *)
+val map2 :
+  label:string -> (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+(** [map2 ~label f s1 s2] combines two series cell-by-cell, aligning periods. *)
 
 val const_ann_growth :
+  label:string ->
   start:Date.t ->
   value:float ->
   rate:float ->
@@ -69,34 +58,30 @@ val const_ann_growth :
 (** A convenience constructor for a series that grows from a starting value by a constant annual
     growth rate, compounded according to the given offset. *)
 
-val sum : 'c t Lazy.t -> 'c t Lazy.t -> 'c t
-val sub : 'c t Lazy.t -> 'c t Lazy.t -> 'c t
-val mul : 'c t Lazy.t -> 'c t Lazy.t -> 'c t
-val div : 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+val sum : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+val sub : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+val mul : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
+val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 
-val filter : ('c Period_cell.t Seq.t -> 'c Period_cell.t Seq.t) -> 'c t Lazy.t -> 'c t
-(** [filter f s] applies a cell-sequence transformation [f] to the evaluated cells of [s]. The
-    transformation is applied lazily during evaluation, after the inner series has been fully
-    materialized. This is the general mechanism for operations that need to drop, clip, or rearrange
-    cells rather than just transforming their values. *)
+val filter :
+  label:string -> ('c Period_cell.t Seq.t -> 'c Period_cell.t Seq.t) -> 'c t Lazy.t -> 'c t
+(** [filter ~label f s] applies a cell-sequence transformation [f] to the evaluated cells of [s]. *)
 
-val after : Date.t -> 'c t Lazy.t -> 'c t
-(** [after date s] returns a series containing only cells that fall after [date]. Cells that end on
-    or before [date] are dropped. If [date] falls strictly within a cell's period (i.e. after the
-    start but before the end), that cell is split at [date] and only the right portion
-    [\[date, end)] is kept. Cells that start on or after [date] are included unchanged. *)
+val after : label:string -> Date.t -> 'c t Lazy.t -> 'c t
+(** [after ~label date s] returns a series containing only cells that fall after [date]. *)
 
 (** {1 Accessors} *)
 
 val id : 'c t -> int
 (** Return the unique integer identifier assigned to a series at construction time. *)
 
+val label : 'c t -> string
+(** Return the label assigned to a series at construction time. *)
+
 (** {1 Evaluation} *)
 
 val eval_seq : eval_point:'c eval_point_fn -> Series_types.cache -> 'c t -> 'c Period_cell.t Seq.t
-(** Materialize a series into a cell sequence. Accepts an [eval_point] callback for resolving point
-    series dependencies. The callback is provided by {!Series} to tie the knot between period and
-    point evaluation without circular module dependencies. *)
+(** Materialize a series into a cell sequence. *)
 
 val eval_query :
   eval_point:'c eval_point_fn -> Series_types.cache -> Period.t -> 'c t -> 'c Period_cell.t Seq.t

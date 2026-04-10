@@ -17,9 +17,6 @@ type series =
   | PeriodSeries : _ Series_types.period_series -> series
   | PointSeries : _ Series_types.point_series -> series
 
-let pack_period s = PeriodSeries s
-let pack_point s = PointSeries s
-
 (** Return the dependency tree rooted at [cell]. Circular dependencies are detected via physical
     identity ([==]) on a visited set and represented as [Cycle] nodes rather than recursing
     infinitely. *)
@@ -136,11 +133,9 @@ let series s =
 
 (** Pretty-print a DOT digraph of the dependency structure of one or more series. Each
     physically-distinct series node becomes a DOT node; edges point from dependencies to dependents.
-    When [~label] is provided, each node includes the series name returned by the function (keyed by
-    series id). Circular dependencies (e.g. self-referential [PUnfold] nodes) are handled via
-    physical identity and will appear as back-edges in the graph rather than causing infinite
-    recursion. *)
-let pp_dot ?label ppf roots =
+    Node labels include the series label from construction. Circular dependencies are handled via
+    physical identity and will appear as back-edges in the graph. *)
+let pp_dot ppf roots =
   (* SAFETY: Only changes the phantom type parameter 'c, which has no runtime
      representation. Needed so that PConvert/TConvert children (which have a
      different phantom type) can be compared by physical identity (==) against
@@ -161,16 +156,9 @@ let pp_dot ?label ppf roots =
     incr next_dot_id;
     did
   in
-  let find_label sid =
-    match label with
-    | Some f -> ( match f sid with exception Not_found -> None | lbl -> Some lbl)
-    | None -> None
-  in
-  let format_node_label lbl kind =
-    match lbl with Some name -> Printf.sprintf "%s (%s)" name kind | None -> kind
-  in
+  let format_node_label lbl kind = Printf.sprintf "%s (%s)" lbl kind in
   let period_label s =
-    let lbl = find_label (Period_series.id s) in
+    let lbl = Period_series.label s in
     match s with
     | Series_types.POfSeq _ -> format_node_label lbl "OfSeq"
     | Series_types.PUnfold _ -> format_node_label lbl "Unfold"
@@ -181,7 +169,7 @@ let pp_dot ?label ppf roots =
     | Series_types.PFilter _ -> format_node_label lbl "Filter"
   in
   let point_label s =
-    let lbl = find_label (Point_series.id s) in
+    let lbl = Point_series.label s in
     match s with
     | Series_types.TConst _ -> format_node_label lbl "PtConst"
     | Series_types.TMap _ -> format_node_label lbl "PtMap"

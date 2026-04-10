@@ -20,10 +20,10 @@ let reduce_sum = List.fold_left ( +. ) 0.0
 
 (* CONSTRUCTORS *)
 
-let of_seq cells = POfSeq { id = fresh_id (); cells }
-let unfold ~deps cells = PUnfold { id = fresh_id (); deps; cells }
+let of_seq ~label cells = POfSeq { id = fresh_id (); label; cells }
+let unfold ~label ~deps cells = PUnfold { id = fresh_id (); label; deps; cells }
 
-let extend base cont =
+let extend ~label base cont =
   let memo = ref None in
   let cont p =
     match !memo with
@@ -33,20 +33,20 @@ let extend base cont =
         memo := Some s;
         s
   in
-  PExtend { id = fresh_id (); base; cont }
+  PExtend { id = fresh_id (); label; base; cont }
 
-let map f s = PMap { id = fresh_id (); inner = s; f }
-let convert f s = PConvert { id = fresh_id (); inner = s; f }
-let map2 f s1 s2 = PMap2 { id = fresh_id (); s1; s2; f }
+let map ~label f s = PMap { id = fresh_id (); label; inner = s; f }
+let convert ~label f s = PConvert { id = fresh_id (); label; inner = s; f }
+let map2 ~label f s1 s2 = PMap2 { id = fresh_id (); label; s1; s2; f }
 let fill_zero = Option.value ~default:0.0
-let sum s1 s2 = map2 (fun a b -> fill_zero a +. fill_zero b) s1 s2
-let sub s1 s2 = map2 (fun a b -> fill_zero a -. fill_zero b) s1 s2
-let mul s1 s2 = map2 (fun a b -> fill_zero a *. fill_zero b) s1 s2
-let div s1 s2 = map2 (fun a b -> fill_zero a /. fill_zero b) s1 s2
-let filter f s = PFilter { id = fresh_id (); inner = s; f }
+let sum ~label s1 s2 = map2 ~label (fun a b -> fill_zero a +. fill_zero b) s1 s2
+let sub ~label s1 s2 = map2 ~label (fun a b -> fill_zero a -. fill_zero b) s1 s2
+let mul ~label s1 s2 = map2 ~label (fun a b -> fill_zero a *. fill_zero b) s1 s2
+let div ~label s1 s2 = map2 ~label (fun a b -> fill_zero a /. fill_zero b) s1 s2
+let filter ~label f s = PFilter { id = fresh_id (); label; inner = s; f }
 
-let after date s =
-  filter
+let after ~label date s =
+  filter ~label
     (fun seq ->
       Seq.filter_map
         (fun cell ->
@@ -59,7 +59,7 @@ let after date s =
         seq)
     s
 
-let const_ann_growth ~start ~value ~rate ~offset ~yf =
+let const_ann_growth ~label ~start ~value ~rate ~offset ~yf =
   (* TODO: Create a split function that divides value based on the relative proportion of 
      the period covered by each sub-period, as determined by the year fraction function [yf].
      This ensures the total value always sums to the parent, even if the sum of the sub-periods'
@@ -95,7 +95,8 @@ let const_ann_growth ~start ~value ~rate ~offset ~yf =
   in
   let initial_period = Period.make start (Date.shift offset start) in
   let initial_cell = Period_cell.const initial_period (fun () -> value) split_fn in
-  POfSeq { id = fresh_id (); cells = Seq.cons initial_cell (generate_cells initial_period value) }
+  POfSeq
+    { id = fresh_id (); label; cells = Seq.cons initial_cell (generate_cells initial_period value) }
 
 (* ACCESSORS *)
 
@@ -108,6 +109,16 @@ let id = function
   | PExtend { id; _ }
   | PFilter { id; _ } ->
       id
+
+let label = function
+  | POfSeq { label; _ }
+  | PUnfold { label; _ }
+  | PMap { label; _ }
+  | PConvert { label; _ }
+  | PMap2 { label; _ }
+  | PExtend { label; _ }
+  | PFilter { label; _ } ->
+      label
 
 (* QUERY HELPERS *)
 

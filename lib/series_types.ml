@@ -17,51 +17,67 @@ and 'c unfold_cell =
   | Step of { period : Period.t; queries : 'c dep_query list; f : float list -> float }
 
 and 'c period_series =
-  | POfSeq of { id : int; cells : 'c Period_cell.t Seq.t }
-  | PUnfold of { id : int; deps : 'c series_dep list; cells : 'c unfold_cell Seq.t }
-  | PMap of { id : int; inner : 'c period_series Lazy.t; f : float -> float }
+  | POfSeq of { id : int; label : string; cells : 'c Period_cell.t Seq.t }
+  | PUnfold of { id : int; label : string; deps : 'c series_dep list; cells : 'c unfold_cell Seq.t }
+  | PMap of { id : int; label : string; inner : 'c period_series Lazy.t; f : float -> float }
   | PConvert : {
       id : int;
+      label : string;
       inner : 'a period_series Lazy.t;
       f : Period.t -> float -> float;
     }
       -> 'b period_series
   | PMap2 of {
       id : int;
+      label : string;
       s1 : 'c period_series Lazy.t;
       s2 : 'c period_series Lazy.t;
       f : float option -> float option -> float;
     }
-  | PExtend of { id : int; base : 'c period_series; cont : Period.t -> 'c period_series }
+  | PExtend of {
+      id : int;
+      label : string;
+      base : 'c period_series;
+      cont : Period.t -> 'c period_series;
+    }
   | PFilter of {
       id : int;
+      label : string;
       inner : 'c period_series Lazy.t;
       f : 'c Period_cell.t Seq.t -> 'c Period_cell.t Seq.t;
     }
 
 and 'c point_series =
-  | TConst of { id : int; value : float }
-  | TMap of { id : int; inner : 'c point_series Lazy.t; f : float -> float }
+  | TConst of { id : int; label : string; value : float }
+  | TMap of { id : int; label : string; inner : 'c point_series Lazy.t; f : float -> float }
   | TConvert : {
       id : int;
+      label : string;
       inner : 'a point_series Lazy.t;
       f : Date.t -> float -> float;
     }
       -> 'b point_series
   | TDep2 of {
       id : int;
+      label : string;
       s1 : 'c point_series Lazy.t;
       s2 : 'c point_series Lazy.t;
       f : float option -> float option -> float;
     }
   | TAccum of {
       id : int;
+      label : string;
       start_date : Date.t;
       initial_value : float;
       changes : 'c period_series Lazy.t;
     }
-  | TExtend of { id : int; base : 'c point_series; cont : Date.t -> 'c point_series }
-  | TOfList of { id : int; cells : (Date.t * float) list }
+  | TExtend of {
+      id : int;
+      label : string;
+      base : 'c point_series;
+      cont : Date.t -> 'c point_series;
+    }
+  | TOfList of { id : int; label : string; cells : (Date.t * float) list }
 
 and 'c series_dep = Period_dep of 'c period_series Lazy.t | Point_dep of 'c point_series Lazy.t
 
@@ -83,5 +99,3 @@ let create_cache () =
     prefix = Hashtbl.create 4;
     accum_prev = Hashtbl.create 4;
   }
-
-exception Duplicate_label of { label : string; existing_series_id : int }

@@ -20,6 +20,6 @@
   cell_cache
   cell_types
   eval
+  series_types
   period_series
-  point_series
-  series_types))
+  point_series))

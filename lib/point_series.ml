@@ -17,22 +17,22 @@ type 'c eval_period_fn =
   Series_types.cache -> 'c Series_types.period_series -> Period.t -> 'c Period_cell.t Seq.t
 
 (*  Constructors *)
-let const value = TConst { id = fresh_id (); value }
-let map f s = TMap { id = fresh_id (); inner = s; f }
-let convert f s = TConvert { id = fresh_id (); inner = s; f }
-let dep2 f s1 s2 = TDep2 { id = fresh_id (); s1; s2; f }
+let const ~label value = TConst { id = fresh_id (); label; value }
+let map ~label f s = TMap { id = fresh_id (); label; inner = s; f }
+let convert ~label f s = TConvert { id = fresh_id (); label; inner = s; f }
+let dep2 ~label f s1 s2 = TDep2 { id = fresh_id (); label; s1; s2; f }
 let map2 = dep2
 let fill_zero = Option.value ~default:0.0
-let neg s = TMap { id = fresh_id (); inner = s; f = (fun x -> -.x) }
-let sum s1 s2 = dep2 (fun a b -> fill_zero a +. fill_zero b) s1 s2
-let sub s1 s2 = dep2 (fun a b -> fill_zero a -. fill_zero b) s1 s2
-let mul s1 s2 = dep2 (fun a b -> fill_zero a *. fill_zero b) s1 s2
-let div s1 s2 = dep2 (fun a b -> fill_zero a /. fill_zero b) s1 s2
+let neg ~label s = TMap { id = fresh_id (); label; inner = s; f = (fun x -> -.x) }
+let sum ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a +. fill_zero b) s1 s2
+let sub ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a -. fill_zero b) s1 s2
+let mul ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a *. fill_zero b) s1 s2
+let div ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a /. fill_zero b) s1 s2
 
-let accum ~start_date ~initial_value changes =
-  TAccum { id = fresh_id (); start_date; initial_value; changes }
+let accum ~label ~start_date ~initial_value changes =
+  TAccum { id = fresh_id (); label; start_date; initial_value; changes }
 
-let extend base cont =
+let extend ~label base cont =
   let memo = ref None in
   let cont d =
     match !memo with
@@ -42,9 +42,9 @@ let extend base cont =
         memo := Some s;
         s
   in
-  TExtend { id = fresh_id (); base; cont }
+  TExtend { id = fresh_id (); label; base; cont }
 
-let of_list cells = TOfList { id = fresh_id (); cells }
+let of_list ~label cells = TOfList { id = fresh_id (); label; cells }
 
 (*  Accessors *)
 let id = function
@@ -55,6 +55,15 @@ let id = function
   | TAccum { id; _ } -> id
   | TExtend { id; _ } -> id
   | TOfList { id; _ } -> id
+
+let label = function
+  | TConst { label; _ } -> label
+  | TMap { label; _ } -> label
+  | TConvert { label; _ } -> label
+  | TDep2 { label; _ } -> label
+  | TAccum { label; _ } -> label
+  | TExtend { label; _ } -> label
+  | TOfList { label; _ } -> label
 
 (*  Evaluation *)
 

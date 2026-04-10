@@ -1,5 +1,4 @@
 open Orcaset
-module S = Series.Make ()
 
 (* --- Configuration -------------------------------------------------------- *)
 
@@ -15,23 +14,27 @@ let neg_offset n = Offset.make ~months:(-(n * 3)) ~month_end:true ()
 
 let capex =
   let step period =
-    S.Period.step ~period
-      (S.Period.Query.self ~period:(Period.prev (neg_offset 1) period) ~reduce:S.Period.reduce_sum)
+    Series.Period.step ~period
+      (Series.Period.Query.self
+         ~period:(Period.prev (neg_offset 1) period)
+         ~reduce:Series.Period.reduce_sum)
       (fun prev -> prev -. 100.0)
   in
   let rec cells last () =
     let p = Period.next offset last in
     Seq.Cons (step p, cells p)
   in
-  S.Period.unfold_self ~label:"Capex" ~cells:(fun () ->
-      Seq.cons (S.Period.const ~period:initial_period (fun () -> -100.0)) (cells initial_period))
+  Series.Period.unfold_self ~label:"Capex" ~cells:(fun () ->
+      Seq.cons
+        (Series.Period.const ~period:initial_period (fun () -> -100.0))
+        (cells initial_period))
 
 (* --- Existing PPE Depreciation Run-off ------------------------------------ *)
 
 let existing_runoff =
   let p1 = Period.make (Date.make 2025 12 31) (Date.make 2026 3 31) in
   let p2 = Period.make (Date.make 2026 3 31) (Date.make 2026 6 30) in
-  S.Period.of_seq ~label:"Existing Runoff"
+  Series.Period.of_seq ~label:"Existing Runoff"
     (List.to_seq
        [
          Period_cell.const p1 (fun () -> -50.0) Period_cell.proportional_split;
@@ -43,32 +46,32 @@ let existing_runoff =
 (* dep_offset.(i) in period P = capex(P - i*offset) / useful_life. *)
 let dep_offsets =
   List.init useful_life (fun i ->
-      S.Period.unfold
+      Series.Period.unfold
         ~label:(Printf.sprintf "Dep Offset %d" i)
-        ~deps:(S.Period.dep_period (lazy capex))
+        ~deps:(Series.Period.dep_period (lazy capex))
         ~cells:(fun capex_dep ->
           Seq.map
             (fun period ->
               let lb = Period.shift (neg_offset i) period in
-              S.Period.step ~period
-                (S.Period.Query.period capex_dep ~period:lb ~reduce:S.Period.reduce_sum) (fun cv ->
-                  cv /. Float.of_int useful_life))
+              Series.Period.step ~period
+                (Series.Period.Query.period capex_dep ~period:lb ~reduce:Series.Period.reduce_sum)
+                (fun cv -> cv /. Float.of_int useful_life))
             quarters))
 
 (* --- Total Depreciation --------------------------------------------------- *)
 
 let depreciation =
   let total_offsets =
-    S.Period.sum ~label:"Total Future Depreciation" (List.map (fun o -> lazy o) dep_offsets)
+    Series.Period.sum ~label:"Total Future Depreciation" (List.map (fun o -> lazy o) dep_offsets)
   in
-  S.Period.sum ~label:"Depreciation" [ lazy existing_runoff; lazy total_offsets ]
+  Series.Period.sum ~label:"Depreciation" [ lazy existing_runoff; lazy total_offsets ]
 
 (* --- PPE ------------------------------------------------------------------ *)
 
-let ppe_change = S.Period.sub ~label:"PPE Change" (lazy capex) (lazy depreciation)
+let ppe_change = Series.Period.sub ~label:"PPE Change" (lazy capex) (lazy depreciation)
 
 let ppe_net =
-  S.Point.accum ~label:"PPE Net" ~start_date ~initial_value:starting_ppe (lazy ppe_change)
+  Series.Point.accum ~label:"PPE Net" ~start_date ~initial_value:starting_ppe (lazy ppe_change)
 
 (* --- Output --------------------------------------------------------------- *)
 
@@ -81,12 +84,12 @@ let write_dep_graph () =
   let dot_path = "examples/6-Depreciation/depreciation_deps.dot" in
   let oc = open_out dot_path in
   let ppf = Format.formatter_of_out_channel oc in
-  Graph.pp_dot ~label:S.label_of_id ppf [ S.period_to_graph depreciation ];
+  Graph.pp_dot ppf [ Series.period_to_graph depreciation ];
   Format.pp_print_flush ppf ();
   close_out oc
 
 let () =
-  let open S.Stmt in
+  let open Series.Stmt in
   let stmt =
     group
       [

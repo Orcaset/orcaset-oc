@@ -24,12 +24,9 @@ val cells : Cell_types.cell -> cell_dep_tree
 type series =
   | PeriodSeries : _ Series_types.period_series -> series
   | PointSeries : _ Series_types.point_series -> series
-
-val pack_period : 'c Series_types.period_series -> series
-(** Wrap a period series for use with {!series} and {!pp_dot}. *)
-
-val pack_point : 'c Series_types.point_series -> series
-(** Wrap a point series for use with {!series} and {!pp_dot}. *)
+      (** A handle to a series for dependency analysis and graph output. The constructors reference
+          private types and cannot be used outside the library — use {!Series.period_to_graph} and
+          {!Series.point_to_graph} to create values of this type. *)
 
 val series : series -> series list
 (** Return all transitive series dependencies (including the root itself). Handles both period and
@@ -37,8 +34,7 @@ val series : series -> series list
 
 (** {1 DOT output} *)
 
-val pp_dot : ?label:(int -> string) -> Format.formatter -> series list -> unit
+val pp_dot : Format.formatter -> series list -> unit
 (** Pretty-print a DOT digraph of the dependency structure of one or more series. Handles both
-    period and point series dependencies within the graph. When [~label] is provided, each node's
-    label includes the series name returned by the function (keyed by series id). Edges point from
-    dependencies to dependents. *)
+    period and point series dependencies within the graph. Node labels are derived from the series
+    labels assigned at construction time. Edges point from dependencies to dependents. *)
