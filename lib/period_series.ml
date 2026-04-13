@@ -165,6 +165,9 @@ let rec eval_seq : type c.
     | PUnfold { cells; _ } ->
         let series_id = id series in
         let memo_cells = Seq.memoize cells in
+        let resolve_unfold_cell_ref : (c unfold_cell -> c Period_cell.t) ref =
+          ref (fun _ -> failwith "PUnfold: unresolved self ref resolver")
+        in
 
         (* Build a memoized sequence of (RRef placeholder, unfold_cell) pairs.
            Pulling creates RRef cells with the correct periods (deterministic from
@@ -174,7 +177,7 @@ let rec eval_seq : type c.
             (Seq.map
                (fun uc ->
                  let period = match uc with Const { period; _ } | Step { period; _ } -> period in
-                 (Period_cell.cell_ref period, uc))
+                 (Period_cell.cell_ref ~resolver:(fun () -> !resolve_unfold_cell_ref uc) period, uc))
                memo_cells)
         in
 
@@ -198,6 +201,7 @@ let rec eval_seq : type c.
         let resolve_query = function
           | Self_query { period; reduce } ->
               let cells = self_query period |> List.of_seq in
+              List.iter Period_cell.ensure_resolved cells;
               (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
           | Period_query { dep; period; reduce } ->
               let cells = eval_query ~eval_point cache period (Lazy.force dep) |> List.of_seq in
@@ -236,6 +240,7 @@ let rec eval_seq : type c.
                   f;
                 }
         in
+        resolve_unfold_cell_ref := resolve_unfold_cell;
 
         (* Resolve each unfold cell and patch its RRef placeholder.
            Resolution is triggered lazily as consumers pull the sequence.
@@ -245,9 +250,8 @@ let rec eval_seq : type c.
         let resolving_seq =
           Seq.memoize
             (Seq.map
-               (fun (rref, uc) ->
-                 let resolved = resolve_unfold_cell uc in
-                 Period_cell.set_ref rref resolved;
+               (fun (rref, _) ->
+                 Period_cell.ensure_resolved rref;
                  rref)
                rref_pairs)
         in

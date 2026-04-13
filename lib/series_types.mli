@@ -61,27 +61,14 @@ and 'c point_series =
       f : Date.t -> float -> float;
     }
       -> 'b point_series
-  | TDep2 of {
+  | TMap2 of {
       id : int;
       label : string;
       s1 : 'c point_series Lazy.t;
       s2 : 'c point_series Lazy.t;
       f : float option -> float option -> float;
     }
-  | TAccum of {
-      id : int;
-      label : string;
-      start_date : Date.t;
-      initial_value : float;
-      changes : 'c period_series Lazy.t;
-    }
-  | TExtend of {
-      id : int;
-      label : string;
-      base : 'c point_series;
-      cont : Date.t -> 'c point_series;
-    }
-  | TOfList of { id : int; label : string; cells : (Date.t * float) list }
+  | TUnfold of { id : int; label : string; deps : 'c series_dep list; cells : 'c unfold_cell Seq.t }
 
 and 'c series_dep = Period_dep of 'c period_series Lazy.t | Point_dep of 'c point_series Lazy.t
 
@@ -93,7 +80,6 @@ type cache = {
   period : (int, packed_period_seq) Hashtbl.t;
   point : (int * Date.t, packed_point_cell) Hashtbl.t;
   prefix : (int, packed_period_seq) Hashtbl.t;
-  accum_prev : (int, Date.t) Hashtbl.t;
 }
 
 val create_cache : unit -> cache

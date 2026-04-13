@@ -39,8 +39,8 @@ let cells (cell : Cell_types.cell) =
           in
           Node (wrapped, children)
       | RClip { inner; _ } -> Node (wrapped, [ go_period visited inner ])
-      | RRef { cell = Some inner; _ } -> Node (wrapped, [ go_period visited inner ])
-      | RRef { cell = None; _ } -> Leaf wrapped
+      | RRef { state = Resolved inner; _ } -> Node (wrapped, [ go_period visited inner ])
+      | RRef { state = Unresolved _ | Resolving; _ } -> Leaf wrapped
   and go_point : type c. Cell_types.cell list -> c point_cell -> cell_dep_tree =
    fun visited c ->
     let wrapped = PointCell c in
@@ -56,10 +56,8 @@ let cells (cell : Cell_types.cell) =
             List.filter_map (fun opt -> Option.map (go_point visited) opt) [ c1; c2 ]
           in
           Node (wrapped, children)
-      | TAccum { prev; changes; _ } ->
-          let prev_children = match prev with Some p -> [ go_point visited p ] | None -> [] in
-          let change_children = List.of_seq (Seq.map (go_period visited) changes) in
-          Node (wrapped, prev_children @ change_children)
+      | TRef { cell = None; _ } -> Leaf wrapped
+      | TRef { cell = Some inner; _ } -> Node (wrapped, [ go_point visited inner ])
   and go visited = function
     | PeriodCell c -> go_period visited c
     | PointCell c -> go_point visited c
@@ -114,10 +112,13 @@ let series s =
       | Series_types.TConst _ -> acc
       | Series_types.TMap { inner; _ } -> go_point acc (Lazy.force inner)
       | Series_types.TConvert { inner; _ } -> go_point acc (cast_point_series (Lazy.force inner))
-      | Series_types.TDep2 { s1; s2; _ } -> go_point (go_point acc (Lazy.force s1)) (Lazy.force s2)
-      | Series_types.TAccum { changes; _ } -> go_period acc (Lazy.force changes)
-      | Series_types.TExtend { base; _ } -> go_point acc base
-      | Series_types.TOfList _ -> acc
+      | Series_types.TMap2 { s1; s2; _ } -> go_point (go_point acc (Lazy.force s1)) (Lazy.force s2)
+      | Series_types.TUnfold { deps; _ } -> 
+        List.fold_left (fun acc dep -> 
+          match dep with 
+          | Series_types.Period_dep ps -> go_period acc (Lazy.force ps)
+          | Series_types.Point_dep ps -> go_point acc (Lazy.force ps))
+          acc deps
     end
   in
   (* SAFETY: The existential type from PeriodSeries/PointSeries constructors is erased
@@ -174,10 +175,8 @@ let pp_dot ppf roots =
     | Series_types.TConst _ -> format_node_label lbl "PtConst"
     | Series_types.TMap _ -> format_node_label lbl "PtMap"
     | Series_types.TConvert _ -> format_node_label lbl "PtConvert"
-    | Series_types.TDep2 _ -> format_node_label lbl "PtDep2"
-    | Series_types.TAccum _ -> format_node_label lbl "PtAccum"
-    | Series_types.TExtend _ -> format_node_label lbl "PtExtend"
-    | Series_types.TOfList _ -> format_node_label lbl "PtOfList"
+    | Series_types.TMap2 _ -> format_node_label lbl "PtMap2"
+    | Series_types.TUnfold _ -> format_node_label lbl "PtUnfold"
   in
 
   let edges : (int * int) list ref = ref [] in
@@ -227,13 +226,19 @@ let pp_dot ppf roots =
           | Series_types.TConst _ -> []
           | Series_types.TMap { inner; _ } -> [ Lazy.force inner ]
           | Series_types.TConvert { inner; _ } -> [ cast_point_series (Lazy.force inner) ]
-          | Series_types.TDep2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
-          | Series_types.TAccum { changes; _ } ->
-              let child_id = visit_period (Lazy.force changes) in
-              edges := (did, child_id) :: !edges;
+          | Series_types.TMap2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
+          | Series_types.TUnfold { deps; _} -> 
+            List.iter
+            (fun dep -> 
+              match dep with
+              | Series_types.Period_dep ps -> 
+                let child_id = visit_period (Lazy.force ps) in
+                edges := (did, child_id) :: !edges
+              | Series_types.Point_dep ps ->
+                let child_id = visit_point (Lazy.force ps) in
+                edges := (did, child_id) :: !edges)
+              deps;
               []
-          | Series_types.TExtend { base; _ } -> [ base ]
-          | Series_types.TOfList _ -> []
         in
         List.iter
           (fun child ->

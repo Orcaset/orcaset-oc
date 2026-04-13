@@ -210,18 +210,12 @@ module Point = struct
   let const ~label value = Point_series.const ~label value
   let map ~label f inner = Point_series.map ~label f inner
   let convert ~label f inner = Point_series.convert ~label f inner
-
-  let accum ~label ~start_date ~initial_value changes =
-    Point_series.accum ~label ~start_date ~initial_value changes
-
   let map2 ~label f s1 s2 = Point_series.map2 ~label f s1 s2
   let neg ~label inner = Point_series.neg ~label inner
   let sum ~label s1 s2 = Point_series.sum ~label s1 s2
   let sub ~label s1 s2 = Point_series.sub ~label s1 s2
   let mul ~label s1 s2 = Point_series.mul ~label s1 s2
   let div ~label s1 s2 = Point_series.div ~label s1 s2
-  let of_list ~label cells = Point_series.of_list ~label cells
-  let extend ~label base cont = Point_series.extend ~label base cont
   let id = Point_series.id
   let label = Point_series.label
 

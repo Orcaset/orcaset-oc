@@ -19,12 +19,27 @@ let const period f split = RConst { id = Cell_types.fresh_id (); period; f; spli
 let map inner f = RMap { id = Cell_types.fresh_id (); inner; f }
 let convert inner f = RConvert { id = Cell_types.fresh_id (); inner; f }
 let map2 c1 c2 f = RMap2 { id = Cell_types.fresh_id (); c1; c2; f }
-let cell_ref period = RRef { id = Cell_types.fresh_id (); period; cell = None }
+let cell_ref ?resolver period =
+  RRef { id = Cell_types.fresh_id (); period; state = Unresolved resolver }
 
 let set_ref ref_cell cell =
   match ref_cell with
-  | RRef r -> r.cell <- Some cell
+  | RRef r -> r.state <- Resolved cell
   | _ -> invalid_arg "Period_cell.set_ref: not a Ref cell"
+
+let ensure_resolved : type c. c t -> unit = function
+  | RRef ({ state = Resolved _; _ } | { state = Resolving; _ }) -> ()
+  | RRef ({ state = Unresolved None; _ }) -> ()
+  | RRef ({ state = Unresolved (Some resolve); _ } as r) ->
+      r.state <- Resolving;
+      let resolved =
+        try resolve ()
+        with exn ->
+          r.state <- Unresolved (Some resolve);
+          raise exn
+      in
+      r.state <- Resolved resolved
+  | _ -> ()
 
 (* Accessors *)
 
@@ -151,8 +166,8 @@ and expand_to_period : type c. c t -> Period.t -> c t option =
         | Some c1, Some c2 -> Some (RMap2 { id; c1; c2; f })
         | _ -> None)
     | RClip { inner; _ } -> expand_to_period inner target_period
-    | RRef { cell = Some inner; _ } -> expand_to_period inner target_period
-    | RRef { cell = None; _ } -> None
+    | RRef { state = Resolved inner; _ } -> expand_to_period inner target_period
+    | RRef { state = Unresolved _ | Resolving; _ } -> None
 
 and clip cell c_period =
   let period = clipped_period cell c_period in

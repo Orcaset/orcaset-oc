@@ -44,7 +44,7 @@ val convert : 'a t -> (Period.t -> float -> float) -> 'b t
 val map2 : 'c t option -> 'c t option -> (float option -> float option -> float) -> 'c t
 (** [map2 c1 c2 f] combines two optional cells. At least one must be [Some]. *)
 
-val cell_ref : Period.t -> 'c t
+val cell_ref : ?resolver:(unit -> 'c t) -> Period.t -> 'c t
 (** [cell_ref period] is a mutable indirection cell that starts unresolved ([None]). Use {!set_ref}
     to patch it to point at the actual cell once it has been constructed. During evaluation an
     unresolved [Ref] returns [0.0]; a resolved [Ref] delegates to the target cell. When the target
@@ -54,6 +54,10 @@ val cell_ref : Period.t -> 'c t
 val set_ref : 'c t -> 'c t -> unit
 (** [set_ref ref_cell target] sets the target of a [Ref] cell.
     @raise Invalid_argument if [ref_cell] is not a [Ref]. *)
+
+val ensure_resolved : 'c t -> unit
+(** [ensure_resolved cell] forces a [Ref] cell with an internal resolver to patch itself to its
+    target. Non-[Ref] cells and plain unresolved refs are left unchanged. *)
 
 (** {1 Accessors} *)
 

@@ -7,7 +7,8 @@ let offset = Offset.make ~months:3 ~month_end:true ()
 let quarters = Period.make_seq ~start_date ~offset
 let initial_period = Period.make start_date (Date.shift offset start_date)
 let useful_life = 4
-let starting_ppe = -75.0
+
+(* let starting_ppe = -75.0 *)
 let neg_offset n = Offset.make ~months:(-(n * 3)) ~month_end:true ()
 
 (* --- Capex ---------------------------------------------------------------- *)
@@ -70,8 +71,10 @@ let depreciation =
 
 let ppe_change = Series.Period.sub ~label:"PPE Change" (lazy capex) (lazy depreciation)
 
+(* TODO: Update *)
 let ppe_net =
-  Series.Point.accum ~label:"PPE Net" ~start_date ~initial_value:starting_ppe (lazy ppe_change)
+  (* Series.Point.accum ~label:"PPE Net" ~start_date ~initial_value:starting_ppe (lazy ppe_change) *)
+  Series.Point.const ~label:"PPE Net" 1000.
 
 (* --- Output --------------------------------------------------------------- *)
 

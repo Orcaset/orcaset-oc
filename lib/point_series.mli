@@ -19,22 +19,6 @@ val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
 val convert : label:string -> (Date.t -> float -> float) -> 'c t Lazy.t -> 'd t
 (** Convert the output of a series from one unit to another. *)
 
-val accum :
-  label:string ->
-  start_date:Date.t ->
-  initial_value:float ->
-  'c Series_types.period_series Lazy.t ->
-  'c t
-(** [accum ~label ~start_date ~initial_value changes] accumulates period series values from
-    [start_date] to the query date, adding them to [initial_value]. *)
-
-val of_list : label:string -> (Date.t * float) list -> 'c t
-(** [of_list ~label cells] creates a series from a list of [(date, value)] pairs. *)
-
-val extend : label:string -> 'c t -> (Date.t -> 'c t) -> 'c t
-(** [extend ~label base cont] queries [base] first. If [base] produces a value, that value is
-    returned. Otherwise [cont] is called with the query date to obtain a continuation series. *)
-
 val map2 :
   label:string -> (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
 (** Combine two series with a binary function. *)

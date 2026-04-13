@@ -62,9 +62,11 @@ let rec depreciation =
 
 and ppe_net =
   lazy
-    (let neg_capex = Series.Period.map ~label:"Neg Capex" (fun x -> -.x) (lazy capex) in
-     let ppe_change = Series.Period.sum ~label:"PPE Change" [ lazy neg_capex; depreciation ] in
-     Series.Point.accum ~label:"PPE Net" ~start_date ~initial_value:10000.0 (lazy ppe_change))
+    (* TODO: Update *)
+    (* (let neg_capex = Series.Period.map ~label:"Neg Capex" (fun x -> -.x) (lazy capex) in *)
+    (* let ppe_change = Series.Period.sum ~label:"PPE Change" [ lazy neg_capex; depreciation ] in *)
+    (* Series.Point.accum ~label:"PPE Net" ~start_date ~initial_value:10000.0 (lazy ppe_change)) *)
+    (Series.Point.const ~label:"PPE Net" 10000.0)
 
 let depreciation = Lazy.force depreciation
 let ppe_net = Lazy.force ppe_net
@@ -101,14 +103,18 @@ let net_cash_change =
 (* --- Balance Sheet ----------------------------------------------------------- *)
 
 (* Cash: starts at $1,000, accumulates net cash change. *)
-let cash = Series.Point.accum ~label:"Cash" ~start_date ~initial_value:1000.0 (lazy net_cash_change)
+(* TODO: Update *)
+(* let cash = Series.Point.accum ~label:"Cash" ~start_date ~initial_value:1000.0 (lazy net_cash_change) *)
+let cash = Series.Point.const ~label:"Cash" 1000.0
 
 (* Common Stock: constant $5,000. *)
 let common_stock = Series.Point.const ~label:"Common Stock" 5000.0
 
 (* Retained Earnings: starts at $6,000 (initial assets - common stock), accumulates net income. *)
 let retained_earnings =
-  Series.Point.accum ~label:"Retained Earnings" ~start_date ~initial_value:6000.0 (lazy net_income)
+  (* TODO: Update *)
+  (* Series.Point.accum ~label:"Retained Earnings" ~start_date ~initial_value:6000.0 (lazy net_income) *)
+  Series.Point.const ~label:"Retained Earnings" 6000.0
 
 (* Total Assets: Cash + PPE Net. *)
 let total_assets = Series.Point.sum ~label:"Total Assets" (lazy cash) (lazy ppe_net)

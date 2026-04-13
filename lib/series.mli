@@ -138,7 +138,6 @@ module Point : sig
   val const : label:string -> float -> 'c t
   val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
   val convert : label:string -> (Date.t -> float -> float) -> 'c t Lazy.t -> 'd t
-  val accum : label:string -> start_date:Date.t -> initial_value:float -> 'c Period.t Lazy.t -> 'c t
 
   val map2 :
     label:string -> (float option -> float option -> float) -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
@@ -157,13 +156,6 @@ module Point : sig
 
   val div : label:string -> 'c t Lazy.t -> 'c t Lazy.t -> 'c t
   (** Elementwise division. Missing values are filled with [0.0]. *)
-
-  val of_list : label:string -> (Date.t * float) list -> 'c t
-  (** [of_list ~label cells] creates a series from a list of [(date, value)] pairs. *)
-
-  val extend : label:string -> 'c t -> (Date.t -> 'c t) -> 'c t
-  (** [extend ~label base cont] queries [base] first. If [base] produces a value, that value is
-      returned. Otherwise [cont] is called to obtain a continuation series. *)
 
   val id : 'c t -> int
   val label : 'c t -> string

@@ -9,7 +9,12 @@
 type split_fn = Period.t -> (unit -> float) -> Date.t -> split_result * split_result
 and split_result = { period : Period.t; f : unit -> float; split : split_fn }
 
-type 'c period_cell =
+type 'c period_ref_state =
+  | Unresolved of (unit -> 'c period_cell) option
+  | Resolving
+  | Resolved of 'c period_cell
+
+and 'c period_cell =
   | RConst of { id : int; period : Period.t; f : unit -> float; split : split_fn }
   | RDeps of { id : int; period : Period.t; deps : cell list; f : float list -> float }
   | RMap of { id : int; inner : 'c period_cell; f : float -> float }
@@ -26,7 +31,7 @@ type 'c period_cell =
       f : float option -> float option -> float;
     }
   | RClip of { id : int; inner : 'c period_cell; period : Period.t }
-  | RRef of { id : int; period : Period.t; mutable cell : 'c period_cell option }
+  | RRef of { id : int; period : Period.t; mutable state : 'c period_ref_state }
 
 and 'c point_cell =
   | TConst of { id : int; date : Date.t; value : float }
@@ -39,13 +44,7 @@ and 'c point_cell =
       c2 : 'c point_cell option;
       f : float option -> float option -> float;
     }
-  | TAccum of {
-      id : int;
-      date : Date.t;
-      prev : 'c point_cell option;
-      changes : 'c period_cell Seq.t;
-      f : float -> float;
-    }
+  | TRef of { id : int; date : Date.t; mutable cell : 'c point_cell option }
 
 and cell = PeriodCell : 'c period_cell -> cell | PointCell : 'c point_cell -> cell
 

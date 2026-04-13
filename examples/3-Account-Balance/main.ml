@@ -23,7 +23,9 @@ let rec interest =
        ~cells:(fun balance -> Seq.map (interest_step balance) periods))
 
 (* Balance: initial value + accumulated interest over time. *)
-and balance = lazy (Series.Point.accum ~label:"Balance" ~start_date ~initial_value:100.0 interest)
+(* TODO: Update *)
+(* and balance = lazy (Series.Point.const ~label:"Balance" 100.0) *)
+and balance = lazy (Series.Point.const ~label:"Balance" 100.0)
 
 (* ── Output ───────────────────────────────────────────────────────────────── *)
 

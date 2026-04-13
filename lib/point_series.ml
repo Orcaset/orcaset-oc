@@ -20,50 +20,28 @@ type 'c eval_period_fn =
 let const ~label value = TConst { id = fresh_id (); label; value }
 let map ~label f s = TMap { id = fresh_id (); label; inner = s; f }
 let convert ~label f s = TConvert { id = fresh_id (); label; inner = s; f }
-let dep2 ~label f s1 s2 = TDep2 { id = fresh_id (); label; s1; s2; f }
-let map2 = dep2
+let map2 ~label f s1 s2 = TMap2 { id = fresh_id (); label; s1; s2; f }
 let fill_zero = Option.value ~default:0.0
 let neg ~label s = TMap { id = fresh_id (); label; inner = s; f = (fun x -> -.x) }
-let sum ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a +. fill_zero b) s1 s2
-let sub ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a -. fill_zero b) s1 s2
-let mul ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a *. fill_zero b) s1 s2
-let div ~label s1 s2 = dep2 ~label (fun a b -> fill_zero a /. fill_zero b) s1 s2
-
-let accum ~label ~start_date ~initial_value changes =
-  TAccum { id = fresh_id (); label; start_date; initial_value; changes }
-
-let extend ~label base cont =
-  let memo = ref None in
-  let cont d =
-    match !memo with
-    | Some s -> s
-    | None ->
-        let s = cont d in
-        memo := Some s;
-        s
-  in
-  TExtend { id = fresh_id (); label; base; cont }
-
-let of_list ~label cells = TOfList { id = fresh_id (); label; cells }
+let sum ~label s1 s2 = map2 ~label (fun a b -> fill_zero a +. fill_zero b) s1 s2
+let sub ~label s1 s2 = map2 ~label (fun a b -> fill_zero a -. fill_zero b) s1 s2
+let mul ~label s1 s2 = map2 ~label (fun a b -> fill_zero a *. fill_zero b) s1 s2
+let div ~label s1 s2 = map2 ~label (fun a b -> fill_zero a /. fill_zero b) s1 s2
 
 (*  Accessors *)
 let id = function
   | TConst { id; _ } -> id
   | TMap { id; _ } -> id
   | TConvert { id; _ } -> id
-  | TDep2 { id; _ } -> id
-  | TAccum { id; _ } -> id
-  | TExtend { id; _ } -> id
-  | TOfList { id; _ } -> id
+  | TMap2 { id; _ } -> id
+  | TUnfold { id; _ } -> id
 
 let label = function
   | TConst { label; _ } -> label
   | TMap { label; _ } -> label
   | TConvert { label; _ } -> label
-  | TDep2 { label; _ } -> label
-  | TAccum { label; _ } -> label
-  | TExtend { label; _ } -> label
-  | TOfList { label; _ } -> label
+  | TMap2 { label; _ } -> label
+  | TUnfold { label; _ } -> label
 
 (*  Evaluation *)
 
@@ -85,40 +63,13 @@ let rec eval_query : type c.
               eval_query ~eval_period cache (cast_point_series (Lazy.force inner)) date
             in
             match inner_cell with None -> None | Some cell -> Some (Point_cell.convert cell f))
-        | TDep2 { s1; s2; f; _ } ->
+        | TMap2 { s1; s2; f; _ } ->
             let c1 = eval_query ~eval_period cache (Lazy.force s1) date in
             let c2 = eval_query ~eval_period cache (Lazy.force s2) date in
             Some (Point_cell.dep2 c1 c2 date f)
-        | TAccum { start_date; initial_value; changes; _ } ->
-            if Date.compare date start_date <= 0 then Some (Point_cell.const date initial_value)
-            else
-              let change_series = Lazy.force changes in
-              let prev, query_start =
-                match Hashtbl.find_opt cache.accum_prev series_id with
-                | Some prev_date
-                  when Date.compare prev_date start_date > 0 && Date.compare prev_date date < 0 ->
-                    let (Pack_point_cell cell) = Hashtbl.find cache.point (series_id, prev_date) in
-                    (Some (cast_point_cell cell), prev_date)
-                | _ -> (None, start_date)
-              in
-              let query_period = Period.make query_start date in
-              let cells = eval_period cache change_series query_period in
-              let f =
-                match prev with None -> fun total -> initial_value +. total | Some _ -> Fun.id
-              in
-              let cell = Point_cell.accum ?prev cells date f in
-              Hashtbl.replace cache.accum_prev series_id date;
-              Some cell
-        | TExtend { base; cont; _ } -> (
-            match eval_query ~eval_period cache base date with
-            | Some _ as result -> result
-            | None ->
-                let cont_series = cont date in
-                eval_query ~eval_period cache cont_series date)
-        | TOfList { cells; _ } -> (
-            match List.find_opt (fun (d, _) -> Date.equal d date) cells with
-            | Some (_, v) -> Some (Point_cell.const date v)
-            | None -> None)
+        | TUnfold _ ->
+          (* Placeholder *)
+          Some (Point_cell.const (Date.make 0 0 0) 0.0)
       in
       match value with
       | None -> value

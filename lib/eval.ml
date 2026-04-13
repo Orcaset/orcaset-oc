@@ -3,6 +3,12 @@
 
 open Cell_types
 
+exception Non_convergence of {
+  iterations : int;
+  delta : float;
+  threshold : float;
+}
+
 (* Cache dispatch helpers *)
 
 let find_in_cache cache (cell : Cell_types.cell) =
@@ -30,9 +36,9 @@ let rec prime_tree cache cell =
           in
           match pc with
           | RConst { f; _ } -> store (Cell_cache.Resolved (f ()))
-          | RRef { cell = None; _ } ->
+          | RRef { state = Unresolved _ | Resolving; _ } ->
               failwith "prime: Ref cell with no resolved dependency reached during priming"
-          | RRef { cell = Some inner; _ } ->
+          | RRef { state = Resolved inner; _ } ->
               store (Cell_cache.Unresolved (0.0, 0));
               prime_tree cache (PeriodCell inner)
           | RDeps { deps; _ } ->
@@ -52,7 +58,7 @@ let rec prime_tree cache cell =
           | RClip { inner; period; _ } -> (
               store (Cell_cache.Unresolved (0.0, 0));
               match inner with
-              | RRef { cell = None; _ } -> ()
+              | RRef { state = Unresolved _ | Resolving; _ } -> ()
               | _ -> (
                   match Period_cell.expand_to_period inner period with
                   | Some expanded -> prime_tree cache (PeriodCell expanded)
@@ -67,15 +73,16 @@ let rec prime_tree cache cell =
           | TConvert { inner; _ } ->
               store (Cell_cache.Unresolved (0.0, 0));
               prime_tree cache (PointCell inner)
+          | TRef { cell = None; _ } ->
+              failwith "prime: Ref cell with no resolved dependency reached during priming"
+          | TRef { cell = Some inner; _ } ->
+              store (Cell_cache.Unresolved (0.0, 0));
+              prime_tree cache (PointCell inner)
           | TDep2 { c1; c2; _ } ->
               store (Cell_cache.Unresolved (0.0, 0));
               List.iter
                 (fun dep -> prime_tree cache (PointCell dep))
-                (List.filter_map Fun.id [ c1; c2 ])
-          | TAccum { prev; changes; _ } ->
-              store (Cell_cache.Unresolved (0.0, 0));
-              (match prev with Some p -> prime_tree cache (PointCell p) | None -> ());
-              Seq.iter (fun dep -> prime_tree cache (PeriodCell dep)) changes))
+                (List.filter_map Fun.id [ c1; c2 ])))
 
 (* Evaluation *)
 
@@ -132,7 +139,7 @@ and compute_value cache iteration = function
           (f v1 v2, Float.max d1 d2)
       | RClip { inner; period; _ } -> (
           match inner with
-          | RRef { cell = None; _ } -> (0.0, 0.0)
+          | RRef { state = Unresolved _ | Resolving; _ } -> (0.0, 0.0)
           | _ -> (
               match Period_cell.expand_to_period inner period with
               | Some expanded -> eval_cell cache iteration (PeriodCell expanded)
@@ -143,8 +150,8 @@ and compute_value cache iteration = function
                     /. float_of_int (Period.days (Period_cell.period inner))
                   in
                   (v *. scale, d)))
-      | RRef { cell = Some c; _ } -> eval_cell cache iteration (PeriodCell c)
-      | RRef { cell = None; _ } -> (0.0, 0.0))
+      | RRef { state = Resolved c; _ } -> eval_cell cache iteration (PeriodCell c)
+      | RRef { state = Unresolved _ | Resolving; _ } -> (0.0, 0.0))
   | PointCell tc -> (
       match tc with
       | TConst { value; _ } -> (value, 0.0)
@@ -170,18 +177,8 @@ and compute_value cache iteration = function
                 (Some v, d)
           in
           (f v1 v2, Float.max d1 d2)
-      | TAccum { prev; changes; f; _ } ->
-          let prev_value, prev_delta =
-            match prev with None -> (0.0, 0.0) | Some p -> eval_cell cache iteration (PointCell p)
-          in
-          let total_accum, max_delta =
-            Seq.fold_left
-              (fun (acc_v, acc_d) change ->
-                let v, d = eval_cell cache iteration (PeriodCell change) in
-                (acc_v +. v, Float.max acc_d d))
-              (prev_value, prev_delta) changes
-          in
-          (f total_accum, max_delta))
+      | TRef { cell = None; _ } -> (0.0, 0.0)
+      | TRef { cell = Some c; _ } -> eval_cell cache iteration (PointCell c))
 
 (* Iteration *)
 
@@ -193,10 +190,17 @@ let resolve_pass cache roots iteration =
     0.0 roots
 
 let rec iterate cache roots iteration =
-  if iteration > Cell_cache.max_iterations then ()
-  else
-    let delta = resolve_pass cache roots iteration in
-    if delta < Cell_cache.convergence_threshold then () else iterate cache roots (iteration + 1)
+  let delta = resolve_pass cache roots iteration in
+  if delta < Cell_cache.convergence_threshold then ()
+  else if iteration >= Cell_cache.max_iterations then
+    raise
+      (Non_convergence
+         {
+           iterations = Cell_cache.max_iterations;
+           delta;
+           threshold = Cell_cache.convergence_threshold;
+         })
+  else iterate cache roots (iteration + 1)
 
 (* Result extraction *)
 
