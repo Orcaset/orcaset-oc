@@ -15,7 +15,7 @@ val const : label:string -> float -> 'c t
 
 val unfold :
   label:string -> deps:'c Series_types.series_dep list -> 'c Series_types.point_unfold_cell Seq.t -> 'c t
-(** Build a point series from a declarative sequence of date-indexed point unfold cells. *)
+(** Build a point series from a declarative sequence of period-indexed change cells. *)
 
 val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
 (** Transform the output of a series by applying a function to each cell's value. *)
@@ -53,4 +53,4 @@ val label : 'c t -> string
 
 val eval_query :
   eval_period:'c eval_period_fn -> Series_types.cache -> 'c t -> Date.t -> 'c Point_cell.t option
-(** Materialize a point series at a given date into a point cell. *)
+(** Materialize a point series at a given date into an as-of point cell. *)

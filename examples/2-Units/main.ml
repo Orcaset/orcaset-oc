@@ -1,5 +1,3 @@
-[@@@warning "-32"]
-
 open Orcaset
 
 (* This example shows how Orcaset protects against unit/currency mismatches at compile time. *)

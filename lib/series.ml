@@ -296,12 +296,12 @@ module Point = struct
     let point_or ~default dep ~date = map (Option.value ~default) (point dep ~date)
   end
 
-  let const_cell ~date f = Series_types.Point_const_cell { date; f }
+  let const_cell ~period f = Series_types.Point_const_cell { period; f }
 
-  let step ~date (query : ('a, 'c) Query.t) f =
+  let step ~period (query : ('a, 'c) Query.t) f =
     Series_types.Point_step_cell
       {
-        date;
+        period;
         queries = query.queries;
         f = (fun values -> f (Period.decode_all "step" query.decode values));
       }

@@ -31,15 +31,23 @@ let sub ~label s1 s2 = map2 ~label (fun a b -> fill_zero a -. fill_zero b) s1 s2
 let mul ~label s1 s2 = map2 ~label (fun a b -> fill_zero a *. fill_zero b) s1 s2
 let div ~label s1 s2 = map2 ~label (fun a b -> fill_zero a /. fill_zero b) s1 s2
 
-let unfold_cell_date = function
-  | Point_const_cell { date; _ } | Point_step_cell { date; _ } -> date
+let reduce_sum = List.fold_left ( +. ) 0.0
 
-let rec find_unfold_cell target_date cells =
+let unfold_cell_period = function
+  | Point_const_cell { period; _ } | Point_step_cell { period; _ } -> period
+
+let rec take_unfold_cells_through_date cells date () =
   match cells () with
-  | Seq.Nil -> None
+  | Seq.Nil -> Seq.Nil
   | Seq.Cons (cell, rest) ->
-      let cmp = Date.compare (unfold_cell_date cell) target_date in
-      if cmp = 0 then Some cell else if cmp > 0 then None else find_unfold_cell target_date rest
+      let period = unfold_cell_period cell in
+      let start_date = Period.start_date period in
+      let end_date = Period.end_date period in
+      if Date.compare end_date date <= 0 then
+        Seq.Cons ((cell, None), take_unfold_cells_through_date rest date)
+      else if Date.compare start_date date < 0 then
+        Seq.Cons ((cell, Some (Period.make start_date date)), Seq.empty)
+      else Seq.Nil
 
 (*  Accessors *)
 let id = function
@@ -93,64 +101,83 @@ let rec eval_query : type c.
               | _ -> invalid_arg "Point_series.eval_query: internal decode mismatch"
             in
             Some (Point_cell.deps date point_deps decode)
-        | TUnfold { cells; _ } -> (
-            match find_unfold_cell date cells with
-            | None -> None
-            | Some unfold_cell ->
-                let placeholder = Cell_types.TRef { id = Cell_types.fresh_id (); date; cell = None } in
-                let resolve_query = function
-                  | Point_self_query { date } ->
-                      let cells =
-                        match eval_query ~eval_period cache series date with
-                        | Some cell -> [ Cell_types.PointCell cell ]
-                        | None -> []
-                      in
-                      (cells, List.fold_left ( +. ) 0.0)
-                  | Point_self_present_query { date } ->
-                      let cells, reduce =
-                        match eval_query ~eval_period cache series date with
-                        | Some cell -> ([ Cell_types.PointCell cell ], fun _ -> 1.0)
-                        | None -> ([], fun _ -> 0.0)
-                      in
-                      (cells, reduce)
-                  | Point_period_query { dep; period; reduce } ->
-                      let cells = eval_period cache (Lazy.force dep) period |> List.of_seq in
-                      (List.map (fun cell -> Cell_types.PeriodCell cell) cells, reduce)
-                  | Point_point_query { dep; date } ->
-                      let cells =
-                        match eval_query ~eval_period cache (Lazy.force dep) date with
-                        | Some cell -> [ Cell_types.PointCell cell ]
-                        | None -> []
-                      in
-                      (cells, List.fold_left ( +. ) 0.0)
-                  | Point_point_present_query { dep; date } ->
-                      let cells, reduce =
-                        match eval_query ~eval_period cache (Lazy.force dep) date with
-                        | Some cell -> ([ Cell_types.PointCell cell ], fun _ -> 1.0)
-                        | None -> ([], fun _ -> 0.0)
-                      in
-                      (cells, reduce)
-                in
-                Hashtbl.replace cache.point (series_id, date) (Pack_point_cell placeholder);
-                let resolved =
-                  match unfold_cell with
-                  | Point_const_cell { f; _ } -> Point_cell.const date (f ())
-                  | Point_step_cell { queries; f; _ } ->
-                      let inner_cells =
-                        List.map
-                          (fun q ->
-                            let dep_cells, reduce = resolve_query q in
-                            Point_cell.deps date dep_cells reduce)
-                          queries
-                      in
-                      Point_cell.deps date
-                        (List.map (fun c -> Cell_types.PointCell c) inner_cells)
-                        f
-                in
-                (match placeholder with
-                | Cell_types.TRef state -> state.cell <- Some resolved
-                | _ -> assert false);
-                Some placeholder)
+        | TUnfold { cells; _ } ->
+            let unfold_cells = take_unfold_cells_through_date cells date |> List.of_seq in
+            if unfold_cells = [] then None
+            else
+              let placeholder = Cell_types.TRef { id = Cell_types.fresh_id (); date; cell = None } in
+              let resolve_query = function
+                | Point_self_query { date } ->
+                    let cells =
+                      match eval_query ~eval_period cache series date with
+                      | Some cell -> [ Cell_types.PointCell cell ]
+                      | None -> []
+                    in
+                    (cells, reduce_sum)
+                | Point_self_present_query { date } ->
+                    let cells, reduce =
+                      match eval_query ~eval_period cache series date with
+                      | Some cell -> ([ Cell_types.PointCell cell ], fun _ -> 1.0)
+                      | None -> ([], fun _ -> 0.0)
+                    in
+                    (cells, reduce)
+                | Point_period_query { dep; period; reduce } ->
+                    let cells = eval_period cache (Lazy.force dep) period |> List.of_seq in
+                    (List.map (fun cell -> Cell_types.PeriodCell cell) cells, reduce)
+                | Point_point_query { dep; date } ->
+                    let cells =
+                      match eval_query ~eval_period cache (Lazy.force dep) date with
+                      | Some cell -> [ Cell_types.PointCell cell ]
+                      | None -> []
+                    in
+                    (cells, reduce_sum)
+                | Point_point_present_query { dep; date } ->
+                    let cells, reduce =
+                      match eval_query ~eval_period cache (Lazy.force dep) date with
+                      | Some cell -> ([ Cell_types.PointCell cell ], fun _ -> 1.0)
+                      | None -> ([], fun _ -> 0.0)
+                    in
+                    (cells, reduce)
+              in
+              let resolve_unfold_cell = function
+                | Point_const_cell { period; f } ->
+                    Period_cell.const period f Period_cell.proportional_split
+                | Point_step_cell { period; queries; f } ->
+                    let inner_cells =
+                      List.map
+                        (fun q ->
+                          let dep_cells, reduce = resolve_query q in
+                          Cell_types.RDeps
+                            { id = Cell_types.fresh_id (); period; deps = dep_cells; f = reduce })
+                        queries
+                    in
+                    Cell_types.RDeps
+                      {
+                        id = Cell_types.fresh_id ();
+                        period;
+                        deps = List.map (fun c -> Cell_types.PeriodCell c) inner_cells;
+                        f;
+                      }
+              in
+              Hashtbl.replace cache.point (series_id, date) (Pack_point_cell placeholder);
+              let resolved_period_cells =
+                List.map
+                  (fun (unfold_cell, clipped_period) ->
+                    let cell = resolve_unfold_cell unfold_cell in
+                    match clipped_period with
+                    | None -> cell
+                    | Some period -> Period_cell.clip cell period)
+                  unfold_cells
+              in
+              let resolved =
+                Point_cell.deps date
+                  (List.map (fun cell -> Cell_types.PeriodCell cell) resolved_period_cells)
+                  reduce_sum
+              in
+              (match placeholder with
+              | Cell_types.TRef state -> state.cell <- Some resolved
+              | _ -> assert false);
+              Some placeholder
       in
       match value with
       | None -> value

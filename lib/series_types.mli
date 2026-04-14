@@ -32,8 +32,12 @@ and 'c point_dep_query =
   | Point_point_present_query of { dep : 'c point_series Lazy.t; date : Date.t }
 
 and 'c point_unfold_cell =
-  | Point_const_cell of { date : Date.t; f : unit -> float }
-  | Point_step_cell of { date : Date.t; queries : 'c point_dep_query list; f : float list -> float }
+  | Point_const_cell of { period : Period.t; f : unit -> float }
+  | Point_step_cell of {
+      period : Period.t;
+      queries : 'c point_dep_query list;
+      f : float list -> float;
+    }
 
 and 'c period_series =
   | POfSeq of { id : int; label : string; cells : 'c Period_cell.t Seq.t }

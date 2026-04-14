@@ -1,31 +1,37 @@
-[@@@warning "-32"]
-
 open Orcaset
 
-(* This example models an account balance that grows over time based on 
-   monthly compounding interest. The balance can be queried at any 
-   date for the current value, including accrued interest. *)
+(* This example models an account balance that compounds monthly. Period interest
+   flows are computed from the opening balance, then accumulated into an as-of
+   point balance that can be queried on any date. *)
 
 let start_date = Date.make 2025 12 31
 let offset = Offset.make ~months:1 ~month_end:true ()
 let rate = 0.03
 let periods = Period.make_seq ~start_date ~offset
 
-(* Interest: each month's interest = balance at period start * rate. *)
+let principal = lazy (Series.Point.const ~label:"Principal" 100.0)
+
+(* Each month's interest is based on the balance at the start of that month. *)
 let interest_step balance period =
   Series.Period.step ~period
     (Series.Period.Query.point_or ~default:0.0 balance ~date:(Period.start_date period))
-    (fun v -> v *. rate)
+    (fun opening_balance -> opening_balance *. rate)
+
+(* Convert each period interest flow into a point-series change over the same period. *)
+let accrued_interest_step interest period =
+  Series.Point.step ~period
+    (Series.Point.Query.period interest ~period ~reduce:Series.Period.reduce_sum)
+    Fun.id
 
 let rec interest =
   lazy
     (Series.Period.unfold ~label:"Interest" ~deps:(Series.Period.dep_point balance)
        ~cells:(fun balance -> Seq.map (interest_step balance) periods))
-
-(* Balance: initial value + accumulated interest over time. *)
-(* TODO: Update *)
-(* and balance = lazy (Series.Point.const ~label:"Balance" 100.0) *)
-and balance = lazy (Series.Point.const ~label:"Balance" 100.0)
+and accrued_interest =
+  lazy
+    (Series.Point.unfold ~label:"Accrued interest" ~deps:(Series.Point.dep_period interest)
+       ~cells:(fun interest -> Seq.map (accrued_interest_step interest) periods))
+and balance = lazy (Series.Point.sum ~label:"Balance" principal accrued_interest)
 
 (* ── Output ───────────────────────────────────────────────────────────────── *)
 

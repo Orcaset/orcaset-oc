@@ -149,6 +149,7 @@ module Point : sig
   val ( let+ ) : ('a, 'c) deps -> ('a -> 'b) -> ('b, 'c) deps
   val ( and+ ) : ('a, 'c) deps -> ('b, 'c) deps -> ('a * 'b, 'c) deps
   val const : label:string -> float -> 'c t
+  (** [const ~label value] returns the same as-of value at every date. *)
 
   module Query : sig
     type ('a, 'c) t
@@ -165,12 +166,14 @@ module Point : sig
     val ( and+ ) : ('a, 'c) t -> ('b, 'c) t -> ('a * 'b, 'c) t
   end
 
-  val const_cell : date:Date.t -> (unit -> float) -> 'c cell
-  val step : date:Date.t -> ('a, 'c) Query.t -> ('a -> float) -> 'c cell
+  val const_cell : period:period -> (unit -> float) -> 'c cell
+  val step : period:period -> ('a, 'c) Query.t -> ('a -> float) -> 'c cell
 
   val unfold : label:string -> deps:('deps, 'c) deps -> cells:('deps -> 'c cell Seq.t) -> 'c t
-  (** [unfold ~label ~deps ~cells] builds a point series from date-indexed cells. Inside the cell
-      builder, {!Query.self} references the constructing point series itself. *)
+  (** [unfold ~label ~deps ~cells] builds a point series from period-indexed change cells. Querying
+      the resulting series at a date returns the cumulative clipped total through that date. Inside
+      the cell builder, {!Query.self} references the constructing point series itself with these
+      as-of semantics. *)
 
   val unfold_self : label:string -> cells:(unit -> 'c cell Seq.t) -> 'c t
   (** Convenience wrapper for {!unfold} when the cell builder has no external dependencies. *)
@@ -200,7 +203,7 @@ module Point : sig
   val label : 'c t -> string
 
   val query : Date.t -> 'c t -> 'c q_result
-  (** [query date series] retrieves the cell for [date]. *)
+  (** [query date series] retrieves the as-of cell for [date]. *)
 
   val query_many : Date.t list -> 'c t -> 'c q_result list
   (** [query_many dates series] retrieves one {!q_result} per date. *)
