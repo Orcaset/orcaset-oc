@@ -8,7 +8,7 @@ type 'c t = 'c Cell_types.point_cell
 val const : Date.t -> float -> 'c t
 val map : 'c t -> (float -> float) -> 'c t
 val convert : 'a t -> (Date.t -> float -> float) -> 'b t
-val dep2 : 'c t option -> 'c t option -> Date.t -> (float option -> float option -> float) -> 'c t
+val deps : Date.t -> Cell_types.cell list -> (float list -> float) -> 'c t
 
 (** {1 Accessors} *)
 

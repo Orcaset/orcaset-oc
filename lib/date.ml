@@ -47,6 +47,8 @@ let make year month day =
     invalid_arg (Printf.sprintf "Date.make: invalid day %d for %04d-%02d" day year month);
   { year; month; day; jdn = compute_jdn ~year ~month ~day }
 
+let lower_bound = make 1 1 1
+
 (* Accessors *)
 
 let year d = d.year

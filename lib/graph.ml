@@ -51,11 +51,7 @@ let cells (cell : Cell_types.cell) =
       | TConst _ -> Leaf wrapped
       | TMap { inner; _ } -> Node (wrapped, [ go_point visited inner ])
       | TConvert { inner; _ } -> Node (wrapped, [ go_point visited inner ])
-      | TDep2 { c1; c2; _ } ->
-          let children =
-            List.filter_map (fun opt -> Option.map (go_point visited) opt) [ c1; c2 ]
-          in
-          Node (wrapped, children)
+      | TDeps { deps; _ } -> Node (wrapped, List.map (go visited) deps)
       | TRef { cell = None; _ } -> Leaf wrapped
       | TRef { cell = Some inner; _ } -> Node (wrapped, [ go_point visited inner ])
   and go visited = function
@@ -113,12 +109,13 @@ let series s =
       | Series_types.TMap { inner; _ } -> go_point acc (Lazy.force inner)
       | Series_types.TConvert { inner; _ } -> go_point acc (cast_point_series (Lazy.force inner))
       | Series_types.TMap2 { s1; s2; _ } -> go_point (go_point acc (Lazy.force s1)) (Lazy.force s2)
-      | Series_types.TUnfold { deps; _ } -> 
-        List.fold_left (fun acc dep -> 
-          match dep with 
-          | Series_types.Period_dep ps -> go_period acc (Lazy.force ps)
-          | Series_types.Point_dep ps -> go_point acc (Lazy.force ps))
-          acc deps
+      | Series_types.TUnfold { deps; _ } ->
+          List.fold_left
+            (fun acc dep ->
+              match dep with
+              | Series_types.Period_dep ps -> go_period acc (Lazy.force ps)
+              | Series_types.Point_dep ps -> go_point acc (Lazy.force ps))
+            acc deps
     end
   in
   (* SAFETY: The existential type from PeriodSeries/PointSeries constructors is erased
@@ -227,17 +224,17 @@ let pp_dot ppf roots =
           | Series_types.TMap { inner; _ } -> [ Lazy.force inner ]
           | Series_types.TConvert { inner; _ } -> [ cast_point_series (Lazy.force inner) ]
           | Series_types.TMap2 { s1; s2; _ } -> [ Lazy.force s1; Lazy.force s2 ]
-          | Series_types.TUnfold { deps; _} -> 
-            List.iter
-            (fun dep -> 
-              match dep with
-              | Series_types.Period_dep ps -> 
-                let child_id = visit_period (Lazy.force ps) in
-                edges := (did, child_id) :: !edges
-              | Series_types.Point_dep ps ->
-                let child_id = visit_point (Lazy.force ps) in
-                edges := (did, child_id) :: !edges)
-              deps;
+          | Series_types.TUnfold { deps; _ } ->
+              List.iter
+                (fun dep ->
+                  match dep with
+                  | Series_types.Period_dep ps ->
+                      let child_id = visit_period (Lazy.force ps) in
+                      edges := (did, child_id) :: !edges
+                  | Series_types.Point_dep ps ->
+                      let child_id = visit_point (Lazy.force ps) in
+                      edges := (did, child_id) :: !edges)
+                deps;
               []
         in
         List.iter

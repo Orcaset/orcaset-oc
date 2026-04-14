@@ -165,7 +165,7 @@ let rec eval_seq : type c.
     | PUnfold { cells; _ } ->
         let series_id = id series in
         let memo_cells = Seq.memoize cells in
-        let resolve_unfold_cell_ref : (c unfold_cell -> c Period_cell.t) ref =
+        let resolve_unfold_cell_ref : (c period_unfold_cell -> c Period_cell.t) ref =
           ref (fun _ -> failwith "PUnfold: unresolved self ref resolver")
         in
 
@@ -176,7 +176,10 @@ let rec eval_seq : type c.
           Seq.memoize
             (Seq.map
                (fun uc ->
-                 let period = match uc with Const { period; _ } | Step { period; _ } -> period in
+                 let period =
+                   match uc with
+                   | Period_const_cell { period; _ } | Period_step_cell { period; _ } -> period
+                 in
                  (Period_cell.cell_ref ~resolver:(fun () -> !resolve_unfold_cell_ref uc) period, uc))
                memo_cells)
         in
@@ -199,21 +202,21 @@ let rec eval_seq : type c.
         in
         let self_query period = clipped_cells period self_query_scope in
         let resolve_query = function
-          | Self_query { period; reduce } ->
+          | Period_self_query { period; reduce } ->
               let cells = self_query period |> List.of_seq in
               List.iter Period_cell.ensure_resolved cells;
               (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
-          | Period_query { dep; period; reduce } ->
+          | Period_period_query { dep; period; reduce } ->
               let cells = eval_query ~eval_point cache period (Lazy.force dep) |> List.of_seq in
               (List.map (fun c -> Cell_types.PeriodCell c) cells, reduce)
-          | Point_query { dep; date } ->
+          | Period_point_query { dep; date } ->
               let cells =
                 match eval_point cache date (Lazy.force dep) with
                 | Some cell -> [ Cell_types.PointCell cell ]
                 | None -> []
               in
               (cells, reduce_sum)
-          | Point_present_query { dep; date } ->
+          | Period_point_present_query { dep; date } ->
               let cells, reduce =
                 match eval_point cache date (Lazy.force dep) with
                 | Some cell -> ([ Cell_types.PointCell cell ], fun _ -> 1.0)
@@ -222,8 +225,9 @@ let rec eval_seq : type c.
               (cells, reduce)
         in
         let resolve_unfold_cell = function
-          | Const { period; f } -> Period_cell.const period f Period_cell.proportional_split
-          | Step { period; queries; f } ->
+          | Period_const_cell { period; f } ->
+              Period_cell.const period f Period_cell.proportional_split
+          | Period_step_cell { period; queries; f } ->
               let inner_cells =
                 List.map
                   (fun q ->

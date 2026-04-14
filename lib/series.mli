@@ -65,7 +65,7 @@ module Period : sig
 
     val pure : 'a -> ('a, 'c) t
     val self : period:Period.t -> reduce:reduce -> (float, 'c) t
-    val period : 'c dep -> period:Period.t -> reduce:reduce -> (float, 'c) t
+    val period : 'c dep -> period:period -> reduce:reduce -> (float, 'c) t
     val point : 'c point_dep -> date:Date.t -> (float option, 'c) t
     val point_or : default:float -> 'c point_dep -> date:Date.t -> (float, 'c) t
     val map : ('a -> 'b) -> ('a, 'c) t -> ('b, 'c) t
@@ -134,8 +134,47 @@ end
 
 module Point : sig
   type 'c t = 'c point_t
+  type reduce = float list -> float
+  type 'c dep = 'c Period.dep
+  type 'c point_dep = 'c Period.point_dep
+  type 'c cell
+  type ('a, 'c) deps = ('a, 'c) Period.deps
 
+  (** {2 Dependency applicative} *)
+
+  val no_deps : (unit, 'c) deps
+  val dep_period : 'c period_t Lazy.t -> ('c dep, 'c) deps
+  val dep_point : 'c point_t Lazy.t -> ('c point_dep, 'c) deps
+  val both : ('a, 'c) deps -> ('b, 'c) deps -> ('a * 'b, 'c) deps
+  val ( let+ ) : ('a, 'c) deps -> ('a -> 'b) -> ('b, 'c) deps
+  val ( and+ ) : ('a, 'c) deps -> ('b, 'c) deps -> ('a * 'b, 'c) deps
   val const : label:string -> float -> 'c t
+
+  module Query : sig
+    type ('a, 'c) t
+
+    val pure : 'a -> ('a, 'c) t
+    val self : date:Date.t -> (float option, 'c) t
+    val self_or : default:float -> date:Date.t -> (float, 'c) t
+    val period : 'c dep -> period:period -> reduce:reduce -> (float, 'c) t
+    val point : 'c point_dep -> date:Date.t -> (float option, 'c) t
+    val point_or : default:float -> 'c point_dep -> date:Date.t -> (float, 'c) t
+    val map : ('a -> 'b) -> ('a, 'c) t -> ('b, 'c) t
+    val both : ('a, 'c) t -> ('b, 'c) t -> ('a * 'b, 'c) t
+    val ( let+ ) : ('a, 'c) t -> ('a -> 'b) -> ('b, 'c) t
+    val ( and+ ) : ('a, 'c) t -> ('b, 'c) t -> ('a * 'b, 'c) t
+  end
+
+  val const_cell : date:Date.t -> (unit -> float) -> 'c cell
+  val step : date:Date.t -> ('a, 'c) Query.t -> ('a -> float) -> 'c cell
+
+  val unfold : label:string -> deps:('deps, 'c) deps -> cells:('deps -> 'c cell Seq.t) -> 'c t
+  (** [unfold ~label ~deps ~cells] builds a point series from date-indexed cells. Inside the cell
+      builder, {!Query.self} references the constructing point series itself. *)
+
+  val unfold_self : label:string -> cells:(unit -> 'c cell Seq.t) -> 'c t
+  (** Convenience wrapper for {!unfold} when the cell builder has no external dependencies. *)
+
   val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
   val convert : label:string -> (Date.t -> float -> float) -> 'c t Lazy.t -> 'd t
 

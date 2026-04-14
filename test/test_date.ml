@@ -86,9 +86,10 @@ let test_weekday () =
   check_int "saturday" 6 (Date.weekday (Date.make 2026 1 3));
   check_int "sunday" 7 (Date.weekday (Date.make 2025 12 28))
 
-let test_min_max_compare_equal () =
+let test_min_bound_max_compare_equal () =
   let d1 = Date.make 2025 6 1 in
   let d2 = Date.make 2025 6 2 in
+  check_date "lower bound" (Date.make 1 1 1) Date.lower_bound;
   check_bool "equal" true (Date.equal d1 (Date.make 2025 6 1));
   check_bool "not equal" false (Date.equal d1 d2);
   check_int "compare" (-1) (Date.compare d1 d2);
@@ -139,7 +140,7 @@ let tests =
     Alcotest.test_case "shift months then days" `Quick test_shift_applies_months_then_days;
     Alcotest.test_case "shift month_end" `Quick test_shift_month_end;
     Alcotest.test_case "weekday" `Quick test_weekday;
-    Alcotest.test_case "compare min max" `Quick test_min_max_compare_equal;
+    Alcotest.test_case "compare lower bound min max" `Quick test_min_bound_max_compare_equal;
     Alcotest.test_case "hash" `Quick test_hash;
     Alcotest.test_case "pp" `Quick test_pp;
     Alcotest.test_case "to_string" `Quick test_to_string;

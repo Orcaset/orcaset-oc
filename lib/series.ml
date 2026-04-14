@@ -36,8 +36,8 @@ module Period = struct
   type reduce = Series_types.reduce
   type 'c dep = 'c t Lazy.t
   type 'c point_dep = 'c point_t Lazy.t
-  type 'c dep_query = 'c Series_types.dep_query
-  type 'c cell = 'c Series_types.unfold_cell
+  type 'c dep_query = 'c Series_types.period_dep_query
+  type 'c cell = 'c Series_types.period_unfold_cell
 
   type ('a, 'c) compiled_query = {
     queries : 'c dep_query list;
@@ -82,18 +82,21 @@ module Period = struct
     let ( and+ ) = both
 
     let self ~period ~reduce =
-      { queries = [ Series_types.Self_query { period; reduce } ]; decode = take_one "self" }
+      { queries = [ Series_types.Period_self_query { period; reduce } ]; decode = take_one "self" }
 
     let period (dep : 'c dep) ~period ~reduce =
       {
-        queries = [ Series_types.Period_query { dep; period; reduce } ];
+        queries = [ Series_types.Period_period_query { dep; period; reduce } ];
         decode = take_one "period";
       }
 
     let point (dep : 'c point_dep) ~date =
       {
         queries =
-          [ Series_types.Point_present_query { dep; date }; Series_types.Point_query { dep; date } ];
+          [
+            Series_types.Period_point_present_query { dep; date };
+            Series_types.Period_point_query { dep; date };
+          ];
         decode =
           (fun xs ->
             let present, xs = take_one "point" xs in
@@ -131,12 +134,13 @@ module Period = struct
           (f v, d));
     }
 
+  let run_deps (deps : ('a, 'c) deps) = deps.run ()
   let ( let+ ) a f = map f a
   let ( and+ ) = both
-  let const ~period f = Series_types.Const { period; f }
+  let const ~period f = Series_types.Period_const_cell { period; f }
 
   let step ~period (query : ('a, 'c) Query.t) f =
-    Series_types.Step
+    Series_types.Period_step_cell
       {
         period;
         queries = query.queries;
@@ -206,8 +210,107 @@ end
 
 module Point = struct
   type 'c t = 'c point_t
+  type reduce = Series_types.reduce
+  type 'c dep = 'c Period.dep
+  type 'c point_dep = 'c Period.point_dep
+  type 'c dep_query = 'c Series_types.point_dep_query
+  type 'c cell = 'c Series_types.point_unfold_cell
+  type ('a, 'c) deps = ('a, 'c) Period.deps
 
+  let no_deps = Period.no_deps
+  let dep_period = Period.dep_period
+  let dep_point = Period.dep_point
+  let both = Period.both
+  let ( let+ ) = Period.( let+ )
+  let ( and+ ) = Period.( and+ )
   let const ~label value = Point_series.const ~label value
+
+  type ('a, 'c) compiled_query = {
+    queries : 'c dep_query list;
+    decode : float list -> 'a * float list;
+  }
+
+  module Query = struct
+    type ('a, 'c) t = ('a, 'c) compiled_query
+
+    let pure value = { queries = []; decode = (fun xs -> (value, xs)) }
+
+    let map f q =
+      {
+        queries = q.queries;
+        decode =
+          (fun xs ->
+            let value, rest = q.decode xs in
+            (f value, rest));
+      }
+
+    let both qa qb =
+      {
+        queries = qa.queries @ qb.queries;
+        decode =
+          (fun xs ->
+            let a, xs = qa.decode xs in
+            let b, xs = qb.decode xs in
+            ((a, b), xs));
+      }
+
+    let ( let+ ) q f = map f q
+    let ( and+ ) = both
+
+    let self ~date =
+      {
+        queries =
+          [
+            Series_types.Point_self_present_query { date };
+            Series_types.Point_self_query { date };
+          ];
+        decode =
+          (fun xs ->
+            let present, xs = Period.take_one "self" xs in
+            let value, xs = Period.take_one "self" xs in
+            ((if Float.equal present 0.0 then None else Some value), xs));
+      }
+
+    let self_or ~default ~date = map (Option.value ~default) (self ~date)
+
+    let period (dep : 'c dep) ~period ~reduce =
+      {
+        queries = [ Series_types.Point_period_query { dep; period; reduce } ];
+        decode = Period.take_one "period";
+      }
+
+    let point (dep : 'c point_dep) ~date =
+      {
+        queries =
+          [
+            Series_types.Point_point_present_query { dep; date };
+            Series_types.Point_point_query { dep; date };
+          ];
+        decode =
+          (fun xs ->
+            let present, xs = Period.take_one "point" xs in
+            let value, xs = Period.take_one "point" xs in
+            ((if Float.equal present 0.0 then None else Some value), xs));
+      }
+
+    let point_or ~default dep ~date = map (Option.value ~default) (point dep ~date)
+  end
+
+  let const_cell ~date f = Series_types.Point_const_cell { date; f }
+
+  let step ~date (query : ('a, 'c) Query.t) f =
+    Series_types.Point_step_cell
+      {
+        date;
+        queries = query.queries;
+        f = (fun values -> f (Period.decode_all "step" query.decode values));
+      }
+
+  let unfold ~label ~deps ~cells =
+    let deps_value, dep_list = Period.run_deps deps in
+    Point_series.unfold ~label ~deps:dep_list (cells deps_value)
+
+  let unfold_self ~label ~cells = unfold ~label ~deps:no_deps ~cells
   let map ~label f inner = Point_series.map ~label f inner
   let convert ~label f inner = Point_series.convert ~label f inner
   let map2 ~label f s1 s2 = Point_series.map2 ~label f s1 s2

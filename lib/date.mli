@@ -20,6 +20,9 @@ val make : int -> int -> int -> t
       if [month] is outside 1--12 or [day] is outside 1--{!days_in_month} for the given year and
       month. *)
 
+val lower_bound : t
+(** A library-wide lower-bound date. It is fixed at [0001-01-01]. *)
+
 (** {1:accessors Accessors} *)
 
 val year : t -> int

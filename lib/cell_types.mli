@@ -37,13 +37,7 @@ and 'c point_cell =
   | TConst of { id : int; date : Date.t; value : float }
   | TMap of { id : int; inner : 'c point_cell; f : float -> float }
   | TConvert : { id : int; inner : 'a point_cell; f : Date.t -> float -> float } -> 'b point_cell
-  | TDep2 of {
-      id : int;
-      date : Date.t;
-      c1 : 'c point_cell option;
-      c2 : 'c point_cell option;
-      f : float option -> float option -> float;
-    }
+  | TDeps of { id : int; date : Date.t; deps : cell list; f : float list -> float }
   | TRef of { id : int; date : Date.t; mutable cell : 'c point_cell option }
 
 and cell = PeriodCell : 'c period_cell -> cell | PointCell : 'c point_cell -> cell

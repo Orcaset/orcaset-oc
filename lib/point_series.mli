@@ -13,6 +13,10 @@ type 'c eval_period_fn =
 val const : label:string -> float -> 'c t
 (** Create a series that produces the same value at every date. *)
 
+val unfold :
+  label:string -> deps:'c Series_types.series_dep list -> 'c Series_types.point_unfold_cell Seq.t -> 'c t
+(** Build a point series from a declarative sequence of date-indexed point unfold cells. *)
+
 val map : label:string -> (float -> float) -> 'c t Lazy.t -> 'c t
 (** Transform the output of a series by applying a function to each cell's value. *)
 

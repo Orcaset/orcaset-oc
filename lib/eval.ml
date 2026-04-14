@@ -3,11 +3,7 @@
 
 open Cell_types
 
-exception Non_convergence of {
-  iterations : int;
-  delta : float;
-  threshold : float;
-}
+exception Non_convergence of { iterations : int; delta : float; threshold : float }
 
 (* Cache dispatch helpers *)
 
@@ -73,16 +69,14 @@ let rec prime_tree cache cell =
           | TConvert { inner; _ } ->
               store (Cell_cache.Unresolved (0.0, 0));
               prime_tree cache (PointCell inner)
+          | TDeps { deps; _ } ->
+              store (Cell_cache.Unresolved (0.0, 0));
+              List.iter (prime_tree cache) deps
           | TRef { cell = None; _ } ->
               failwith "prime: Ref cell with no resolved dependency reached during priming"
           | TRef { cell = Some inner; _ } ->
               store (Cell_cache.Unresolved (0.0, 0));
-              prime_tree cache (PointCell inner)
-          | TDep2 { c1; c2; _ } ->
-              store (Cell_cache.Unresolved (0.0, 0));
-              List.iter
-                (fun dep -> prime_tree cache (PointCell dep))
-                (List.filter_map Fun.id [ c1; c2 ])))
+              prime_tree cache (PointCell inner)))
 
 (* Evaluation *)
 
@@ -161,22 +155,15 @@ and compute_value cache iteration = function
       | TConvert { inner; f; _ } ->
           let v, d = eval_cell cache iteration (PointCell inner) in
           (f (Point_cell.date inner) v, d)
-      | TDep2 { c1; c2; f; _ } ->
-          let v1, d1 =
-            match c1 with
-            | None -> (None, 0.0)
-            | Some c ->
-                let v, d = eval_cell cache iteration (PointCell c) in
-                (Some v, d)
+      | TDeps { deps; f; _ } ->
+          let values, max_delta =
+            List.fold_left
+              (fun (vals, acc_delta) dep ->
+                let v, d = eval_cell cache iteration dep in
+                (v :: vals, Float.max acc_delta d))
+              ([], 0.0) deps
           in
-          let v2, d2 =
-            match c2 with
-            | None -> (None, 0.0)
-            | Some c ->
-                let v, d = eval_cell cache iteration (PointCell c) in
-                (Some v, d)
-          in
-          (f v1 v2, Float.max d1 d2)
+          (f (List.rev values), max_delta)
       | TRef { cell = None; _ } -> (0.0, 0.0)
       | TRef { cell = Some c; _ } -> eval_cell cache iteration (PointCell c))
 

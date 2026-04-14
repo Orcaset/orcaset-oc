@@ -24,9 +24,9 @@ val of_seq : label:string -> 'c Period_cell.t Seq.t -> 'c t
 (** A series backed by a pre-built cell sequence. *)
 
 val unfold :
-  label:string -> deps:'c Series_types.series_dep list -> 'c Series_types.unfold_cell Seq.t -> 'c t
+  label:string -> deps:'c Series_types.series_dep list -> 'c Series_types.period_unfold_cell Seq.t -> 'c t
 (** [unfold ~label ~deps cells] builds a series from a declarative sequence of
-    {!Series_types.unfold_cell} values. *)
+    {!Series_types.period_unfold_cell} values. *)
 
 val extend : label:string -> 'c t -> (Period.t -> 'c t) -> 'c t
 (** [extend ~label base cont] evaluates [base] (which must be finite), passes the last period to
