@@ -1,14 +1,31 @@
 open Orcaset
 
-(* A three-statement financial model: Income Statement, Cash Flow Statement, and Balance Sheet.
+(* A three-statement financial model with linked income, cash flow, and balance sheet statements.
    Demonstrates circular dependencies (depreciation <-> PPE) and point series accumulation for balance
-   sheet items. *)
+   sheet items.
+
+   Output defaults to 4 quarterly periods. Use -n to override the number of displayed periods and -p
+   to switch the output periodicity to monthly, quarterly, or yearly.
+
+   Example usage:
+   ```
+   dune build && dune exec examples/4-Simple-Three-Statement/main.exe -- -n 12 -p monthly
+   ``` *)
 
 let start_date = Date.make 2025 12 31
 let offset = Offset.make ~months:1 ~month_end:true ()
 let revenue_lookback = Offset.make ~months:(-1) ~month_end:true ()
 let months = Period.make_seq ~start_date ~offset
 let initial_period = Period.make start_date (Date.shift offset start_date)
+
+let accumulate_period_flow ~label flow =
+  Series.Point.unfold ~label ~deps:(Series.Point.dep_period flow) ~cells:(fun flow_dep ->
+      Seq.map
+        (fun period ->
+          Series.Point.step ~period
+            (Series.Point.Query.period flow_dep ~period ~reduce:Series.Period.reduce_sum)
+            Fun.id)
+        months)
 
 (* --- Income Statement -------------------------------------------------------- *)
 
@@ -62,11 +79,11 @@ let rec depreciation =
 
 and ppe_net =
   lazy
-    (* TODO: Update *)
-    (* (let neg_capex = Series.Period.map ~label:"Neg Capex" (fun x -> -.x) (lazy capex) in *)
-    (* let ppe_change = Series.Period.sum ~label:"PPE Change" [ lazy neg_capex; depreciation ] in *)
-    (* Series.Point.accum ~label:"PPE Net" ~start_date ~initial_value:10000.0 (lazy ppe_change)) *)
-    (Series.Point.const ~label:"PPE Net" 10000.0)
+    (let neg_capex = Series.Period.map ~label:"Neg Capex" (fun x -> -.x) (lazy capex) in
+     let ppe_change = Series.Period.sum ~label:"PPE Change" [ lazy neg_capex; depreciation ] in
+     let opening_ppe = Series.Point.const ~label:"Opening PPE Net" 10000.0 in
+     let ppe_rollforward = accumulate_period_flow ~label:"PPE Rollforward" (lazy ppe_change) in
+     Series.Point.sum ~label:"PPE Net" (lazy opening_ppe) (lazy ppe_rollforward))
 
 let depreciation = Lazy.force depreciation
 let ppe_net = Lazy.force ppe_net
@@ -103,18 +120,19 @@ let net_cash_change =
 (* --- Balance Sheet ----------------------------------------------------------- *)
 
 (* Cash: starts at $1,000, accumulates net cash change. *)
-(* TODO: Update *)
-(* let cash = Series.Point.accum ~label:"Cash" ~start_date ~initial_value:1000.0 (lazy net_cash_change) *)
-let cash = Series.Point.const ~label:"Cash" 1000.0
+let cash =
+  let opening_cash = Series.Point.const ~label:"Opening Cash" 1000.0 in
+  let cash_rollforward = accumulate_period_flow ~label:"Cash Rollforward" (lazy net_cash_change) in
+  Series.Point.sum ~label:"Cash" (lazy opening_cash) (lazy cash_rollforward)
 
 (* Common Stock: constant $5,000. *)
 let common_stock = Series.Point.const ~label:"Common Stock" 5000.0
 
 (* Retained Earnings: starts at $6,000 (initial assets - common stock), accumulates net income. *)
 let retained_earnings =
-  (* TODO: Update *)
-  (* Series.Point.accum ~label:"Retained Earnings" ~start_date ~initial_value:6000.0 (lazy net_income) *)
-  Series.Point.const ~label:"Retained Earnings" 6000.0
+  let opening_re = Series.Point.const ~label:"Opening Retained Earnings" 6000.0 in
+  let re_rollforward = accumulate_period_flow ~label:"RE Rollforward" (lazy net_income) in
+  Series.Point.sum ~label:"Retained Earnings" (lazy opening_re) (lazy re_rollforward)
 
 (* Total Assets: Cash + PPE Net. *)
 let total_assets = Series.Point.sum ~label:"Total Assets" (lazy cash) (lazy ppe_net)
@@ -128,18 +146,42 @@ let balance_check = Series.Point.sub ~label:"Balance Check" (lazy total_assets) 
 
 (* --- Output ----------------------------------------------------------------- *)
 
-let num_periods =
+type periodicity = Monthly | Quarterly | Yearly
+
+let periodicity_of_string = function
+  | "monthly" -> Monthly
+  | "quarterly" -> Quarterly
+  | "yearly" -> Yearly
+  | s -> invalid_arg ("Unsupported periodicity: " ^ s)
+
+let offset_of_periodicity = function
+  | Monthly -> Offset.make ~months:1 ~month_end:true ()
+  | Quarterly -> Offset.make ~months:3 ~month_end:true ()
+  | Yearly -> Offset.make ~years:1 ~month_end:true ()
+
+let num_periods, periodicity =
   let n = ref 4 in
+  let periodicity = ref Quarterly in
   Arg.parse
     [
       ("-n", Arg.Set_int n, "Number of periods to output");
       ("--num-periods", Arg.Set_int n, "Number of periods to output");
+      ( "-p",
+        Arg.Symbol
+          ([ "monthly"; "quarterly"; "yearly" ], fun s -> periodicity := periodicity_of_string s),
+        "Output periodicity: monthly, quarterly, or yearly" );
+      ( "--periodicity",
+        Arg.Symbol
+          ([ "monthly"; "quarterly"; "yearly" ], fun s -> periodicity := periodicity_of_string s),
+        "Output periodicity: monthly, quarterly, or yearly" );
     ]
     (fun _ -> ())
-    "Usage: main [-n <int>]";
-  !n
+    "Usage: main [-n <int>] [-p <monthly|quarterly|yearly>]";
+  (!n, !periodicity)
 
-let query_periods = List.of_seq (Seq.take num_periods months)
+let query_periods =
+  let query_offset = offset_of_periodicity periodicity in
+  List.of_seq (Seq.take num_periods (Period.make_seq ~start_date ~offset:query_offset))
 
 let () =
   let open Series.Stmt in

@@ -13,6 +13,7 @@ let offset = Offset.make ~months:3 ~month_end:true ()
 let growth_rate = 0.25
 let initial_period = Period.make initial_start_date (Date.shift offset initial_start_date)
 
+(* Revenue: Manually unfold over period steps for demonstration purposes. *)
 let revenue_step curr_period last_period =
   Series.Period.step ~period:curr_period
     (Series.Period.Query.self ~period:last_period ~reduce:Series.Period.reduce_sum)
