@@ -409,13 +409,137 @@ module Stmt = struct
       summed) or a single optional point cell. The cell cache is read later in the format phase. *)
   type col_slot = PeriodSlot of Cell_types.cell list | PointSlot of Cell_types.cell option
 
-  type row = Data of { indent : int; label : string; values : string list } | Sep
+  type column_role =
+    | Start_anchor
+    | Period_end
+
+  type slot_kind =
+    | Slot_empty
+    | Slot_period of period
+    | Slot_point of Date.t
+
+  type row_kind =
+    | Row_line
+    | Row_total
+
+  type series_kind =
+    | Series_period
+    | Series_point
+
+  type column = {
+    id : string;
+    label : string;
+    date : Date.t;
+    role : column_role;
+  }
+
+  type slot = {
+    column_id : string;
+    kind : slot_kind;
+    value : float option;
+    cell_ids : string list;
+  }
+
+  type row = {
+    id : string;
+    parent_id : string option;
+    depth : int;
+    kind : row_kind;
+    label : string;
+    series_kind : series_kind;
+    series_runtime_id : int;
+    slots : slot list;
+  }
+
+  type cell_kind =
+    | Cell_period
+    | Cell_point
+
+  type cell_op =
+    | Cell_const
+    | Cell_deps
+    | Cell_map
+    | Cell_convert
+    | Cell_map2
+    | Cell_clip
+    | Cell_ref
+
+  type cell = {
+    id : string;
+    runtime_id : int;
+    kind : cell_kind;
+    op : cell_op;
+    value : float;
+    period : period option;
+    date : Date.t option;
+    dep_ids : string list;
+  }
+
+  type snapshot = {
+    version : int;
+    columns : column list;
+    rows : row list;
+    cells : cell list;
+  }
+
+  type statement_snapshot = {
+    id : string;
+    rows : row list;
+  }
+
+  type model_snapshot = {
+    version : int;
+    columns : column list;
+    statements : statement_snapshot list;
+    cells : cell list;
+  }
+
+  type pp_row = Data of { indent : int; label : string; values : string list } | Sep
+
+  type snapshot_row_acc = {
+    id : string;
+    parent_id : string option;
+    depth : int;
+    kind : row_kind;
+    label : string;
+    series_kind : series_kind;
+    series_runtime_id : int;
+    slot_kinds : slot_kind list;
+    slots : col_slot list;
+  }
+
+  type collected_statement = {
+    id : string;
+    rows : snapshot_row_acc list;
+  }
+
+  let snapshot_version = 1
 
   let period_line s = Line { label = Period.label s; series = PackedPeriod s }
   let point_line s = Line { label = Point.label s; series = PackedPoint s }
   let period_total s children = Total { label = Period.label s; series = PackedPeriod s; children }
   let point_total s children = Total { label = Point.label s; series = PackedPoint s; children }
   let group children = Group { children }
+
+  let dates_of_periods periods =
+    match periods with
+    | [] -> []
+    | first :: _ -> LibPeriod.start_date first :: List.map LibPeriod.end_date periods
+
+  let columns_of_dates dates =
+    List.mapi
+      (fun idx date ->
+        {
+          id = Printf.sprintf "c%d" idx;
+          label = Date.to_string date;
+          date;
+          role = if idx = 0 then Start_anchor else Period_end;
+        })
+      dates
+
+  let columns_of_periods periods =
+    let dates = dates_of_periods periods in
+    (dates, columns_of_dates dates)
 
   let format_number v =
     let s = Printf.sprintf "%.0f" (Float.abs v) in
@@ -445,8 +569,8 @@ module Stmt = struct
               PeriodSlot wrapped)
             periods
         in
-        (* Period series get a leading None column for the start-date *)
-        PointSlot None :: slots
+        (* Period series get a leading empty start-date column when periods are present. *)
+        (match slots with [] -> [] | _ -> PointSlot None :: slots)
     | PackedPoint s ->
         List.map
           (fun date ->
@@ -489,7 +613,7 @@ module Stmt = struct
 
   let format_value = function None -> "" | Some v -> format_number v
 
-  let slot_tree_to_rows cell_cache =
+  let slot_tree_to_pp_rows cell_cache =
     List.map (function
       | SLine { indent; label; slots } ->
           let values = List.map (fun s -> format_value (read_slot cell_cache s)) slots in
@@ -499,23 +623,259 @@ module Stmt = struct
           Data { indent; label; values }
       | SSep -> Sep)
 
-  let pp t (periods : period list) =
-    let dates =
-      match periods with
-      | [] -> []
-      | first :: _ -> LibPeriod.start_date first :: List.map LibPeriod.end_date periods
+  let packed_series_info = function
+    | PackedPeriod s -> (Series_period, Period.id s)
+    | PackedPoint s -> (Series_point, Point.id s)
+
+  let slot_kinds periods dates = function
+    | PackedPeriod _ -> (
+        match periods with
+        | [] -> []
+        | _ -> Slot_empty :: List.map (fun period -> Slot_period period) periods)
+    | PackedPoint _ -> List.map (fun date -> Slot_point date) dates
+
+  let make_row_id scope path =
+    let local =
+      match path with
+      | [] -> "r"
+      | _ -> "r" ^ String.concat "." (List.map string_of_int path)
     in
+    match scope with None -> local | Some prefix -> prefix ^ ":" ^ local
+
+  let rec collect_snapshot_rows series_cache all_cells_acc periods dates scope parent_id depth path =
+    function
+    | Line { label; series } ->
+        let id = make_row_id scope path in
+        let series_kind, series_runtime_id = packed_series_info series in
+        let slots = query_slots series_cache all_cells_acc periods dates series in
+        let slot_kinds = slot_kinds periods dates series in
+        [
+          {
+            id;
+            parent_id;
+            depth;
+            kind = Row_line;
+            label;
+            series_kind;
+            series_runtime_id;
+            slot_kinds;
+            slots;
+          };
+        ]
+    | Total { label; series; children } ->
+        let id = make_row_id scope path in
+        let child_rows =
+          List.concat
+            (List.mapi
+               (fun idx child ->
+                 collect_snapshot_rows series_cache all_cells_acc periods dates scope (Some id)
+                   (depth + 1) (path @ [ idx ]) child)
+               children)
+        in
+        let series_kind, series_runtime_id = packed_series_info series in
+        let slots = query_slots series_cache all_cells_acc periods dates series in
+        let slot_kinds = slot_kinds periods dates series in
+        child_rows
+        @ [
+            {
+              id;
+              parent_id;
+              depth;
+              kind = Row_total;
+              label;
+              series_kind;
+              series_runtime_id;
+              slot_kinds;
+              slots;
+            };
+          ]
+    | Group { children } ->
+        List.concat
+          (List.mapi
+             (fun idx child ->
+               collect_snapshot_rows series_cache all_cells_acc periods dates scope parent_id depth
+                 (path @ [ idx ]) child)
+             children)
+
+  let cell_export_id = function
+    | Cell_types.PeriodCell c ->
+        Printf.sprintf "period:%d:%s" (Period_cell.id c)
+          (LibPeriod.to_string (Period_cell.period c))
+    | Cell_types.PointCell c ->
+        Printf.sprintf "point:%d:%s" (Point_cell.id c) (Date.to_string (Point_cell.date c))
+
+  let slot_cell_ids = function
+    | PeriodSlot cells -> List.map cell_export_id cells
+    | PointSlot None -> []
+    | PointSlot (Some cell) -> [ cell_export_id cell ]
+
+  let direct_period_deps : type c. c Cell_types.period_cell -> Cell_types.cell list = function
+    | Cell_types.RConst _ -> []
+    | Cell_types.RDeps { deps; _ } -> deps
+    | Cell_types.RMap { inner; _ } -> [ Cell_types.PeriodCell inner ]
+    | Cell_types.RConvert { inner; _ } -> [ Cell_types.PeriodCell inner ]
+    | Cell_types.RMap2 { c1; c2; _ } ->
+        List.filter_map (Option.map (fun cell -> Cell_types.PeriodCell cell)) [ c1; c2 ]
+    | Cell_types.RClip { inner; _ } -> [ Cell_types.PeriodCell inner ]
+    | Cell_types.RRef { state = Cell_types.Resolved inner; _ } -> [ Cell_types.PeriodCell inner ]
+    | Cell_types.RRef { state = Cell_types.Unresolved _; _ } -> []
+    | Cell_types.RRef { state = Cell_types.Resolving; _ } -> []
+
+  let direct_point_deps : type c. c Cell_types.point_cell -> Cell_types.cell list = function
+    | Cell_types.TConst _ -> []
+    | Cell_types.TMap { inner; _ } -> [ Cell_types.PointCell inner ]
+    | Cell_types.TConvert { inner; _ } -> [ Cell_types.PointCell inner ]
+    | Cell_types.TDeps { deps; _ } -> deps
+    | Cell_types.TRef { cell = Some inner; _ } -> [ Cell_types.PointCell inner ]
+    | Cell_types.TRef { cell = None; _ } -> []
+
+  let direct_cell_deps = function
+    | Cell_types.PeriodCell c -> direct_period_deps c
+    | Cell_types.PointCell c -> direct_point_deps c
+
+  let period_cell_op : type c. c Cell_types.period_cell -> cell_op = function
+    | Cell_types.RConst _ -> Cell_const
+    | Cell_types.RDeps _ -> Cell_deps
+    | Cell_types.RMap _ -> Cell_map
+    | Cell_types.RConvert _ -> Cell_convert
+    | Cell_types.RMap2 _ -> Cell_map2
+    | Cell_types.RClip _ -> Cell_clip
+    | Cell_types.RRef _ -> Cell_ref
+
+  let point_cell_op : type c. c Cell_types.point_cell -> cell_op = function
+    | Cell_types.TConst _ -> Cell_const
+    | Cell_types.TMap _ -> Cell_map
+    | Cell_types.TConvert _ -> Cell_convert
+    | Cell_types.TDeps _ -> Cell_deps
+    | Cell_types.TRef _ -> Cell_ref
+
+  let collect_cells cell_cache roots =
+    let seen = Hashtbl.create 128 in
+    let collected = ref [] in
+    let rec visit cell =
+      let id = cell_export_id cell in
+      if not (Hashtbl.mem seen id) then begin
+        Hashtbl.add seen id ();
+        let deps = direct_cell_deps cell in
+        List.iter visit deps;
+        let dep_ids = List.map cell_export_id deps in
+        let value = Eval.read_result cell_cache cell in
+        let cell_snapshot =
+          match cell with
+          | Cell_types.PeriodCell c ->
+              {
+                id;
+                runtime_id = Period_cell.id c;
+                kind = Cell_period;
+                op = period_cell_op c;
+                value;
+                period = Some (Period_cell.period c);
+                date = None;
+                dep_ids;
+              }
+          | Cell_types.PointCell c ->
+              {
+                id;
+                runtime_id = Point_cell.id c;
+                kind = Cell_point;
+                op = point_cell_op c;
+                value;
+                period = None;
+                date = Some (Point_cell.date c);
+                dep_ids;
+              }
+        in
+        collected := cell_snapshot :: !collected
+      end
+    in
+    List.iter visit roots;
+    List.rev !collected
+
+  let solve_cells all_cells =
+    let cell_cache = Cell_cache.create () in
+    List.iter (Eval.prime_tree cell_cache) all_cells;
+    (match all_cells with [] -> () | _ -> Eval.iterate cell_cache all_cells 1);
+    cell_cache
+
+  let rec map3 f xs ys zs =
+    match (xs, ys, zs) with
+    | [], [], [] -> []
+    | x :: xs, y :: ys, z :: zs -> f x y z :: map3 f xs ys zs
+    | _ -> invalid_arg "Series.Stmt.map3: mismatched list lengths"
+
+  let row_of_acc (columns : column list) (cell_cache : Cell_cache.t) (row : snapshot_row_acc) : row =
+    {
+      id = row.id;
+      parent_id = row.parent_id;
+      depth = row.depth;
+      kind = row.kind;
+      label = row.label;
+      series_kind = row.series_kind;
+      series_runtime_id = row.series_runtime_id;
+      slots =
+        map3
+          (fun (column : column) kind slot ->
+            {
+              column_id = column.id;
+              kind;
+              value = read_slot cell_cache slot;
+              cell_ids = slot_cell_ids slot;
+            })
+          columns row.slot_kinds row.slots;
+    }
+
+  let snapshot t (periods : period list) =
+    let dates, columns = columns_of_periods periods in
+    let series_cache = Series_types.create_cache () in
+    let all_cells_acc = ref [] in
+    let rows = collect_snapshot_rows series_cache all_cells_acc periods dates None None 0 [] t in
+    let all_cells = List.rev !all_cells_acc in
+    let cell_cache = solve_cells all_cells in
+    {
+      version = snapshot_version;
+      columns;
+      rows = List.map (row_of_acc columns cell_cache) rows;
+      cells = collect_cells cell_cache all_cells;
+    }
+
+  let snapshot_many statements (periods : period list) =
+    let dates, columns = columns_of_periods periods in
+    let series_cache = Series_types.create_cache () in
+    let all_cells_acc = ref [] in
+    let collected_statements =
+      List.map
+        (fun (id, stmt) ->
+          {
+            id;
+            rows = collect_snapshot_rows series_cache all_cells_acc periods dates (Some id) None 0 [] stmt;
+          })
+        statements
+    in
+    let all_cells = List.rev !all_cells_acc in
+    let cell_cache = solve_cells all_cells in
+    {
+      version = snapshot_version;
+      columns;
+      statements =
+        List.map
+          (fun (statement : collected_statement) ->
+            ({ id = statement.id; rows = List.map (row_of_acc columns cell_cache) statement.rows }
+              : statement_snapshot))
+          collected_statements;
+      cells = collect_cells cell_cache all_cells;
+    }
+
+  let pp t (periods : period list) =
+    let dates = dates_of_periods periods in
     (* Phase 1: query all series with a shared series-level cache. *)
     let series_cache = Series_types.create_cache () in
     let all_cells_acc = ref [] in
     let slot_trees = collect_slots series_cache all_cells_acc periods dates 0 t in
-    let all_cells = !all_cells_acc in
+    let all_cells = List.rev !all_cells_acc in
     (* Phase 2: solve all cells with a single shared cell cache. *)
-    let cell_cache = Cell_cache.create () in
-    List.iter (Eval.prime_tree cell_cache) all_cells;
-    Eval.iterate cell_cache all_cells 1;
+    let cell_cache = solve_cells all_cells in
     (* Phase 3: format rows by reading from the shared cell cache. *)
-    let rows = slot_tree_to_rows cell_cache slot_trees in
+    let rows = slot_tree_to_pp_rows cell_cache slot_trees in
     let indent_size = 2 in
     let date_strs = List.map Date.to_string dates in
     let header_label = "Period end" in

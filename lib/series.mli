@@ -245,6 +245,115 @@ module Stmt : sig
   val group : t list -> t
   (** [group children] is a container that holds a list of lines, totals, or nested groups. *)
 
+  type column_role =
+    | Start_anchor
+    | Period_end
+  (** Describes whether a rendered column is the leading start-date anchor or a period-end column. *)
+
+  type slot_kind =
+    | Slot_empty
+    | Slot_period of period
+    | Slot_point of Date.t
+  (** Distinguishes empty leading period slots from period and point values. *)
+
+  type row_kind =
+    | Row_line
+    | Row_total
+  (** Indicates whether a row is a simple line item or a total row. *)
+
+  type series_kind =
+    | Series_period
+    | Series_point
+  (** The kind of series backing a rendered row. *)
+
+  type column = {
+    id : string;
+    label : string;
+    date : Date.t;
+    role : column_role;
+  }
+  (** Metadata for one rendered column. [id] is stable within a snapshot and suitable for external
+      references. *)
+
+  type slot = {
+    column_id : string;
+    kind : slot_kind;
+    value : float option;
+    cell_ids : string list;
+  }
+  (** One visible value in the rendered statement. [cell_ids] points into the exported [cell] list so
+      callers can drill into dependencies. *)
+
+  type row = {
+    id : string;
+    parent_id : string option;
+    depth : int;
+    kind : row_kind;
+    label : string;
+    series_kind : series_kind;
+    series_runtime_id : int;
+    slots : slot list;
+  }
+  (** A rendered statement row. [id] is deterministic for a given statement tree shape. *)
+
+  type cell_kind =
+    | Cell_period
+    | Cell_point
+  (** Indicates whether an exported cell belongs to a period or point series. *)
+
+  type cell_op =
+    | Cell_const
+    | Cell_deps
+    | Cell_map
+    | Cell_convert
+    | Cell_map2
+    | Cell_clip
+    | Cell_ref
+  (** The underlying Orcaset cell constructor used to build an exported cell. *)
+
+  type cell = {
+    id : string;
+    runtime_id : int;
+    kind : cell_kind;
+    op : cell_op;
+    value : float;
+    period : period option;
+    date : Date.t option;
+    dep_ids : string list;
+  }
+  (** A normalized exported cell. [id] is unique within the snapshot and includes span metadata so
+      split cells do not collide. *)
+
+  type snapshot = {
+    version : int;
+    columns : column list;
+    rows : row list;
+    cells : cell list;
+  }
+  (** A single rendered statement plus the normalized cell registry needed for drill-down. *)
+
+  type statement_snapshot = {
+    id : string;
+    rows : row list;
+  }
+  (** One statement inside a multi-statement snapshot. *)
+
+  type model_snapshot = {
+    version : int;
+    columns : column list;
+    statements : statement_snapshot list;
+    cells : cell list;
+  }
+  (** Multiple rendered statements sharing one normalized cell registry. *)
+
+  val snapshot : t -> period list -> snapshot
+  (** [snapshot stmt periods] renders [stmt] into structured rows, columns, slots, and reachable
+      cells without formatting numbers as strings. *)
+
+  val snapshot_many : (string * t) list -> period list -> model_snapshot
+  (** [snapshot_many statements periods] snapshots multiple statements against a shared cell cache and
+      deduplicated cell registry. Each statement id is used to namespace row ids in the result. *)
+
   val pp : t -> period list -> string
   (** [pp stmt periods] pretty-prints the statement as a fixed-width table. *)
 end
