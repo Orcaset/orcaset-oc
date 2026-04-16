@@ -104,11 +104,20 @@ and 'c series_dep = Period_dep of 'c period_series Lazy.t | Point_dep of 'c poin
 type 'c series = PeriodSeries of 'c period_series | PointSeries of 'c point_series
 type packed_period_seq = Pack_period_seq : 'c Period_cell.t Seq.t -> packed_period_seq
 type packed_point_cell = Pack_point_cell : 'c Point_cell.t -> packed_point_cell
+type 'c point_unfold_checkpoint = {
+  last_date : Date.t;
+  last_cell : 'c Point_cell.t option;
+  remaining_cells : 'c point_unfold_cell Seq.t;
+}
+
+type packed_point_unfold_checkpoint =
+  | Pack_point_unfold_checkpoint : 'c point_unfold_checkpoint -> packed_point_unfold_checkpoint
 
 type cache = {
   period : (int, packed_period_seq) Hashtbl.t;
   point : (int * Date.t, packed_point_cell) Hashtbl.t;
   prefix : (int, packed_period_seq) Hashtbl.t;
+  unfold : (int, packed_point_unfold_checkpoint) Hashtbl.t;
 }
 
 val create_cache : unit -> cache

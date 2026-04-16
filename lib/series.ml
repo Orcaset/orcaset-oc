@@ -331,11 +331,14 @@ module Point = struct
   let query_many dates series =
     let cache = Series_types.create_cache () in
     let lbl = Point_series.label series in
-    List.map
-      (fun date ->
-        let cell = Point_series.eval_query ~eval_period cache series date in
-        QRPoint { label = lbl; cell })
-      dates
+    dates
+    |> List.mapi (fun index date -> (index, date))
+    |> List.sort (fun (_, left) (_, right) -> Date.compare left right)
+    |> List.map (fun (index, date) ->
+           let cell = Point_series.eval_query ~eval_period cache series date in
+           (index, QRPoint { label = lbl; cell }))
+    |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
+    |> List.map snd
 end
 
 (* Evaluation — wraps the internal Eval module so users never touch it directly *)
@@ -864,6 +867,132 @@ module Stmt = struct
           collected_statements;
       cells = collect_cells cell_cache all_cells;
     }
+
+  let json_escape s =
+    let buf = Buffer.create (String.length s + 8) in
+    String.iter
+      (function
+        | '"' -> Buffer.add_string buf "\\\""
+        | '\\' -> Buffer.add_string buf "\\\\"
+        | '\b' -> Buffer.add_string buf "\\b"
+        | '\012' -> Buffer.add_string buf "\\f"
+        | '\n' -> Buffer.add_string buf "\\n"
+        | '\r' -> Buffer.add_string buf "\\r"
+        | '\t' -> Buffer.add_string buf "\\t"
+        | c when Char.code c < 0x20 ->
+            Buffer.add_string buf (Printf.sprintf "\\u%04x" (Char.code c))
+        | c -> Buffer.add_char buf c)
+      s;
+    Buffer.contents buf
+
+  let json_string s = "\"" ^ json_escape s ^ "\""
+  let json_float f = Printf.sprintf "%.12g" f
+  let json_option f = function None -> "null" | Some value -> f value
+  let json_list f items = "[" ^ String.concat "," (List.map f items) ^ "]"
+  let json_field name value = Printf.sprintf "%s:%s" (json_string name) value
+  let json_object fields = "{" ^ String.concat "," fields ^ "}"
+
+  let json_date date = json_string (Date.to_string date)
+  let json_period period = json_string (LibPeriod.to_string period)
+
+  let json_column_role = function
+    | Start_anchor -> json_string "start_anchor"
+    | Period_end -> json_string "period_end"
+
+  let json_slot_kind = function
+    | Slot_empty -> json_string "empty"
+    | Slot_period period -> json_object [ json_field "period" (json_period period) ]
+    | Slot_point date -> json_object [ json_field "date" (json_date date) ]
+
+  let json_row_kind = function
+    | Row_line -> json_string "line"
+    | Row_total -> json_string "total"
+
+  let json_series_kind = function
+    | Series_period -> json_string "period"
+    | Series_point -> json_string "point"
+
+  let json_cell_kind = function
+    | Cell_period -> json_string "period"
+    | Cell_point -> json_string "point"
+
+  let json_cell_op = function
+    | Cell_const -> json_string "const"
+    | Cell_deps -> json_string "deps"
+    | Cell_map -> json_string "map"
+    | Cell_convert -> json_string "convert"
+    | Cell_map2 -> json_string "map2"
+    | Cell_clip -> json_string "clip"
+    | Cell_ref -> json_string "ref"
+
+  let json_column (column : column) =
+    json_object
+      [
+        json_field "id" (json_string column.id);
+        json_field "label" (json_string column.label);
+        json_field "date" (json_date column.date);
+        json_field "role" (json_column_role column.role);
+      ]
+
+  let json_slot (slot : slot) =
+    json_object
+      [
+        json_field "column_id" (json_string slot.column_id);
+        json_field "kind" (json_slot_kind slot.kind);
+        json_field "value" (json_option json_float slot.value);
+        json_field "cell_ids" (json_list json_string slot.cell_ids);
+      ]
+
+  let json_row (row : row) =
+    json_object
+      [
+        json_field "id" (json_string row.id);
+        json_field "parent_id" (json_option json_string row.parent_id);
+        json_field "depth" (string_of_int row.depth);
+        json_field "kind" (json_row_kind row.kind);
+        json_field "label" (json_string row.label);
+        json_field "series_kind" (json_series_kind row.series_kind);
+        json_field "series_runtime_id" (string_of_int row.series_runtime_id);
+        json_field "slots" (json_list json_slot row.slots);
+      ]
+
+  let json_cell (cell : cell) =
+    json_object
+      [
+        json_field "id" (json_string cell.id);
+        json_field "runtime_id" (string_of_int cell.runtime_id);
+        json_field "kind" (json_cell_kind cell.kind);
+        json_field "op" (json_cell_op cell.op);
+        json_field "value" (json_float cell.value);
+        json_field "period" (json_option json_period cell.period);
+        json_field "date" (json_option json_date cell.date);
+        json_field "dep_ids" (json_list json_string cell.dep_ids);
+      ]
+
+  let json_statement (statement : statement_snapshot) =
+    json_object
+      [
+        json_field "id" (json_string statement.id);
+        json_field "rows" (json_list json_row statement.rows);
+      ]
+
+  let snapshot_to_json (snapshot : snapshot) =
+    json_object
+      [
+        json_field "version" (string_of_int snapshot.version);
+        json_field "columns" (json_list json_column snapshot.columns);
+        json_field "rows" (json_list json_row snapshot.rows);
+        json_field "cells" (json_list json_cell snapshot.cells);
+      ]
+
+  let model_snapshot_to_json (snapshot : model_snapshot) =
+    json_object
+      [
+        json_field "version" (string_of_int snapshot.version);
+        json_field "columns" (json_list json_column snapshot.columns);
+        json_field "statements" (json_list json_statement snapshot.statements);
+        json_field "cells" (json_list json_cell snapshot.cells);
+      ]
 
   let pp t (periods : period list) =
     let dates = dates_of_periods periods in

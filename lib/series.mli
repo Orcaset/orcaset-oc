@@ -354,6 +354,12 @@ module Stmt : sig
   (** [snapshot_many statements periods] snapshots multiple statements against a shared cell cache and
       deduplicated cell registry. Each statement id is used to namespace row ids in the result. *)
 
+  val snapshot_to_json : snapshot -> string
+  (** [snapshot_to_json snapshot] serializes a structured statement snapshot to compact JSON. *)
+
+  val model_snapshot_to_json : model_snapshot -> string
+  (** [model_snapshot_to_json snapshot] serializes a multi-statement snapshot to compact JSON. *)
+
   val pp : t -> period list -> string
   (** [pp stmt periods] pretty-prints the statement as a fixed-width table. *)
 end
