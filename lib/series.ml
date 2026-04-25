@@ -149,11 +149,19 @@ module Period = struct
 
   let of_seq ~label cells = Period_series.of_seq ~label cells
 
-  let unfold ~label ~deps ~cells =
+  let unfold_seq ~label ~deps ~cells =
     let deps_value, dep_list = deps.run () in
     Period_series.unfold ~label ~deps:dep_list (cells deps_value)
 
-  let unfold_self ~label ~cells = unfold ~label ~deps:no_deps ~cells
+  let unfold_seq_self ~label ~cells = unfold_seq ~label ~deps:no_deps ~cells
+
+  let unfold ~label ~deps ~init ~cells =
+    let deps_value, dep_list = deps.run () in
+    Period_series.unfold ~label ~deps:dep_list (Seq.unfold (cells deps_value) init)
+
+  let unfold_self ~label ~init ~cells =
+    unfold ~label ~deps:no_deps ~init ~cells:(fun () state -> cells state)
+
   let extend ~label base cont = Period_series.extend ~label base cont
   let reduce_sum = Period_series.reduce_sum
   let map ~label f inner = Period_series.map ~label f inner
@@ -306,11 +314,19 @@ module Point = struct
         f = (fun values -> f (Period.decode_all "step" query.decode values));
       }
 
-  let unfold ~label ~deps ~cells =
+  let unfold_seq ~label ~deps ~cells =
     let deps_value, dep_list = Period.run_deps deps in
     Point_series.unfold ~label ~deps:dep_list (cells deps_value)
 
-  let unfold_self ~label ~cells = unfold ~label ~deps:no_deps ~cells
+  let unfold_seq_self ~label ~cells = unfold_seq ~label ~deps:no_deps ~cells
+
+  let unfold ~label ~deps ~init ~cells =
+    let deps_value, dep_list = Period.run_deps deps in
+    Point_series.unfold ~label ~deps:dep_list (Seq.unfold (cells deps_value) init)
+
+  let unfold_self ~label ~init ~cells =
+    unfold ~label ~deps:no_deps ~init ~cells:(fun () state -> cells state)
+
   let map ~label f inner = Point_series.map ~label f inner
   let convert ~label f inner = Point_series.convert ~label f inner
   let map2 ~label f s1 s2 = Point_series.map2 ~label f s1 s2
