@@ -27,7 +27,7 @@ let revenue =
     let current_period = Period.next offset last_period in
     Seq.Cons (revenue_step current_period last_period, generate_cells current_period)
   in
-  Series.Period.unfold_self ~label:"Revenue" ~cells:(fun () ->
+  Series.Period.unfold_seq_self ~label:"Revenue" ~cells:(fun () ->
       Seq.cons
         (Series.Period.const ~period:initial_period (fun () -> initial_value))
         (generate_cells initial_period))
@@ -36,7 +36,7 @@ let expenses = Series.Period.map ~label:"Expenses" (fun r -> r *. expense_margin
 let income = Series.Period.sum ~label:"Income" [ lazy revenue; lazy expenses ]
 
 (* ---- Output --- *)
-let num_periods = 12
+let num_periods = 1200
 
 let query_periods =
   let query_offset = Offset.make ~months:1 ~month_end:true () in

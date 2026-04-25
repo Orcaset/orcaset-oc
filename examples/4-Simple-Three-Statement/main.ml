@@ -19,7 +19,7 @@ let months = Period.make_seq ~start_date ~offset
 let initial_period = Period.make start_date (Date.shift offset start_date)
 
 let accumulate_period_flow ~label flow =
-  Series.Point.unfold ~label ~deps:(Series.Point.dep_period flow) ~cells:(fun flow_dep ->
+  Series.Point.unfold_seq ~label ~deps:(Series.Point.dep_period flow) ~cells:(fun flow_dep ->
       Seq.map
         (fun period ->
           Series.Point.step ~period
@@ -44,7 +44,7 @@ let revenue =
     let current_period = Period.next offset last_period in
     Seq.Cons (revenue_step current_period, generate_cells current_period)
   in
-  Series.Period.unfold_self ~label:"Revenue" ~cells:(fun () ->
+  Series.Period.unfold_seq_self ~label:"Revenue" ~cells:(fun () ->
       Seq.cons
         (Series.Period.const ~period:initial_period (fun () -> 1000.0))
         (generate_cells initial_period))
@@ -57,7 +57,7 @@ let gross_profit = Series.Period.sum ~label:"Gross Profit" [ lazy revenue; lazy 
 
 (* Opex: constant -$200/month. *)
 let opex =
-  Series.Period.unfold_self ~label:"Opex" ~cells:(fun () ->
+  Series.Period.unfold_seq_self ~label:"Opex" ~cells:(fun () ->
       Seq.map (fun period -> Series.Period.const ~period (fun () -> -200.0)) months)
 
 (* Capex: 5% of revenue (negative = cash outflow). *)
@@ -68,7 +68,7 @@ let capex = Series.Period.map ~label:"Capex" (fun r -> r *. -0.05) (lazy revenue
    PPE Net starts at $10,000, increases by capex additions, decreases by depreciation. *)
 let rec depreciation =
   lazy
-    (Series.Period.unfold ~label:"Depreciation" ~deps:(Series.Period.dep_point ppe_net)
+    (Series.Period.unfold_seq ~label:"Depreciation" ~deps:(Series.Period.dep_point ppe_net)
        ~cells:(fun ppe_net ->
          Seq.map
            (fun period ->
@@ -109,7 +109,7 @@ let cf_operations = Series.Period.sum ~label:"CF Operations" [ lazy net_income; 
 
 (* CF Financing: constant $0. *)
 let cf_financing =
-  Series.Period.unfold_self ~label:"CF Financing" ~cells:(fun () ->
+  Series.Period.unfold_seq_self ~label:"CF Financing" ~cells:(fun () ->
       Seq.map (fun period -> Series.Period.const ~period (fun () -> 0.0)) months)
 
 (* Net Cash Change: CF Operations + Capex + CF Financing. *)

@@ -25,12 +25,12 @@ let accrued_interest_step interest period =
 (* Define line items. *)
 let rec interest =
   lazy
-    (Series.Period.unfold ~label:"Interest" ~deps:(Series.Period.dep_point balance)
+    (Series.Period.unfold_seq ~label:"Interest" ~deps:(Series.Period.dep_point balance)
        ~cells:(fun balance -> Seq.map (interest_step balance) periods))
 
 and accrued_interest =
   lazy
-    (Series.Point.unfold ~label:"Accrued interest" ~deps:(Series.Point.dep_period interest)
+    (Series.Point.unfold_seq ~label:"Accrued interest" ~deps:(Series.Point.dep_period interest)
        ~cells:(fun interest -> Seq.map (accrued_interest_step interest) periods))
 
 and balance = lazy (Series.Point.sum ~label:"Balance" principal accrued_interest)

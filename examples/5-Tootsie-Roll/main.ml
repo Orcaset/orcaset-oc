@@ -34,6 +34,7 @@ open Series.Stmt
 let is_stmt =
   group
     [
+      period_line Income.revenue_growth_rate;
       period_total i.net_earnings
         [
           period_total i.ebt

@@ -34,20 +34,18 @@ let yoy_forecast ~label ~annual_growth hist =
   let forecast last_period =
     let quarterly = Offset.make ~months:3 ~month_end:true () in
     let yoy_lookback = Offset.make ~months:(-12) () in
-    Series.Period.unfold_self ~label:(label ^ " (forecast)") ~cells:(fun () ->
-        let rec unfold prev_period () =
-          let cur = Period.next quarterly prev_period in
-          let lookback_period = Period.shift yoy_lookback cur in
-          let next_cell =
-            Series.Period.step ~period:cur
-              (let open Series.Period.Query in
-               let+ prev = self ~period:lookback_period ~reduce:Series.Period.reduce_sum in
-               prev)
-              (fun prev -> prev *. (1.0 +. annual_growth))
-          in
-          Seq.Cons (next_cell, unfold cur)
+    Series.Period.unfold_self ~label:(label ^ " (forecast)") ~init:last_period
+      ~cells:(fun prev_period ->
+        let cur = Period.next quarterly prev_period in
+        let lookback_period = Period.shift yoy_lookback cur in
+        let next_cell =
+          Series.Period.step ~period:cur
+            (let open Series.Period.Query in
+             let+ prev = self ~period:lookback_period ~reduce:Series.Period.reduce_sum in
+             prev)
+            (fun prev -> prev *. (1.0 +. annual_growth))
         in
-        unfold last_period)
+        Some (next_cell, cur))
   in
   Series.Period.extend ~label hist forecast
 
@@ -63,10 +61,63 @@ let pct_of_revenue_forecast ~label ~pct hist revenue =
 
 (* --- Revenue components --------------------------------------------------- *)
 
-(** Forecast net product sales: grow at 2% YoY. *)
+(** Split function that preserves a cell's value on both sides of a split. Unlike
+    {!Period_cell.proportional_split}, this keeps the rate/ratio unchanged when a period is
+    subdivided — appropriate for intensive quantities like growth rates. *)
+let rec constant_split period value_fn split_date =
+  ( {
+      Period_cell.period = Period.make (Period.start_date period) split_date;
+      f = value_fn;
+      split = constant_split;
+    },
+    {
+      Period_cell.period = Period.make split_date (Period.end_date period);
+      f = value_fn;
+      split = constant_split;
+    } )
+
+(** Annual revenue-growth assumption applied YoY to net product sales: 10% for 2026, 5% for 2027,
+    2.5% per year thereafter. Defined as three explicit cells spanning calendar years; the
+    {!constant_split} split function ensures each sub-period (e.g. a forecast quarter) inherits the
+    enclosing year's rate. *)
+let revenue_growth_rate =
+  let cell start_year end_year rate =
+    let period = Period.make (Date.make start_year 12 31) (Date.make end_year 12 31) in
+    Period_cell.const period (fun () -> rate) constant_split
+  in
+  let cells =
+    [
+      cell 2025 2026 0.10;
+      cell 2026 2027 0.05;
+      cell 2027 2999 0.025;
+    ]
+  in
+  Series.Period.of_seq ~label:"Revenue Growth Rate" (List.to_seq cells)
+
+(** Forecast net product sales: grow each quarter by the YoY rate read from
+    {!revenue_growth_rate}. *)
 let make_net_product_sales csv =
   let hist = c csv "Net Product Sales (hist)" "Net product sales" in
-  yoy_forecast ~label:"Net Product Sales" ~annual_growth:0.02 hist
+  let forecast last_period =
+    let quarterly = Offset.make ~months:3 ~month_end:true () in
+    let yoy_lookback = Offset.make ~months:(-12) () in
+    Series.Period.unfold ~label:"Net Product Sales (forecast)"
+      ~deps:(Series.Period.dep_period (lazy revenue_growth_rate))
+      ~init:last_period
+      ~cells:(fun rate_dep prev_period ->
+        let cur = Period.next quarterly prev_period in
+        let lookback_period = Period.shift yoy_lookback cur in
+        let next_cell =
+          Series.Period.step ~period:cur
+            (let open Series.Period.Query in
+             let+ prev = self ~period:lookback_period ~reduce:Series.Period.reduce_sum
+             and+ rate = period rate_dep ~period:cur ~reduce:Series.Period.reduce_sum in
+             (prev, rate))
+            (fun (prev, rate) -> prev *. (1.0 +. rate))
+        in
+        Some (next_cell, cur))
+  in
+  Series.Period.extend ~label:"Net Product Sales" hist forecast
 
 (** Forecast rental and royalty revenue: grow at 2% YoY. *)
 let make_rental_and_royalty_revenue csv =
@@ -108,13 +159,11 @@ let make_other_income csv =
   let hist = c csv "Other Income (hist)" "Other income, net" in
   let forecast last_period =
     let quarterly = Offset.make ~months:3 ~month_end:true () in
-    Series.Period.unfold_self ~label:"Other Income (forecast)" ~cells:(fun () ->
-        let rec unfold prev_period () =
-          let cur = Period.next quarterly prev_period in
-          let next_cell = Series.Period.const ~period:cur (fun () -> 5_000_000.0) in
-          Seq.Cons (next_cell, unfold cur)
-        in
-        unfold last_period)
+    Series.Period.unfold_self ~label:"Other Income (forecast)" ~init:last_period
+      ~cells:(fun prev_period ->
+        let cur = Period.next quarterly prev_period in
+        let next_cell = Series.Period.const ~period:cur (fun () -> 5_000_000.0) in
+        Some (next_cell, cur))
   in
   Series.Period.extend ~label:"Other Income" hist forecast
 

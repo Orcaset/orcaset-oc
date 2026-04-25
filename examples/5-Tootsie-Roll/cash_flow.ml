@@ -34,13 +34,11 @@ let safe_ratio numerator denominator = if Float.equal denominator 0.0 then 0.0 e
 let flat_forecast ~label csv name ~amount =
   let hist = c csv (label ^ " (hist)") name in
   let forecast last_period =
-    Series.Period.unfold_self ~label:(label ^ " (forecast)") ~cells:(fun () ->
-        let rec unfold prev () =
-          let cur = Period.next quarterly prev in
-          let cell = Series.Period.const ~period:cur (fun () -> amount) in
-          Seq.Cons (cell, unfold cur)
-        in
-        unfold last_period)
+    Series.Period.unfold_self ~label:(label ^ " (forecast)") ~init:last_period
+      ~cells:(fun prev ->
+        let cur = Period.next quarterly prev in
+        let cell = Series.Period.const ~period:cur (fun () -> amount) in
+        Some (cell, cur))
   in
   Series.Period.extend ~label hist forecast
 
@@ -49,25 +47,23 @@ let driver_delta_forecast ~label csv name ~ratio ~driver ~asset_like =
   let hist = c csv (label ^ " (hist)") name in
   let forecast last_period =
     Series.Period.unfold ~label:(label ^ " (forecast)") ~deps:(Series.Period.dep_period driver)
-      ~cells:(fun driver_dep ->
-        let rec unfold prev () =
-          let cur = Period.next quarterly prev in
-          let prev_period = Period.shift prior_quarter cur in
-          let cell =
-            Series.Period.step ~period:cur
-              (let open Series.Period.Query in
-               let+ current_driver =
-                 period driver_dep ~period:cur ~reduce:Series.Period.reduce_sum
-               and+ previous_driver =
-                 period driver_dep ~period:prev_period ~reduce:Series.Period.reduce_sum in
-               (current_driver, previous_driver))
-              (fun (current_driver, previous_driver) ->
-                let target_delta = ratio *. (current_driver -. previous_driver) in
-                if asset_like then -.target_delta else target_delta)
-          in
-          Seq.Cons (cell, unfold cur)
+      ~init:last_period
+      ~cells:(fun driver_dep prev ->
+        let cur = Period.next quarterly prev in
+        let prev_period = Period.shift prior_quarter cur in
+        let cell =
+          Series.Period.step ~period:cur
+            (let open Series.Period.Query in
+             let+ current_driver =
+               period driver_dep ~period:cur ~reduce:Series.Period.reduce_sum
+             and+ previous_driver =
+               period driver_dep ~period:prev_period ~reduce:Series.Period.reduce_sum in
+             (current_driver, previous_driver))
+            (fun (current_driver, previous_driver) ->
+              let target_delta = ratio *. (current_driver -. previous_driver) in
+              if asset_like then -.target_delta else target_delta)
         in
-        unfold last_period)
+        Some (cell, cur))
   in
   Series.Period.extend ~label hist forecast
 

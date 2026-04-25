@@ -18,7 +18,7 @@ let point_of_observations ~label observations =
               (Series.Point.const_cell ~period (fun () -> value -. prev_value))
               (deltas date value tail)
       in
-      Series.Point.unfold_self ~label ~cells:(fun () ->
+      Series.Point.unfold_seq_self ~label ~cells:(fun () ->
           Seq.cons
             (Series.Point.const_cell ~period:first_period (fun () -> first_value))
             (deltas first_date first_value rest))
@@ -34,7 +34,7 @@ let last_point_exn points = List.hd (List.rev points)
 
 let accumulate_period_flow_from_date ~label ~start_date flow =
   let periods = Period.make_seq ~start_date ~offset:quarterly in
-  Series.Point.unfold ~label ~deps:(Series.Point.dep_period flow) ~cells:(fun flow_dep ->
+  Series.Point.unfold_seq ~label ~deps:(Series.Point.dep_period flow) ~cells:(fun flow_dep ->
       Seq.map
         (fun period ->
           Series.Point.step ~period
