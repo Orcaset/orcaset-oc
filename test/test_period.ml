@@ -11,16 +11,16 @@ let test_make_and_accessors () =
   let start_date = Date.make 2025 1 1 in
   let end_date = Date.make 2025 2 1 in
   let p = Period.make start_date end_date in
-  check_date "start_date" start_date (Period.start_date p);
-  check_date "end_date" end_date (Period.end_date p);
+  check_date "start_date" start_date (Period.start p);
+  check_date "end_date" end_date (Period.end_ p);
   check_int "days" 31 (Period.days p)
 
 let test_inverted_period () =
   let start_date = Date.make 2025 2 1 in
   let end_date = Date.make 2025 1 1 in
   let p = Period.make start_date end_date in
-  check_date "start_date" start_date (Period.start_date p);
-  check_date "end_date" end_date (Period.end_date p);
+  check_date "start_date" start_date (Period.start p);
+  check_date "end_date" end_date (Period.end_ p);
   check_int "days" (-31) (Period.days p)
 
 let test_to_tuple () =
@@ -105,16 +105,14 @@ let test_shift () =
 
 let test_make_seq_produces_contiguous_periods () =
   let offset = Offset.make ~months:1 ~month_end:true () in
-  let periods =
-    Period.make_seq ~start_date:(Date.make 2025 1 31) ~offset |> Seq.take 3 |> List.of_seq
-  in
+  let periods = Period.make_seq ~start:(Date.make 2025 1 31) ~offset |> Seq.take 3 |> List.of_seq in
   match periods with
   | [ p1; p2; p3 ] ->
       check_period "p1" (Period.make (Date.make 2025 1 31) (Date.make 2025 2 28)) p1;
       check_period "p2" (Period.make (Date.make 2025 2 28) (Date.make 2025 3 31)) p2;
       check_period "p3" (Period.make (Date.make 2025 3 31) (Date.make 2025 4 30)) p3;
-      check_date "contiguous 1->2" (Period.end_date p1) (Period.start_date p2);
-      check_date "contiguous 2->3" (Period.end_date p2) (Period.start_date p3)
+      check_date "contiguous 1->2" (Period.end_ p1) (Period.start p2);
+      check_date "contiguous 2->3" (Period.end_ p2) (Period.start p3)
   | _ -> failwith "expected three periods"
 
 let test_equal_and_hash () =
@@ -185,7 +183,7 @@ let test_seq_to_dates_from_make_seq () =
   (* make_seq produces contiguous periods, so shared boundaries are merged.
      The Nil branch also emits the final end_date, producing a duplicate. *)
   let offset = Offset.make ~months:1 ~month_end:true () in
-  let periods = Period.make_seq ~start_date:(Date.make 2025 1 31) ~offset |> Seq.take 3 in
+  let periods = Period.make_seq ~start:(Date.make 2025 1 31) ~offset |> Seq.take 3 in
   let dates = Period.seq_to_dates periods |> List.of_seq in
   check_date_list "from make_seq"
     [ Date.make 2025 1 31; Date.make 2025 3 31; Date.make 2025 4 30; Date.make 2025 4 30 ]

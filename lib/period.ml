@@ -1,40 +1,38 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-type t = { start_date : Date.t; end_date : Date.t }
+type t = { start : Date.t; end_ : Date.t }
 
-let make start_date end_date = { start_date; end_date }
-let to_tuple p = (p.start_date, p.end_date)
+let make start end_ = { start; end_ }
+let to_tuple p = (p.start, p.end_)
 
 (* Accessors *)
 
-let start_date p = p.start_date
-let end_date p = p.end_date
-let days p = Date.diff p.end_date p.start_date
-let contains date period = Date.(date >= period.start_date && date < period.end_date)
+let start p = p.start
+let end_ p = p.end_
+let days p = Date.diff p.end_ p.start
+let contains date period = Date.(date >= period.start && date < period.end_)
 
 (* Shifting *)
 
 let next offset period =
-  let derived_date = Date.shift offset (end_date period) in
-  if Date.(derived_date < end_date period) then
-    { start_date = derived_date; end_date = end_date period }
-  else { start_date = end_date period; end_date = derived_date }
+  let derived_date = Date.shift offset (end_ period) in
+  if Date.(derived_date < end_ period) then { start = derived_date; end_ = end_ period }
+  else { start = end_ period; end_ = derived_date }
 
 let prev offset period =
-  let derived_date = Date.shift offset (start_date period) in
-  if Date.(derived_date > start_date period) then
-    { start_date = start_date period; end_date = derived_date }
-  else { start_date = derived_date; end_date = start_date period }
+  let derived_date = Date.shift offset (start period) in
+  if Date.(derived_date > start period) then { start = start period; end_ = derived_date }
+  else { start = derived_date; end_ = start period }
 
 let shift offset period =
-  { start_date = Date.shift offset period.start_date; end_date = Date.shift offset period.end_date }
+  { start = Date.shift offset period.start; end_ = Date.shift offset period.end_ }
 
 (* Sequences *)
 
-let make_seq ~start_date ~offset =
-  let end_date = Date.shift offset start_date in
-  let initial_period = { start_date; end_date } in
+let make_seq ~start ~offset =
+  let end_ = Date.shift offset start in
+  let initial_period = { start; end_ } in
   Seq.unfold
     (fun period ->
       let next_period = next offset period in
@@ -47,23 +45,22 @@ let seq_to_dates periods =
     | Seq.Nil -> (
         match last with
         | None -> Seq.Nil
-        | Some last_period -> Seq.Cons (end_date last_period, Seq.empty))
+        | Some last_period -> Seq.Cons (end_ last_period, Seq.empty))
     | Seq.Cons (period, next) -> (
         match last with
-        | None -> Seq.Cons (start_date period, aux (Some period) next)
+        | None -> Seq.Cons (start period, aux (Some period) next)
         | Some last_period ->
-            if Date.equal (end_date last_period) (start_date period) then
-              Seq.Cons (end_date period, aux (Some period) next)
+            if Date.equal (end_ last_period) (start period) then
+              Seq.Cons (end_ period, aux (Some period) next)
             else
-              Seq.Cons
-                ( end_date last_period,
-                  fun () -> Seq.Cons (start_date period, aux (Some period) next) ))
+              Seq.Cons (end_ last_period, fun () -> Seq.Cons (start period, aux (Some period) next))
+        )
   in
   aux None periods
 
 (* Predicates and comparisons *)
 
 let equal p0 p1 = compare p0 p1 = 0
-let hash p = Hashtbl.hash (Date.hash p.start_date, Date.hash p.end_date)
-let to_string p = Date.to_string p.start_date ^ ".." ^ Date.to_string p.end_date
+let hash p = Hashtbl.hash (Date.hash p.start, Date.hash p.end_)
+let to_string p = Date.to_string p.start ^ ".." ^ Date.to_string p.end_
 let pp fmt p = Format.pp_print_string fmt (to_string p)

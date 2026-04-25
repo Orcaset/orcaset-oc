@@ -1,25 +1,5 @@
 (library
  (name orcaset)
  (public_name orcaset)
- (modules
-  cell_types
-  cell_cache
-  date
-  eval
-  graph
-  offset
-  period
-  period_cell
-  point_cell
-  series_types
-  period_series
-  point_series
-  series
-  yf)
- (private_modules
-  cell_cache
-  cell_types
-  eval
-  series_types
-  period_series
-  point_series))
+ (modules cell_eval cell_type date offset period series)
+ (private_modules cell_eval cell_type))

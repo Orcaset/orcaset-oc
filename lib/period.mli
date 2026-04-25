@@ -4,10 +4,9 @@
 (** Contiguous time intervals.
 
     A period is an ordered pair of dates representing a time interval interpreted as
-    [\[start_date, end_date)] (start-inclusive, end-exclusive). This ensures contiguous periods
-    produced by {!make_seq} tile without overlap. The length in days is [end_date - start_date],
-    which is zero when both dates are equal and negative when [end_date] precedes [start_date] (no
-    validation is performed).
+    [\[start, end_)] (start-inclusive, end-exclusive). This ensures contiguous periods produced by
+    {!make_seq} tile without overlap. The length in days is [end_ - start], which is zero when both
+    dates are equal and negative when [end_] precedes [start] (no validation is performed).
 
     {1 Periods} *)
 
@@ -15,48 +14,46 @@ type t
 (** The type for time periods. *)
 
 val make : Date.t -> Date.t -> t
-(** [make start_date end_date] is a period from [start_date] to [end_date].
+(** [make start end_] is a period from [start] to [end_].
 
     {b Note.} No validation is performed on date ordering. *)
 
 (** {1 Accessors} *)
 
-val start_date : t -> Date.t
-(** [start_date p] is [p]'s start date. *)
+val start : t -> Date.t
+(** [start p] is [p]'s start date. *)
 
-val end_date : t -> Date.t
-(** [end_date p] is [p]'s end date. *)
+val end_ : t -> Date.t
+(** [end_ p] is [p]'s end date. *)
 
 val days : t -> int
-(** [days p] is the number of calendar days in [p], i.e. {!Date.diff}[ (end_date p) (start_date p)].
-*)
+(** [days p] is the number of calendar days in [p], i.e. {!Date.diff}[ (end_ p) (start p)]. *)
 
 val to_tuple : t -> Date.t * Date.t
-(** [to_tuple p] is [(start_date p, end_date p)]. *)
+(** [to_tuple p] is [(start p, end_ p)]. *)
 
 val contains : Date.t -> t -> bool
-(** [contains d p] is [true] iff [start_date p <= d] and [d < end_date p]. Start-inclusive,
-    end-exclusive. *)
+(** [contains d p] is [true] iff [start p <= d] and [d < end_ p]. Start-inclusive, end-exclusive. *)
 
 (** {1 Shifting} *)
 
 val next : Offset.t -> t -> t
-(** [next offset p] is a new period with the dates [Period.end_date p] and
-    [Date.shift offset (Period.end_date p)]. *)
+(** [next offset p] is a new period with the dates [Period.end_ p] and
+    [Date.shift offset (Period.end_ p)]. *)
 
 val prev : Offset.t -> t -> t
-(** [prev offset p] is a new period with the dates [Date.shift (Period.start_date p)] and
-    [Period.start_date p]. *)
+(** [prev offset p] is a new period with the dates [Date.shift (Period.start p)] and
+    [Period.start p]. *)
 
 val shift : Offset.t -> t -> t
 (** [shift offset p] is a new period with both start and end dates shifted by [offset]. *)
 
 (** {1 Sequences} *)
 
-val make_seq : start_date:Date.t -> offset:Offset.t -> t Seq.t
-(** [make_seq ~start_date ~offset] is an infinite sequence of contiguous periods. The first period
-    starts at [start_date] and ends at [Date.shift offset start_date]. Each subsequent period starts
-    where the previous one ended. *)
+val make_seq : start:Date.t -> offset:Offset.t -> t Seq.t
+(** [make_seq ~start ~offset] is an infinite sequence of contiguous periods. The first period starts
+    at [start] and ends at [Date.shift offset start]. Each subsequent period starts where the
+    previous one ended. *)
 
 val seq_to_dates : t Seq.t -> Date.t Seq.t
 (** [seq_to_dates periods] is a sequence of dates in [periods] with equal adjacent start/end dates
