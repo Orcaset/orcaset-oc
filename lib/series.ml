@@ -38,6 +38,14 @@ module rec Spans : sig
         cells : 'readers -> 'state -> (unfold_cell * 'state) option;
       }
         -> t
+    | Unfold_from : {
+        id : series_id;
+        label : string option;
+        base : t;
+        deps : unit -> 'readers Deps.t;
+        cells : 'readers -> Period.t -> (unfold_cell * Period.t) option;
+      }
+        -> t
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
@@ -56,6 +64,14 @@ module rec Spans : sig
     deps:(unit -> 'readers Deps.t) ->
     init:'state ->
     cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
+    unit ->
+    t
+
+  val unfold_from :
+    ?label:string ->
+    t ->
+    deps:(unit -> 'readers Deps.t) ->
+    cells:('readers -> Period.t -> (unfold_cell * Period.t) option) ->
     unit ->
     t
 
@@ -93,11 +109,22 @@ end = struct
         cells : 'readers -> 'state -> (unfold_cell * 'state) option;
       }
         -> t
+    | Unfold_from : {
+        id : series_id;
+        label : string option;
+        base : t;
+        deps : unit -> 'readers Deps.t;
+        cells : 'readers -> Period.t -> (unfold_cell * Period.t) option;
+      }
+        -> t
 
   let cell ~period ~split formula = Cell { period; split; formula }
   let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
   let const ?label ~period ~value () = Const { id = new_id (); label; period; value }
   let unfold ?label ~deps ~init ~cells () = Unfold { id = new_id (); label; deps; init; cells }
+
+  let unfold_from ?label base ~deps ~cells () =
+    Unfold_from { id = new_id (); label; base; deps; cells }
 
   let unfold_rec ?label ~deps ~init ~cells () =
     let rec self = Unfold { id = new_id (); label; deps = (fun () -> deps self); init; cells } in
@@ -118,6 +145,7 @@ end = struct
     | Map2 { id; _ } -> id
     | Extend { id; _ } -> id
     | Unfold { id; _ } -> id
+    | Unfold_from { id; _ } -> id
 
   let label = function
     | Const { label; _ } -> label
@@ -125,6 +153,7 @@ end = struct
     | Map2 { label; _ } -> label
     | Extend _ -> None
     | Unfold { label; _ } -> label
+    | Unfold_from { label; _ } -> label
 
   let map ?label f dep = Map { id = new_id (); label; dep; f }
   let extend a b = Extend { id = new_id (); a; b }
@@ -530,6 +559,33 @@ let make_unfold_producer ~init ~cells ~register_formula =
   in
   view 0
 
+let register_unfold_formula cache ~period ~split formula =
+  let span =
+    f_value period (fun () -> failwith "formula span must be evaluated through Series") split
+  in
+  Hashtbl.replace cache.span_formulas (span_id span) formula;
+  span
+
+let unfold_from_span_seq base ~cells ~register_formula =
+  let continuation = ref None in
+  let continuation_from period =
+    match !continuation with
+    | Some seq -> seq
+    | None ->
+        let seq = make_unfold_producer ~init:period ~cells ~register_formula in
+        continuation := Some seq;
+        seq
+  in
+  let rec replay_base last_period base () =
+    match base () with
+    | Seq.Nil -> (
+        match last_period with None -> Seq.Nil | Some period -> continuation_from period ())
+    | Seq.Cons (span, rest) ->
+        let period = span_period span in
+        Seq.Cons (span, replay_base (Some period) rest)
+  in
+  replay_base None base
+
 let extend_span_seq a b =
   let rec continue_b start b () =
     match b () with
@@ -577,14 +633,13 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
       extend_span_seq (seq_for_span_series cache a) (seq_for_span_series cache b) |> Seq.memoize
   | Unfold { deps; init; cells; _ } ->
       let readers = Deps.run (deps ()) in
-      let register_formula ~period ~split formula =
-        let span =
-          f_value period (fun () -> failwith "formula span must be evaluated through Series") split
-        in
-        Hashtbl.replace cache.span_formulas (span_id span) formula;
-        span
-      in
-      make_unfold_producer ~init ~cells:(cells readers) ~register_formula
+      make_unfold_producer ~init ~cells:(cells readers)
+        ~register_formula:(register_unfold_formula cache)
+  | Unfold_from { base; deps; cells; _ } ->
+      let readers = Deps.run (deps ()) in
+      unfold_from_span_seq (seq_for_span_series cache base) ~cells:(cells readers)
+        ~register_formula:(register_unfold_formula cache)
+      |> Seq.memoize
 
 and query_span_series cache series period : span option list =
   let series_id = Spans.id series in
@@ -1044,6 +1099,12 @@ let series_dependencies : type a. a series -> packed_series list = function
       | Map { dep; _ } -> [ Series (Span_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
       | Extend { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
+      | Unfold_from { base; deps; _ } ->
+          Series (Span_series base)
+          :: (Deps.dependencies (deps ())
+             |> List.map (function
+               | Deps.Span_item s -> Series (Span_series s)
+               | Deps.Point_item s -> Series (Point_series s)))
       | Unfold { deps; _ } ->
           Deps.dependencies (deps ())
           |> List.map (function

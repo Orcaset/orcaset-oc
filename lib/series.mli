@@ -56,6 +56,18 @@ module rec Spans : sig
     t
   (** [unfold ?label ~deps ~init ~cells ()] builds a span series by repeatedly calling [cells]. *)
 
+  val unfold_from :
+    ?label:string ->
+    t ->
+    deps:(unit -> 'readers Deps.t) ->
+    cells:('readers -> Period.t -> (unfold_cell * Period.t) option) ->
+    unit ->
+    t
+  (** [unfold_from ?label base ~deps ~cells ()] yields all spans from [base], then continues by
+      calling [cells] with the final period emitted by [base]. Each continuation step returns the
+      emitted cell and the next period passed to [cells]. If [base] emits no spans, [cells] is never
+      called. *)
+
   val unfold_rec :
     ?label:string ->
     deps:(t -> 'readers Deps.t) ->

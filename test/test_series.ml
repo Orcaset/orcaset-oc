@@ -161,6 +161,79 @@ let test_span_extend_empty_first_series () =
   let total = query_span cache extended ~period:feb ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "empty first series" 28.0 total
 
+let test_unfold_from_replays_base_and_continues () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let base = Spans.of_list ~split:proportional_split [ (jan, 31.0); (feb, 28.0) ] in
+  let seen = ref [] in
+  let series =
+    Spans.unfold_from base
+      ~deps:(fun () -> Deps.none)
+      ~cells:(fun () previous ->
+        seen := previous :: !seen;
+        let period = Period.next (months 1) previous in
+        if Date.(Period.start period >= d 2026 5 1) then None
+        else
+          let value = Float.of_int (Date.month (Period.start period)) in
+          Some (Spans.cell ~period ~split:proportional_split (Formula.pure value), period))
+      ()
+  in
+  let cache = make_cache () in
+  (match query_span cache series ~period:(p (d 2026 1 1) (d 2026 5 1)) ~reduce:Fun.id with
+  | [ Some jan_value; Some feb_value; Some mar_value; Some apr_value ] ->
+      Alcotest.(check (float 1e-9)) "jan from base" 31.0 jan_value;
+      Alcotest.(check (float 1e-9)) "feb from base" 28.0 feb_value;
+      Alcotest.(check (float 1e-9)) "mar from continuation" 3.0 mar_value;
+      Alcotest.(check (float 1e-9)) "apr from continuation" 4.0 apr_value
+  | _ -> Alcotest.fail "expected base spans followed by continuation spans");
+  match List.rev !seen with
+  | [ first; second ] ->
+      Alcotest.(check bool)
+        "first continuation receives last base period" true (Period.equal feb first);
+      Alcotest.(check bool) "next period controls continuation state" true (Period.equal mar second)
+  | _ -> Alcotest.fail "expected two continuation calls"
+
+let test_unfold_from_empty_base_does_not_call_cells () =
+  let open Series in
+  let empty = Spans.of_list ~split:proportional_split [] in
+  let called = ref false in
+  let series =
+    Spans.unfold_from empty
+      ~deps:(fun () -> Deps.none)
+      ~cells:(fun () _ ->
+        called := true;
+        Alcotest.fail "cells should not be called for an empty base")
+      ()
+  in
+  let cache = make_cache () in
+  let total = query_span cache series ~period:(p (d 2026 1 1) (d 2026 2 1)) ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "empty result" 0.0 total;
+  Alcotest.(check bool) "cells not called" false !called
+
+let test_unfold_from_dependencies () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let base = single_span_series ~period ~split:proportional_split 1.0 in
+  let points = Points.of_list [ (d 2026 2 1, 2.0) ] in
+  let series =
+    Spans.unfold_from base ~deps:(fun () -> Deps.point_dep points) ~cells:(fun _ _ -> None) ()
+  in
+  let deps = dependencies (Span_series series) in
+  Alcotest.(check int) "base plus explicit dep" 2 (List.length deps);
+  let span_deps, point_deps =
+    List.fold_left
+      (fun (span_count, point_count) dep ->
+        let (Series s) = dep.series in
+        match s with
+        | Span_series _ -> (span_count + 1, point_count)
+        | Point_series _ -> (span_count, point_count + 1))
+      (0, 0) deps
+  in
+  Alcotest.(check int) "span deps" 1 span_deps;
+  Alcotest.(check int) "point deps" 1 point_deps
+
 let test_sum_float_opts () =
   let open Series in
   Alcotest.(check (float 1e-9))
@@ -559,6 +632,9 @@ let tests =
       ( "span extend preserves gap before second series",
         test_span_extend_preserves_gap_before_second_series );
       ("span extend empty first series", test_span_extend_empty_first_series);
+      ("unfold_from replays base and continues", test_unfold_from_replays_base_and_continues);
+      ("unfold_from empty base does not call cells", test_unfold_from_empty_base_does_not_call_cells);
+      ("unfold_from dependencies", test_unfold_from_dependencies);
       ("sum_float_opts", test_sum_float_opts);
       ( "non-cyclic map preserves gaps and evaluates once",
         test_non_cyclic_map_preserves_gaps_and_evaluates_once );
