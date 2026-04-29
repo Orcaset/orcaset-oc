@@ -363,50 +363,6 @@ type dependency = { series : packed_series; dependencies : dependency list; is_b
 let sum_float_opt ~fill =
   List.fold_left (fun acc -> function Some value -> acc +. value | None -> acc +. fill) 0.0
 
-(* ----- Series id ownership ----- *)
-
-type series_owner = Span_owner of Spans.t | Point_owner of Points.t
-type owner_claims = { mutable owners : series_owner option array }
-
-let make_owner_claims () = { owners = Array.make 16 None }
-let series_id_index (Id id) = id
-
-let same_owner existing claimed =
-  match (existing, claimed) with
-  | Span_owner a, Span_owner b -> a == b
-  | Point_owner a, Point_owner b -> a == b
-  | _ -> false
-
-let ensure_owner_capacity claims id =
-  if id >= Array.length claims.owners then begin
-    let old_length = Array.length claims.owners in
-    let new_length = ref (max 1 old_length) in
-    while id >= !new_length do
-      new_length := !new_length * 2
-    done;
-    let next = Array.make !new_length None in
-    Array.blit claims.owners 0 next 0 old_length;
-    claims.owners <- next
-  end
-
-let claim_owner claims series_id owner =
-  let id = series_id_index series_id in
-  ensure_owner_capacity claims id;
-  match claims.owners.(id) with
-  | None ->
-      claims.owners.(id) <- Some owner;
-      series_id
-  | Some existing when same_owner existing owner -> series_id
-  | Some _ -> invalid_arg (Printf.sprintf "series id %d reused by multiple series" id)
-
-let claim_span_series claims series = claim_owner claims (Spans.id series) (Span_owner series)
-let claim_point_series claims series = claim_owner claims (Points.id series) (Point_owner series)
-
-let claim_series : type a. owner_claims -> a series -> series_id =
- fun claims -> function
-  | Span_series series -> claim_span_series claims series
-  | Point_series series -> claim_point_series claims series
-
 (* ----- Series cache ----- *)
 type cached_point = Cached_point of point option
 
@@ -457,7 +413,6 @@ type resolving_cell = {
 type eval_state = Resolving of resolving_cell | Resolved of { cell : eval_cell; value : float }
 
 type series_cache = {
-  owners : owner_claims;
   point : (series_id, cached_point PointCellCache.t) Hashtbl.t;
   span : (series_id, span_cache_entry) Hashtbl.t;
   accum : (series_id, accum_cache_entry) Hashtbl.t;
@@ -467,7 +422,6 @@ type series_cache = {
 
 let make_cache () : series_cache =
   {
-    owners = make_owner_claims ();
     point = Hashtbl.create 20;
     span = Hashtbl.create 20;
     accum = Hashtbl.create 20;
@@ -571,7 +525,6 @@ let make_unfold_producer ~init ~cells ~register_formula =
   view 0
 
 let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq.t =
-  ignore (claim_span_series cache.owners series : series_id);
   match series with
   | Const { period; value; _ } -> Seq.return (f_value period value const_split)
   | Map { dep; f; _ } ->
@@ -605,7 +558,7 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
       make_unfold_producer ~init ~cells:(cells readers) ~register_formula
 
 and query_span_series cache series period : span option list =
-  let series_id = claim_span_series cache.owners series in
+  let series_id = Spans.id series in
   let series_entry_opt = Hashtbl.find_opt cache.span series_id in
   let { cells; sequence } =
     match series_entry_opt with
@@ -647,7 +600,7 @@ and query_accum cache point_series_id init changes date : point =
       new_point
 
 and query_point_series cache series date : point option =
-  let series_id = claim_point_series cache.owners series in
+  let series_id = Points.id series in
   let cached_value =
     match Hashtbl.find_opt cache.point series_id with
     | Some cache -> PointCellCache.find_opt cache date
@@ -1044,6 +997,10 @@ module Series_id_set = Set.Make (struct
   let compare (Id a) (Id b) = Int.compare a b
 end)
 
+let series_id : type a. a series -> series_id = function
+  | Point_series series -> Points.id series
+  | Span_series series -> Spans.id series
+
 let series_dependencies : type a. a series -> packed_series list = function
   | Point_series series -> (
       match series with
@@ -1063,23 +1020,20 @@ let series_dependencies : type a. a series -> packed_series list = function
             | Deps.Span_item s -> Series (Span_series s)
             | Deps.Point_item s -> Series (Point_series s)))
 
-let rec build_dependencies claims active_path (Series series) =
+let rec build_dependencies active_path (Series series) =
   let add_dependency dependency =
     let (Series dep_series) = dependency in
-    let dep_id = claim_series claims dep_series in
+    let dep_id = series_id dep_series in
     if Series_id_set.mem dep_id active_path then
       { series = dependency; dependencies = []; is_back_edge = true }
     else
       {
         series = dependency;
-        dependencies = build_dependencies claims (Series_id_set.add dep_id active_path) dependency;
+        dependencies = build_dependencies (Series_id_set.add dep_id active_path) dependency;
         is_back_edge = false;
       }
   in
   series_dependencies series |> List.map add_dependency
 
 let dependencies : type a. a series -> dependency list =
- fun series ->
-  let claims = make_owner_claims () in
-  let root_id = claim_series claims series in
-  build_dependencies claims (Series_id_set.singleton root_id) (Series series)
+ fun series -> build_dependencies (Series_id_set.singleton (series_id series)) (Series series)
