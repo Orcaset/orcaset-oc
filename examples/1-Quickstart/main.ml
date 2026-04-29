@@ -9,29 +9,25 @@ let initial_period = Period.make initial_period_start (Date.shift qtr_offset ini
 
 (* ----- Model ----- *)
 
-let rec revenue =
-  Series.Spans.Unfold
-    {
-      id = Series.new_id ();
-      label = Some "Revenue";
-      deps = (fun () -> Series.Deps.span_dep revenue);
-      init = initial_period;
-      cells =
-        (fun read_revenue period ->
-          let formula =
-            if Period.equal period initial_period then Series.Formula.pure 1_000.0
-            else
-              let open Series.Formula in
-              let+ prior_revenue =
-                read_revenue ~period:(Period.prev qtr_lookback period)
-                  ~reduce:(Series.sum_float_opt ~fill:0.0)
-              in
-              prior_revenue *. 1.03
+let revenue =
+  Series.Spans.unfold_rec ~label:"Revenue"
+    ~deps:(fun self -> Series.Deps.span_dep self)
+    ~init:initial_period
+    ~cells:(fun read_revenue period ->
+      let formula =
+        if Period.equal period initial_period then Series.Formula.pure 1_000.0
+        else
+          let open Series.Formula in
+          let+ prior_revenue =
+            read_revenue ~period:(Period.prev qtr_lookback period)
+              ~reduce:(Series.sum_float_opt ~fill:0.0)
           in
-          Some
-            ( Series.cell ~period ~split:Series.proportional_split formula,
-              Period.next qtr_offset period ));
-    }
+          prior_revenue *. 1.03
+      in
+      Some
+        ( Series.Spans.cell ~period ~split:Series.proportional_split formula,
+          Period.next qtr_offset period ))
+    ()
 
 let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue
 let profit = Series.Spans.sum ~label:"Profit" revenue expenses

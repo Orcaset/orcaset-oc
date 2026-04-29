@@ -13,33 +13,29 @@ Profit: Sum of revenue and expenses
 The full model is defined in 23 lines of code which can be queried for values over any arbitrary date range.
 
 ```ocaml
-let rec revenue =
-  Series.Spans.Unfold
-    {
-      id = Series.new_id ();
-      label = Some "Revenue";
-      (* Declare revenue as a dependency of itself. *)
-      deps = (fun () -> Series.Deps.span_dep revenue);
-      (* Revenue unfolds over periods. Set the initial period. *)
-      init = initial_period;
-      (* The step function returns a (revenue accrual, next period) tuple. 
-         Dependency readers from `deps` are passed to the step function at execution. *)
-      cells =
-        (fun read_revenue period ->
-          let formula =
-            (* If the current period is the start period, return the initial value. *)
-            if Period.equal period initial_period then Series.Formula.pure 1_000.0
-            (* Otherwise, look up the revenue over the prior period and grow it by the quarterly rate. *)
-            else
-              let open Series.Formula in
-              let+ prior_revenue =
-                read_revenue ~period:(Period.prev qtr_lookback period) ~reduce:(Series.sum_float_opt ~fill:0.0)
-              in
-              prior_revenue *. 1.03
+let revenue =
+  Series.Spans.unfold_rec ~label:"Revenue"
+    (* Declare revenue as a dependency of itself. *)
+    ~deps:(fun self -> Series.Deps.span_dep self)
+    (* Revenue unfolds over periods. Set the initial period. *)
+    ~init:initial_period
+    (* The step function returns a (revenue accrual, next period) tuple. 
+       Dependency readers from `deps` are passed to the step function at execution. *)
+    ~cells:(fun read_revenue period ->
+      let formula =
+        (* If the current period is the start period, return the initial value. *)
+        if Period.equal period initial_period then Series.Formula.pure 1_000.0
+        (* Otherwise, look up the revenue over the prior period and grow it by the quarterly rate. *)
+        else
+          let open Series.Formula in
+          let+ prior_revenue =
+            read_revenue ~period:(Period.prev qtr_lookback period) ~reduce:(Series.sum_float_opt ~fill:0.0)
           in
-          Some
-            ( Series.cell ~period ~split:Series.proportional_split formula, Period.next qtr_offset period ));
-    }
+          prior_revenue *. 1.03
+      in
+      Some
+        ( Series.cell ~period ~split:Series.proportional_split formula, Period.next qtr_offset period ))
+    ()
 
 (* Expenses are defined as a constant (negative) percent of revenue. *)
 let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue

@@ -16,7 +16,259 @@ let proportional_split : split = Cell_type.proportional_split
 let const_split : split = Cell_type.const_split
 
 (* ----- Series constructors ----- *)
-module rec Formula : sig
+module rec Spans : sig
+  type unfold_cell
+
+  type t =
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | Unfold : {
+        id : series_id;
+        label : string option;
+        deps : unit -> 'readers Deps.t;
+        init : 'state;
+        cells : 'readers -> 'state -> (unfold_cell * 'state) option;
+      }
+        -> t
+
+  val neg : ?label:string -> t -> t
+  val scale : ?label:string -> float -> t -> t
+  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sub : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val div : ?label:string -> ?fill:float -> t -> t -> t
+  val const : ?label:string -> period:Period.t -> value:(unit -> float) -> unit -> t
+  val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
+  val map : ?label:string -> (float -> float) -> t -> t
+  val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
+
+  val unfold :
+    ?label:string ->
+    deps:(unit -> 'readers Deps.t) ->
+    init:'state ->
+    cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
+    unit ->
+    t
+
+  val unfold_rec :
+    ?label:string ->
+    deps:(t -> 'readers Deps.t) ->
+    init:'state ->
+    cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
+    unit ->
+    t
+
+  val cell : period:Period.t -> split:split -> float Formula.t -> unfold_cell
+  val id : t -> series_id
+  val label : t -> string option
+  val unpack_unfold_cell : unfold_cell -> Period.t * split * float Formula.t
+end = struct
+  type unfold_cell = Cell of { period : Period.t; split : split; formula : float Formula.t }
+
+  type t =
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | Unfold : {
+        id : series_id;
+        label : string option;
+        deps : unit -> 'readers Deps.t;
+        init : 'state;
+        cells : 'readers -> 'state -> (unfold_cell * 'state) option;
+      }
+        -> t
+
+  let cell ~period ~split formula = Cell { period; split; formula }
+  let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
+  let const ?label ~period ~value () = Const { id = new_id (); label; period; value }
+  let unfold ?label ~deps ~init ~cells () = Unfold { id = new_id (); label; deps; init; cells }
+
+  let unfold_rec ?label ~deps ~init ~cells () =
+    let rec self = Unfold { id = new_id (); label; deps = (fun () -> deps self); init; cells } in
+    self
+
+  let of_list ?label ~split cells =
+    unfold ?label
+      ~deps:(fun () -> Deps.none)
+      ~init:cells
+      ~cells:(fun () -> function
+        | [] -> None
+        | (period, value) :: rest -> Some (cell ~period ~split (Formula.pure value), rest))
+      ()
+
+  let id = function
+    | Const { id; _ } -> id
+    | Map { id; _ } -> id
+    | Map2 { id; _ } -> id
+    | Unfold { id; _ } -> id
+
+  let label = function
+    | Const { label; _ } -> label
+    | Map { label; _ } -> label
+    | Map2 { label; _ } -> label
+    | Unfold { label; _ } -> label
+
+  let map ?label f dep = Map { id = new_id (); label; dep; f }
+  let neg ?label dep = map ?label (fun value -> -.value) dep
+  let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
+  let fill_option fill = function None -> fill | some -> some
+
+  let map2 ?label ?fill a b f =
+    Map2
+      { id = new_id (); label; a; b; f = (fun a b -> f (fill_option fill a) (fill_option fill b)) }
+
+  let value_or_zero = Option.value ~default:0.0
+  let sum ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a +. value_or_zero b)
+  let sub ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a -. value_or_zero b)
+  let mul ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a *. value_or_zero b)
+  let div ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a /. value_or_zero b)
+end
+
+and Points : sig
+  type t =
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | List of { id : series_id; label : string option; values : (Date.t * float) list }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
+
+  val neg : ?label:string -> t -> t
+  val scale : ?label:string -> float -> t -> t
+  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sub : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val div : ?label:string -> ?fill:float -> t -> t -> t
+  val const : ?label:string -> period:Period.t -> value:(unit -> float) -> unit -> t
+  val of_list : ?label:string -> (Date.t * float) list -> t
+  val map : ?label:string -> (float -> float) -> t -> t
+  val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
+  val accum : ?label:string -> init:float -> changes:Spans.t -> unit -> t
+  val id : t -> series_id
+  val label : t -> string option
+end = struct
+  type t =
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | List of { id : series_id; label : string option; values : (Date.t * float) list }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
+
+  let const ?label ~period ~value () = Const { id = new_id (); label; period; value }
+  let of_list ?label values = List { id = new_id (); label; values }
+  let accum ?label ~init ~changes () = Accum { id = new_id (); label; init; changes }
+
+  let id = function
+    | Const { id; _ } -> id
+    | List { id; _ } -> id
+    | Map { id; _ } -> id
+    | Map2 { id; _ } -> id
+    | Accum { id; _ } -> id
+
+  let label = function
+    | Const { label; _ } -> label
+    | List { label; _ } -> label
+    | Map { label; _ } -> label
+    | Map2 { label; _ } -> label
+    | Accum { label; _ } -> label
+
+  let map ?label f dep = Map { id = new_id (); label; dep; f }
+  let neg ?label dep = map ?label (fun value -> -.value) dep
+  let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
+  let fill_option fill = function None -> fill | some -> some
+
+  let map2 ?label ?fill a b f =
+    Map2
+      { id = new_id (); label; a; b; f = (fun a b -> f (fill_option fill a) (fill_option fill b)) }
+
+  let value_or_zero = Option.value ~default:0.0
+  let sum ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a +. value_or_zero b)
+  let sub ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a -. value_or_zero b)
+  let mul ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a *. value_or_zero b)
+  let div ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a /. value_or_zero b)
+end
+
+and Deps : sig
+  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
+  type point_reader = date:Date.t -> default:float -> float Formula.t
+  type _ t
+
+  val none : unit t
+  val span_dep : Spans.t -> span_reader t
+  val point_dep : Points.t -> point_reader t
+  val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
+  val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
+
+  type packed_dep = Span_item of Spans.t | Point_item of Points.t
+
+  val dependencies : 'a t -> packed_dep list
+  val run : 'a t -> 'a
+end = struct
+  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
+  type point_reader = date:Date.t -> default:float -> float Formula.t
+  type _ dep = Span_dep : Spans.t -> span_reader dep | Point_dep : Points.t -> point_reader dep
+  type _ t = Pure : 'a -> 'a t | Ap : 'x dep * ('x -> 'a) t -> 'a t
+
+  let none = Pure ()
+
+  let rec map : type a b. (a -> b) -> a t -> b t =
+   fun f -> function Pure x -> Pure (f x) | Ap (d, k) -> Ap (d, map (fun g x -> f (g x)) k)
+
+  (* Standard free-applicative [ap]: ap (f : ('a -> 'b) t) (x : 'a t) : 'b t. *)
+  let rec ap : type a b. (a -> b) t -> a t -> b t =
+   fun f x ->
+    match f with Pure g -> map g x | Ap (d, k) -> Ap (d, ap (map (fun g y a -> g a y) k) x)
+
+  let span_dep s = Ap (Span_dep s, Pure (fun r -> r))
+  let point_dep s = Ap (Point_dep s, Pure (fun r -> r))
+  let ( let+ ) x f = map f x
+  let ( and+ ) a b = ap (map (fun x y -> (x, y)) a) b
+
+  type packed_dep = Span_item of Spans.t | Point_item of Points.t
+
+  let rec dependencies : type a. a t -> packed_dep list = function
+    | Pure _ -> []
+    | Ap (Span_dep s, rest) -> Span_item s :: dependencies rest
+    | Ap (Point_dep s, rest) -> Point_item s :: dependencies rest
+
+  let run (type a) (d : a t) : a =
+    let rec go : type a. a t -> a = function
+      | Pure x -> x
+      | Ap (Span_dep s, rest) ->
+          let reader ~period ~reduce = Formula.span_query s ~period ~reduce in
+          go rest reader
+      | Ap (Point_dep s, rest) ->
+          let reader ~date ~default = Formula.point_query s ~date ~default in
+          go rest reader
+    in
+    go d
+end
+
+and Formula : sig
   type 'a t
 
   type packed_query =
@@ -94,248 +346,6 @@ end = struct
     in
     go formula
 end
-
-and Spans : sig
-  type unfold_cell
-
-  type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
-    | Map2 of {
-        id : series_id;
-        label : string option;
-        a : t;
-        b : t;
-        f : float option -> float option -> float;
-      }
-    | Unfold : {
-        id : series_id;
-        label : string option;
-        deps : unit -> 'readers Deps.t;
-        init : 'state;
-        cells : 'readers -> 'state -> (unfold_cell * 'state) option;
-      }
-        -> t
-
-  val cell : period:Period.t -> split:split -> float Formula.t -> unfold_cell
-  val unpack_unfold_cell : unfold_cell -> Period.t * split * float Formula.t
-
-  val unfold :
-    ?label:string ->
-    deps:(unit -> 'readers Deps.t) ->
-    init:'state ->
-    cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
-    unit ->
-    t
-
-  val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
-  val id : t -> series_id
-  val label : t -> string option
-  val map : ?label:string -> (float -> float) -> t -> t
-  val neg : ?label:string -> t -> t
-  val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> ?fill:float -> t -> t -> t
-  val sub : ?label:string -> ?fill:float -> t -> t -> t
-  val mul : ?label:string -> ?fill:float -> t -> t -> t
-  val div : ?label:string -> ?fill:float -> t -> t -> t
-end = struct
-  type unfold_cell = Cell of { period : Period.t; split : split; formula : float Formula.t }
-
-  type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
-    | Map2 of {
-        id : series_id;
-        label : string option;
-        a : t;
-        b : t;
-        f : float option -> float option -> float;
-      }
-    | Unfold : {
-        id : series_id;
-        label : string option;
-        deps : unit -> 'readers Deps.t;
-        init : 'state;
-        cells : 'readers -> 'state -> (unfold_cell * 'state) option;
-      }
-        -> t
-
-  let cell ~period ~split formula = Cell { period; split; formula }
-  let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
-  let unfold ?label ~deps ~init ~cells () = Unfold { id = new_id (); label; deps; init; cells }
-
-  let of_list ?label ~split cells =
-    unfold ?label
-      ~deps:(fun () -> Deps.none)
-      ~init:cells
-      ~cells:(fun () -> function
-        | [] -> None
-        | (period, value) :: rest -> Some (cell ~period ~split (Formula.pure value), rest))
-      ()
-
-  let id = function
-    | Const { id; _ } -> id
-    | Map { id; _ } -> id
-    | Map2 { id; _ } -> id
-    | Unfold { id; _ } -> id
-
-  let label = function
-    | Const { label; _ } -> label
-    | Map { label; _ } -> label
-    | Map2 { label; _ } -> label
-    | Unfold { label; _ } -> label
-
-  let map ?label f dep = Map { id = new_id (); label; dep; f }
-  let neg ?label dep = map ?label (fun value -> -.value) dep
-  let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
-
-  let map2 ?label ?(fill = 0.0) a b f =
-    Map2
-      {
-        id = new_id ();
-        label;
-        a;
-        b;
-        f = (fun a b -> f (Option.value ~default:fill a) (Option.value ~default:fill b));
-      }
-
-  let sum ?label ?fill a b = map2 ?label ?fill a b ( +. )
-  let sub ?label ?fill a b = map2 ?label ?fill a b ( -. )
-  let mul ?label ?fill a b = map2 ?label ?fill a b ( *. )
-  let div ?label ?fill a b = map2 ?label ?fill a b ( /. )
-end
-
-and Points : sig
-  type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
-    | List of { id : series_id; label : string option; values : (Date.t * float) list }
-    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
-    | Map2 of {
-        id : series_id;
-        label : string option;
-        a : t;
-        b : t;
-        f : float option -> float option -> float;
-      }
-    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
-
-  val of_list : ?label:string -> (Date.t * float) list -> t
-  val id : t -> series_id
-  val label : t -> string option
-  val map : ?label:string -> (float -> float) -> t -> t
-  val neg : ?label:string -> t -> t
-  val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> ?fill:float -> t -> t -> t
-  val sub : ?label:string -> ?fill:float -> t -> t -> t
-  val mul : ?label:string -> ?fill:float -> t -> t -> t
-  val div : ?label:string -> ?fill:float -> t -> t -> t
-end = struct
-  type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
-    | List of { id : series_id; label : string option; values : (Date.t * float) list }
-    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
-    | Map2 of {
-        id : series_id;
-        label : string option;
-        a : t;
-        b : t;
-        f : float option -> float option -> float;
-      }
-    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
-
-  let of_list ?label values = List { id = new_id (); label; values }
-
-  let id = function
-    | Const { id; _ } -> id
-    | List { id; _ } -> id
-    | Map { id; _ } -> id
-    | Map2 { id; _ } -> id
-    | Accum { id; _ } -> id
-
-  let label = function
-    | Const { label; _ } -> label
-    | List { label; _ } -> label
-    | Map { label; _ } -> label
-    | Map2 { label; _ } -> label
-    | Accum { label; _ } -> label
-
-  let map ?label f dep = Map { id = new_id (); label; dep; f }
-  let neg ?label dep = map ?label (fun value -> -.value) dep
-  let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
-
-  let map2 ?label ?(fill = 0.0) a b f =
-    Map2
-      {
-        id = new_id ();
-        label;
-        a;
-        b;
-        f = (fun a b -> f (Option.value ~default:fill a) (Option.value ~default:fill b));
-      }
-
-  let sum ?label ?fill a b = map2 ?label ?fill a b ( +. )
-  let sub ?label ?fill a b = map2 ?label ?fill a b ( -. )
-  let mul ?label ?fill a b = map2 ?label ?fill a b ( *. )
-  let div ?label ?fill a b = map2 ?label ?fill a b ( /. )
-end
-
-and Deps : sig
-  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
-  type point_reader = date:Date.t -> default:float -> float Formula.t
-  type _ t
-
-  val none : unit t
-  val span_dep : Spans.t -> span_reader t
-  val point_dep : Points.t -> point_reader t
-  val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
-  val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
-
-  type packed_dep = Span_item of Spans.t | Point_item of Points.t
-
-  val dependencies : 'a t -> packed_dep list
-  val run : 'a t -> 'a
-end = struct
-  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
-  type point_reader = date:Date.t -> default:float -> float Formula.t
-  type _ dep = Span_dep : Spans.t -> span_reader dep | Point_dep : Points.t -> point_reader dep
-  type _ t = Pure : 'a -> 'a t | Ap : 'x dep * ('x -> 'a) t -> 'a t
-
-  let none = Pure ()
-
-  let rec map : type a b. (a -> b) -> a t -> b t =
-   fun f -> function Pure x -> Pure (f x) | Ap (d, k) -> Ap (d, map (fun g x -> f (g x)) k)
-
-  (* Standard free-applicative [ap]: ap (f : ('a -> 'b) t) (x : 'a t) : 'b t. *)
-  let rec ap : type a b. (a -> b) t -> a t -> b t =
-   fun f x ->
-    match f with Pure g -> map g x | Ap (d, k) -> Ap (d, ap (map (fun g y a -> g a y) k) x)
-
-  let span_dep s = Ap (Span_dep s, Pure (fun r -> r))
-  let point_dep s = Ap (Point_dep s, Pure (fun r -> r))
-  let ( let+ ) x f = map f x
-  let ( and+ ) a b = ap (map (fun x y -> (x, y)) a) b
-
-  type packed_dep = Span_item of Spans.t | Point_item of Points.t
-
-  let rec dependencies : type a. a t -> packed_dep list = function
-    | Pure _ -> []
-    | Ap (Span_dep s, rest) -> Span_item s :: dependencies rest
-    | Ap (Point_dep s, rest) -> Point_item s :: dependencies rest
-
-  let run (type a) (d : a t) : a =
-    let rec go : type a. a t -> a = function
-      | Pure x -> x
-      | Ap (Span_dep s, rest) ->
-          let reader ~period ~reduce = Formula.span_query s ~period ~reduce in
-          go rest reader
-      | Ap (Point_dep s, rest) ->
-          let reader ~date ~default = Formula.point_query s ~date ~default in
-          go rest reader
-    in
-    go d
-end
-
-let cell = Spans.cell
 
 (* ----- Existentially-packed series ----- *)
 
@@ -525,7 +535,7 @@ let walk_accum_delta tail date =
   in
   loop [] tail
 
-(* Feed an Unfold [cells] stream: each yielded [unfold_cell] becomes a memoized span cell. *)
+(* Feed an unfold [cells] stream: each yielded [unfold_cell] becomes a memoized span cell. *)
 let make_unfold_producer ~init ~cells ~register_formula =
   let buf = Dynarray.create () in
   let state = ref init in
