@@ -78,41 +78,6 @@ let span_id = function
   | Map { id; _ } -> id
   | Map2 { id; _ } -> id
 
-let split_with_strategy date span split =
-  let left, right = split span date in
-  ( Some (f_slice left.period span left.value split),
-    Some (f_slice right.period span right.value split) )
-
-let rec split_span date span =
-  let start, end_ = Period.to_tuple (span_period span) in
-  if Date.(date <= start) then (None, Some span)
-  else if Date.(date >= end_) then (Some span, None)
-  else
-    match span with
-    | Value { split; _ } | Slice { split; _ } -> split_with_strategy date span split
-    | Map { dep; f; _ } -> (
-        match split_span date dep with
-        | Some left, Some right -> (Some (f_map left f), Some (f_map right f))
-        | Some left, None -> (Some (f_map left f), None)
-        | None, Some right -> (None, Some (f_map right f))
-        | None, None -> (None, None))
-    | Map2 { a; b; f; _ } -> (
-        let left_period = Period.make start date in
-        let right_period = Period.make date end_ in
-        match (a, b) with
-        | None, None -> (None, None)
-        | Some a, None ->
-            let a_left, a_right = split_span date a in
-            (Some (f_map2 left_period a_left None f), Some (f_map2 right_period a_right None f))
-        | None, Some b ->
-            let b_left, b_right = split_span date b in
-            (Some (f_map2 left_period None b_left f), Some (f_map2 right_period None b_right f))
-        | Some a, Some b ->
-            let a_left, a_right = split_span date a in
-            let b_left, b_right = split_span date b in
-            (Some (f_map2 left_period a_left b_left f), Some (f_map2 right_period a_right b_right f))
-        )
-
 let proportional_split : split_strategy =
  fun span date ->
   let start, end_ = Period.to_tuple (span_period span) in
@@ -128,6 +93,36 @@ let const_split : split_strategy =
   let start, end_ = Period.to_tuple (span_period span) in
   ( split_part ~period:(Period.make start date) ~value:Fun.id,
     split_part ~period:(Period.make date end_) ~value:Fun.id )
+
+(* The strategy used to split a span that does not carry one of its own. A [Map]'s value is
+   [f dep_value]; splitting it must allocate that value using the dep's strategy so that [f] is
+   applied before, not after, the proportional (or constant) scaling. Falls back to
+   [proportional_split] when the chain bottoms out at a [Map2], which has no single underlying
+   strategy. *)
+let rec inherited_split = function
+  | Value { split; _ } | Slice { split; _ } -> split
+  | Map { dep; _ } -> inherited_split dep
+  | Map2 _ -> proportional_split
+
+let split_span date span =
+  let start, end_ = Period.to_tuple (span_period span) in
+  if Date.(date <= start) then (None, Some span)
+  else if Date.(date >= end_) then (Some span, None)
+  else
+    match span with
+    | Value { split; _ } | Slice { split; _ } ->
+        let left, right = split span date in
+        ( Some (f_slice left.period span left.value split),
+          Some (f_slice right.period span right.value split) )
+    | Map _ | Map2 _ ->
+        (* Apply the combining function before splitting: build slices that depend on the whole
+           span so its value ([f dep_value] for [Map], [f a b] for [Map2]) is computed over the
+           original period and only then scaled by [split]. Splitting first would push the scaling
+           inside [f], which is only correct when [f] is linear. *)
+        let split = inherited_split span in
+        let left, right = split span date in
+        ( Some (f_slice left.period span left.value split),
+          Some (f_slice right.period span right.value split) )
 
 let clip_span bounds span =
   let q_start, q_end = Period.to_tuple bounds in
