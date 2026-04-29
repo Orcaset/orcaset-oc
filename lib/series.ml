@@ -108,7 +108,6 @@ and Spans : sig
         b : t;
         f : float option -> float option -> float;
       }
-    | After of { id : series_id; label : string option; date : Date.t; dep : t }
     | Unfold : {
         id : series_id;
         label : string option;
@@ -128,7 +127,6 @@ and Spans : sig
   val sub : ?label:string -> ?fill:float -> t -> t -> t
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
-  val after : Date.t -> t -> t
 end = struct
   type unfold_cell = Cell of { period : Period.t; split : split; formula : float Formula.t }
 
@@ -142,7 +140,6 @@ end = struct
         b : t;
         f : float option -> float option -> float;
       }
-    | After of { id : series_id; label : string option; date : Date.t; dep : t }
     | Unfold : {
         id : series_id;
         label : string option;
@@ -159,14 +156,12 @@ end = struct
     | Const { id; _ } -> id
     | Map { id; _ } -> id
     | Map2 { id; _ } -> id
-    | After { id; _ } -> id
     | Unfold { id; _ } -> id
 
   let label = function
     | Const { label; _ } -> label
     | Map { label; _ } -> label
     | Map2 { label; _ } -> label
-    | After { label; _ } -> label
     | Unfold { label; _ } -> label
 
   let neg ?label dep = Map { id = new_id (); label; dep; f = (fun value -> -.value) }
@@ -188,7 +183,6 @@ end = struct
   let sub ?label ?fill a b = map2 ?label ?fill a b ( -. )
   let mul ?label ?fill a b = map2 ?label ?fill a b ( *. )
   let div ?label ?fill a b = map2 ?label ?fill a b ( /. )
-  let after date dep = After { id = new_id (); label = None; date; dep }
 end
 
 and Points : sig
@@ -539,18 +533,6 @@ let make_unfold_producer ~init ~cells ~register_formula =
   in
   view 0
 
-let rec span_seq_after date seq () =
-  match seq () with
-  | Seq.Nil -> Seq.Nil
-  | Seq.Cons (span, rest) -> (
-      let start, end_ = Period.to_tuple (span_period span) in
-      if Date.(end_ <= date) then span_seq_after date rest ()
-      else if Date.(start >= date) then Seq.Cons (span, rest)
-      else
-        match split_span date span with
-        | _, Some right -> Seq.Cons (right, rest)
-        | _, None -> span_seq_after date rest ())
-
 let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq.t =
   ignore (claim_span_series cache.owners series : series_id);
   match series with
@@ -574,7 +556,6 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
           paired
       in
       Seq.memoize seq
-  | After { date; dep; _ } -> seq_for_span_series cache dep |> span_seq_after date |> Seq.memoize
   | Unfold { deps; init; cells; _ } ->
       let readers = Deps.run (deps ()) in
       let register_formula ~period ~split formula =
@@ -1034,7 +1015,6 @@ let series_dependencies : type a. a series -> packed_series list = function
       | Const _ -> []
       | Map { dep; _ } -> [ Series (Span_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
-      | After { dep; _ } -> [ Series (Span_series dep) ]
       | Unfold { deps; _ } ->
           Deps.dependencies (deps ())
           |> List.map (function

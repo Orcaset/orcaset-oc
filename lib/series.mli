@@ -61,7 +61,6 @@ and Spans : sig
         b : t;
         f : float option -> float option -> float;
       }
-    | After of { id : series_id; label : string option; date : Date.t; dep : t }
     | Unfold : {
         id : series_id;
         label : string option;
@@ -80,11 +79,6 @@ and Spans : sig
   val sub : ?label:string -> ?fill:float -> t -> t -> t
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
-
-  val after : Date.t -> t -> t
-  (** [after date series] returns a span series containing cells from [series] that start on or
-      after [date]. If [date] falls inside a source cell, that cell is split and the portion from
-      [date] is included. *)
 end
 
 and Points : sig

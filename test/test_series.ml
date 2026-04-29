@@ -122,25 +122,6 @@ let test_span_convenience_fill () =
   let total = query_span cache filled ~period:query_period ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "filled missing span sides" 15.0 total
 
-let test_span_after () =
-  let open Series in
-  let start = d 2026 1 1 in
-  let series =
-    monthly_series ~start ~n:3 (function 0 -> 31.0 | 1 -> 28.0 | 2 -> 31.0 | _ -> assert false)
-  in
-  let after_mid_feb = Spans.after (d 2026 2 15) series in
-  let cache = make_cache () in
-  let query_period = p start (d 2026 4 1) in
-  let values = query_span cache after_mid_feb ~period:query_period ~reduce:Fun.id in
-  (match values with
-  | [ None; Some feb_tail; Some march ] ->
-      Alcotest.(check (float 1e-9)) "split first included span" 14.0 feb_tail;
-      Alcotest.(check (float 1e-9)) "keeps later spans" 31.0 march
-  | _ -> Alcotest.fail "expected leading gap, split February tail, and March");
-  let after_boundary = Spans.after (d 2026 2 1) series in
-  let boundary_total = query_span cache after_boundary ~period:query_period ~reduce:sum_floats in
-  Alcotest.(check (float 1e-9)) "includes spans starting at date" 59.0 boundary_total
-
 let test_sum_float_opts () =
   let open Series in
   Alcotest.(check (float 1e-9))
@@ -628,7 +609,6 @@ let tests =
       ("span map2 applies function", test_span_map2_applies_function);
       ("span convenience constructors", test_span_convenience_constructors);
       ("span convenience fill", test_span_convenience_fill);
-      ("span after", test_span_after);
       ("sum_float_opts", test_sum_float_opts);
       ( "non-cyclic map preserves gaps and evaluates once",
         test_non_cyclic_map_preserves_gaps_and_evaluates_once );
