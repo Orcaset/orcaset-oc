@@ -118,6 +118,9 @@ let test_span_convenience_constructors () =
   in
   let total = Spans.sum ~label:"Total" a b in
   Alcotest.(check (option string)) "label" (Some "Total") (Spans.label total);
+  let mapped = Spans.map ~label:"Doubled" (fun value -> value *. 2.0) a in
+  Alcotest.(check (option string)) "map label" (Some "Doubled") (Spans.label mapped);
+  check "map" 20.0 mapped;
   check "neg" (-10.0) (Spans.neg a);
   check "scale" 30.0 (Spans.scale 3.0 a);
   check "sum" 12.0 total;
@@ -219,6 +222,9 @@ let test_point_convenience_constructors () =
   in
   let total = Points.sum ~label:"Total" a b in
   Alcotest.(check (option string)) "label" (Some "Total") (Points.label total);
+  let mapped = Points.map ~label:"Doubled" (fun value -> value *. 2.0) a in
+  Alcotest.(check (option string)) "map label" (Some "Doubled") (Points.label mapped);
+  check "map" 20.0 mapped;
   check "neg" (-10.0) (Points.neg a);
   check "scale" 30.0 (Points.scale 3.0 a);
   check "sum" 12.0 total;
@@ -270,21 +276,17 @@ let test_label_accessors () =
 let test_unfold_no_deps_single_step () =
   let open Series in
   let series =
-    Spans.Unfold
-      {
-        id = new_id ();
-        label = None;
-        init = 0;
-        deps = (fun () -> Deps.none);
-        cells =
-          (fun () n ->
-            if n >= 1 then None
-            else
-              let period = p (d 2026 1 1) (d 2026 2 1) in
-              Some (cell ~period ~split:proportional_split (Formula.pure 42.0), n + 1));
-      }
+    Spans.unfold ~label:"Single step" ~init:0
+      ~deps:(fun () -> Deps.none)
+      ~cells:(fun () n ->
+        if n >= 1 then None
+        else
+          let period = p (d 2026 1 1) (d 2026 2 1) in
+          Some (cell ~period ~split:proportional_split (Formula.pure 42.0), n + 1))
+      ()
   in
   let cache = make_cache () in
+  Alcotest.(check (option string)) "label" (Some "Single step") (Spans.label series);
   let total = query_span cache series ~period:(p (d 2026 1 1) (d 2026 2 1)) ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "value" 42.0 total
 

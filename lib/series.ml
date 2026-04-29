@@ -119,9 +119,19 @@ and Spans : sig
 
   val cell : period:Period.t -> split:split -> float Formula.t -> unfold_cell
   val unpack_unfold_cell : unfold_cell -> Period.t * split * float Formula.t
+
+  val unfold :
+    ?label:string ->
+    deps:(unit -> 'readers Deps.t) ->
+    init:'state ->
+    cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
+    unit ->
+    t
+
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   val id : t -> series_id
   val label : t -> string option
+  val map : ?label:string -> (float -> float) -> t -> t
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
   val sum : ?label:string -> ?fill:float -> t -> t -> t
@@ -152,19 +162,16 @@ end = struct
 
   let cell ~period ~split formula = Cell { period; split; formula }
   let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
+  let unfold ?label ~deps ~init ~cells () = Unfold { id = new_id (); label; deps; init; cells }
 
   let of_list ?label ~split cells =
-    Unfold
-      {
-        id = new_id ();
-        label;
-        deps = (fun () -> Deps.none);
-        init = cells;
-        cells =
-          (fun () -> function
-            | [] -> None
-            | (period, value) :: rest -> Some (cell ~period ~split (Formula.pure value), rest));
-      }
+    unfold ?label
+      ~deps:(fun () -> Deps.none)
+      ~init:cells
+      ~cells:(fun () -> function
+        | [] -> None
+        | (period, value) :: rest -> Some (cell ~period ~split (Formula.pure value), rest))
+      ()
 
   let id = function
     | Const { id; _ } -> id
@@ -178,10 +185,9 @@ end = struct
     | Map2 { label; _ } -> label
     | Unfold { label; _ } -> label
 
-  let neg ?label dep = Map { id = new_id (); label; dep; f = (fun value -> -.value) }
-
-  let scale ?label factor dep =
-    Map { id = new_id (); label; dep; f = (fun value -> factor *. value) }
+  let map ?label f dep = Map { id = new_id (); label; dep; f }
+  let neg ?label dep = map ?label (fun value -> -.value) dep
+  let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
 
   let map2 ?label ?(fill = 0.0) a b f =
     Map2
@@ -216,6 +222,7 @@ and Points : sig
   val of_list : ?label:string -> (Date.t * float) list -> t
   val id : t -> series_id
   val label : t -> string option
+  val map : ?label:string -> (float -> float) -> t -> t
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
   val sum : ?label:string -> ?fill:float -> t -> t -> t
@@ -252,10 +259,9 @@ end = struct
     | Map2 { label; _ } -> label
     | Accum { label; _ } -> label
 
-  let neg ?label dep = Map { id = new_id (); label; dep; f = (fun value -> -.value) }
-
-  let scale ?label factor dep =
-    Map { id = new_id (); label; dep; f = (fun value -> factor *. value) }
+  let map ?label f dep = Map { id = new_id (); label; dep; f }
+  let neg ?label dep = map ?label (fun value -> -.value) dep
+  let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
 
   let map2 ?label ?(fill = 0.0) a b f =
     Map2

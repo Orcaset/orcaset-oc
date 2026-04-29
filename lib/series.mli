@@ -70,12 +70,27 @@ and Spans : sig
       }
         -> t
 
+  val unfold :
+    ?label:string ->
+    deps:(unit -> 'readers Deps.t) ->
+    init:'state ->
+    cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
+    unit ->
+    t
+  (** [unfold ?label ~deps ~init ~cells ()] builds an {!Unfold} span series with a fresh
+      {!series_id}. Use the {!Unfold} constructor directly when the series must provide an explicit
+      id, for example in recursive definitions. *)
+
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   (** [of_list ?label ~split cells] is a span series that yields [cells] in list order. No ordering
       or overlap validation is performed. *)
 
   val label : t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)
+
+  val map : ?label:string -> (float -> float) -> t -> t
+  (** [map ?label f series] applies [f] to each value in [series], assigning a fresh {!series_id}.
+  *)
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
@@ -105,6 +120,10 @@ and Points : sig
 
   val label : t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)
+
+  val map : ?label:string -> (float -> float) -> t -> t
+  (** [map ?label f series] applies [f] to each value in [series], assigning a fresh {!series_id}.
+  *)
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
