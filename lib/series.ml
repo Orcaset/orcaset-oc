@@ -9,97 +9,221 @@ type series_id = Id of int [@@unboxed]
 let next_id = Atomic.make 0
 let new_id () : series_id = Id (Atomic.fetch_and_add next_id 1)
 
-(* ----- Step ----- *)
-(* A [step] is a user-facing handle for a single cell emitted by [Unfold]. It is
-   represented internally as a [span], but is exposed abstractly in the .mli so
-   users cannot construct or inspect spans directly. *)
-type split = split_span
+(* ----- Span cells ----- *)
+type split = split_strategy
 
 let proportional_split : split = Cell_type.proportional_split
 let const_split : split = Cell_type.const_split
 
-type step = span
-
-let step ~period ~split value : step = f_value period value split
-
 (* ----- Series constructors ----- *)
-module rec Span_series : sig
+module rec Formula : sig
+  type 'a t
+
+  type packed_query =
+    | Span_query_item of { series : Spans.t; period : Period.t }
+    | Point_query_item of { series : Points.t; date : Date.t }
+
+  val pure : 'a -> 'a t
+  val map : ('a -> 'b) -> 'a t -> 'b t
+  val map2 : ('a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+  val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
+  val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
+  val queries : 'a t -> packed_query list
+  val span_query : Spans.t -> period:Period.t -> reduce:(float option list -> float) -> float t
+  val point_query : Points.t -> date:Date.t -> default:float -> float t
+
+  val eval_with_delta :
+    query_span_values:(Spans.t -> Period.t -> float option list * float) ->
+    query_point_value:(Points.t -> Date.t -> float option * float) ->
+    'a t ->
+    'a * float
+end = struct
+  type _ query =
+    | Span_query : {
+        series : Spans.t;
+        period : Period.t;
+        reduce : float option list -> float;
+      }
+        -> float query
+    | Point_query : { series : Points.t; date : Date.t; default : float } -> float query
+
+  type 'a t =
+    | Pure : 'a -> 'a t
+    | Map : ('a -> 'b) * 'a t -> 'b t
+    | Map2 : ('a -> 'b -> 'c) * 'a t * 'b t -> 'c t
+    | Query : 'a query -> 'a t
+
+  type packed_query =
+    | Span_query_item of { series : Spans.t; period : Period.t }
+    | Point_query_item of { series : Points.t; date : Date.t }
+
+  let pure x = Pure x
+  let map f x = Map (f, x)
+  let map2 f a b = Map2 (f, a, b)
+  let ( let+ ) x f = map f x
+  let ( and+ ) a b = map2 (fun x y -> (x, y)) a b
+  let span_query series ~period ~reduce = Query (Span_query { series; period; reduce })
+  let point_query series ~date ~default = Query (Point_query { series; date; default })
+
+  let rec queries : type a. a t -> packed_query list = function
+    | Pure _ -> []
+    | Map (_, x) -> queries x
+    | Map2 (_, a, b) -> queries a @ queries b
+    | Query (Span_query { series; period; _ }) -> [ Span_query_item { series; period } ]
+    | Query (Point_query { series; date; _ }) -> [ Point_query_item { series; date } ]
+
+  let eval_with_delta (type a)
+      ~(query_span_values : Spans.t -> Period.t -> float option list * float)
+      ~(query_point_value : Points.t -> Date.t -> float option * float) (formula : a t) : a * float
+      =
+    let rec go : type a. a t -> a * float = function
+      | Pure x -> (x, 0.0)
+      | Map (f, x) ->
+          let value, delta = go x in
+          (f value, delta)
+      | Map2 (f, a, b) ->
+          let a_value, a_delta = go a in
+          let b_value, b_delta = go b in
+          (f a_value b_value, max a_delta b_delta)
+      | Query (Span_query { series; period; reduce }) ->
+          let values, delta = query_span_values series period in
+          (reduce values, delta)
+      | Query (Point_query { series; date; default }) ->
+          let value, delta = query_point_value series date in
+          (Option.value ~default value, delta)
+    in
+    go formula
+end
+
+and Spans : sig
+  type unfold_cell
+
   type t =
-    | Const of { id : series_id; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; dep : t; f : float -> float }
-    | Map2 of { id : series_id; a : t; b : t; f : float option -> float option -> float }
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | After of { id : series_id; label : string option; date : Date.t; dep : t }
     | Unfold : {
         id : series_id;
+        label : string option;
         deps : unit -> 'readers Deps.t;
-        init : 'b;
-        step : 'readers -> 'b -> (step * 'b) option;
+        init : 'state;
+        cells : 'readers -> 'state -> (unfold_cell * 'state) option;
       }
         -> t
 
+  val cell : period:Period.t -> split:split -> float Formula.t -> unfold_cell
+  val unpack_unfold_cell : unfold_cell -> Period.t * split * float Formula.t
   val id : t -> series_id
-  val neg : t -> t
-  val scale : float -> t -> t
-  val sum : t -> t -> t
-  val sub : t -> t -> t
+  val label : t -> string option
+  val neg : ?label:string -> t -> t
+  val scale : ?label:string -> float -> t -> t
+  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sub : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val div : ?label:string -> ?fill:float -> t -> t -> t
+  val after : Date.t -> t -> t
 end = struct
+  type unfold_cell = Cell of { period : Period.t; split : split; formula : float Formula.t }
+
   type t =
-    | Const of { id : series_id; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; dep : t; f : float -> float }
-    | Map2 of { id : series_id; a : t; b : t; f : float option -> float option -> float }
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | After of { id : series_id; label : string option; date : Date.t; dep : t }
     | Unfold : {
         id : series_id;
+        label : string option;
         deps : unit -> 'readers Deps.t;
-        init : 'b;
-        step : 'readers -> 'b -> (step * 'b) option;
+        init : 'state;
+        cells : 'readers -> 'state -> (unfold_cell * 'state) option;
       }
         -> t
+
+  let cell ~period ~split formula = Cell { period; split; formula }
+  let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
 
   let id = function
     | Const { id; _ } -> id
     | Map { id; _ } -> id
     | Map2 { id; _ } -> id
+    | After { id; _ } -> id
     | Unfold { id; _ } -> id
 
-  let neg dep = Map { id = new_id (); dep; f = (fun x -> -.x) }
-  let scale k dep = Map { id = new_id (); dep; f = (fun x -> k *. x) }
+  let label = function
+    | Const { label; _ } -> label
+    | Map { label; _ } -> label
+    | Map2 { label; _ } -> label
+    | After { label; _ } -> label
+    | Unfold { label; _ } -> label
 
-  let sum a b =
+  let neg ?label dep = Map { id = new_id (); label; dep; f = (fun value -> -.value) }
+
+  let scale ?label factor dep =
+    Map { id = new_id (); label; dep; f = (fun value -> factor *. value) }
+
+  let map2 ?label ?(fill = 0.0) a b f =
     Map2
       {
         id = new_id ();
+        label;
         a;
         b;
-        f = (fun x y -> Option.value ~default:0.0 x +. Option.value ~default:0.0 y);
+        f = (fun a b -> f (Option.value ~default:fill a) (Option.value ~default:fill b));
       }
 
-  let sub a b =
-    Map2
-      {
-        id = new_id ();
-        a;
-        b;
-        f = (fun x y -> Option.value ~default:0.0 x -. Option.value ~default:0.0 y);
-      }
+  let sum ?label ?fill a b = map2 ?label ?fill a b ( +. )
+  let sub ?label ?fill a b = map2 ?label ?fill a b ( -. )
+  let mul ?label ?fill a b = map2 ?label ?fill a b ( *. )
+  let div ?label ?fill a b = map2 ?label ?fill a b ( /. )
+  let after date dep = After { id = new_id (); label = None; date; dep }
 end
 
-and Point_series : sig
+and Points : sig
   type t =
-    | Const of { id : series_id; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; dep : t; f : float -> float }
-    | Map2 of { id : series_id; a : t; b : t; f : float option -> float option -> float }
-    | Accum of { id : series_id; init : float; changes : Span_series.t }
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
   val id : t -> series_id
-  val neg : t -> t
-  val scale : float -> t -> t
-  val sum : t -> t -> t
-  val sub : t -> t -> t
+  val label : t -> string option
+  val neg : ?label:string -> t -> t
+  val scale : ?label:string -> float -> t -> t
+  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sub : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val div : ?label:string -> ?fill:float -> t -> t -> t
 end = struct
   type t =
-    | Const of { id : series_id; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; dep : t; f : float -> float }
-    | Map2 of { id : series_id; a : t; b : t; f : float option -> float option -> float }
-    | Accum of { id : series_id; init : float; changes : Span_series.t }
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
   let id = function
     | Const { id; _ } -> id
@@ -107,57 +231,52 @@ end = struct
     | Map2 { id; _ } -> id
     | Accum { id; _ } -> id
 
-  let neg dep = Map { id = new_id (); dep; f = (fun x -> -.x) }
-  let scale k dep = Map { id = new_id (); dep; f = (fun x -> k *. x) }
+  let label = function
+    | Const { label; _ } -> label
+    | Map { label; _ } -> label
+    | Map2 { label; _ } -> label
+    | Accum { label; _ } -> label
 
-  let sum a b =
+  let neg ?label dep = Map { id = new_id (); label; dep; f = (fun value -> -.value) }
+
+  let scale ?label factor dep =
+    Map { id = new_id (); label; dep; f = (fun value -> factor *. value) }
+
+  let map2 ?label ?(fill = 0.0) a b f =
     Map2
       {
         id = new_id ();
+        label;
         a;
         b;
-        f = (fun x y -> Option.value ~default:0.0 x +. Option.value ~default:0.0 y);
+        f = (fun a b -> f (Option.value ~default:fill a) (Option.value ~default:fill b));
       }
 
-  let sub a b =
-    Map2
-      {
-        id = new_id ();
-        a;
-        b;
-        f = (fun x y -> Option.value ~default:0.0 x -. Option.value ~default:0.0 y);
-      }
+  let sum ?label ?fill a b = map2 ?label ?fill a b ( +. )
+  let sub ?label ?fill a b = map2 ?label ?fill a b ( -. )
+  let mul ?label ?fill a b = map2 ?label ?fill a b ( *. )
+  let div ?label ?fill a b = map2 ?label ?fill a b ( /. )
 end
 
 and Deps : sig
-  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float
-  type point_reader = date:Date.t -> default:float -> float
+  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
+  type point_reader = date:Date.t -> default:float -> float Formula.t
   type _ t
 
   val none : unit t
-  val span_dep : Span_series.t -> span_reader t
-  val point_dep : Point_series.t -> point_reader t
+  val span_dep : Spans.t -> span_reader t
+  val point_dep : Points.t -> point_reader t
   val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
   val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
-  val reduce : (float -> float -> float) -> float -> float option list -> float
 
-  type packed_dep = Span_item of Span_series.t | Point_item of Point_series.t
+  type packed_dep = Span_item of Spans.t | Point_item of Points.t
 
   val dependencies : 'a t -> packed_dep list
-
-  val run :
-    query_span_values:(Span_series.t -> Period.t -> float option list) ->
-    query_point_value:(Point_series.t -> Date.t -> float option) ->
-    'a t ->
-    'a
+  val run : 'a t -> 'a
 end = struct
-  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float
-  type point_reader = date:Date.t -> default:float -> float
-
-  type _ dep =
-    | Span_dep : Span_series.t -> span_reader dep
-    | Point_dep : Point_series.t -> point_reader dep
-
+  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
+  type point_reader = date:Date.t -> default:float -> float Formula.t
+  type _ dep = Span_dep : Spans.t -> span_reader dep | Point_dep : Points.t -> point_reader dep
   type _ t = Pure : 'a -> 'a t | Ap : 'x dep * ('x -> 'a) t -> 'a t
 
   let none = Pure ()
@@ -172,54 +291,93 @@ end = struct
 
   let span_dep s = Ap (Span_dep s, Pure (fun r -> r))
   let point_dep s = Ap (Point_dep s, Pure (fun r -> r))
-
-  let reduce (op : float -> float -> float) (fill : float) =
-    List.fold_left (fun acc -> function Some v -> op acc v | None -> op acc fill) 0.0
-
   let ( let+ ) x f = map f x
   let ( and+ ) a b = ap (map (fun x y -> (x, y)) a) b
 
-  type packed_dep = Span_item of Span_series.t | Point_item of Point_series.t
+  type packed_dep = Span_item of Spans.t | Point_item of Points.t
 
   let rec dependencies : type a. a t -> packed_dep list = function
     | Pure _ -> []
     | Ap (Span_dep s, rest) -> Span_item s :: dependencies rest
     | Ap (Point_dep s, rest) -> Point_item s :: dependencies rest
 
-  let run (type a) ~query_span_values ~query_point_value (d : a t) : a =
+  let run (type a) (d : a t) : a =
     let rec go : type a. a t -> a = function
       | Pure x -> x
       | Ap (Span_dep s, rest) ->
-          let reader ~period ~reduce = reduce (query_span_values s period) in
+          let reader ~period ~reduce = Formula.span_query s ~period ~reduce in
           go rest reader
       | Ap (Point_dep s, rest) ->
-          let reader ~date ~default =
-            match query_point_value s date with Some v -> v | None -> default
-          in
+          let reader ~date ~default = Formula.point_query s ~date ~default in
           go rest reader
     in
     go d
 end
 
+let cell = Spans.cell
+
 (* ----- Existentially-packed series ----- *)
 
 type _ series =
-  | Point_series : Point_series.t -> [ `Point ] series
-  | Span_series : Span_series.t -> [ `Span ] series
+  | Point_series : Points.t -> [ `Point ] series
+  | Span_series : Spans.t -> [ `Span ] series
+
+let label : type a. a series -> string option = function
+  | Point_series series -> Points.label series
+  | Span_series series -> Spans.label series
 
 type packed_series = Series : 'a series -> packed_series
 type dependency = { series : packed_series; dependencies : dependency list; is_back_edge : bool }
 
-exception Resolution_failed = Cell_eval.Resolution_failed
+let sum_float_opt ~fill =
+  List.fold_left (fun acc -> function Some value -> acc +. value | None -> acc +. fill) 0.0
 
-let id : type a. a series -> series_id = function
-  | Point_series series -> Point_series.id series
-  | Span_series series -> Span_series.id series
+(* ----- Series id ownership ----- *)
+
+type series_owner = Span_owner of Spans.t | Point_owner of Points.t
+type owner_claims = { mutable owners : series_owner option array }
+
+let make_owner_claims () = { owners = Array.make 16 None }
+let series_id_index (Id id) = id
+
+let same_owner existing claimed =
+  match (existing, claimed) with
+  | Span_owner a, Span_owner b -> a == b
+  | Point_owner a, Point_owner b -> a == b
+  | _ -> false
+
+let ensure_owner_capacity claims id =
+  if id >= Array.length claims.owners then begin
+    let old_length = Array.length claims.owners in
+    let new_length = ref (max 1 old_length) in
+    while id >= !new_length do
+      new_length := !new_length * 2
+    done;
+    let next = Array.make !new_length None in
+    Array.blit claims.owners 0 next 0 old_length;
+    claims.owners <- next
+  end
+
+let claim_owner claims series_id owner =
+  let id = series_id_index series_id in
+  ensure_owner_capacity claims id;
+  match claims.owners.(id) with
+  | None ->
+      claims.owners.(id) <- Some owner;
+      series_id
+  | Some existing when same_owner existing owner -> series_id
+  | Some _ -> invalid_arg (Printf.sprintf "series id %d reused by multiple series" id)
+
+let claim_span_series claims series = claim_owner claims (Spans.id series) (Span_owner series)
+let claim_point_series claims series = claim_owner claims (Points.id series) (Point_owner series)
+
+let claim_series : type a. owner_claims -> a series -> series_id =
+ fun claims -> function
+  | Span_series series -> claim_span_series claims series
+  | Point_series series -> claim_point_series claims series
 
 (* ----- Series cache ----- *)
-type point_slot = { eval : Cell_eval.slot; mutable cell : point option }
-type span_slot = { eval : Cell_eval.slot; mutable cell : span option }
-type cached_point = Cached_point of point_slot
+type cached_point = Cached_point of point option
 
 module PointCellCache = Hashtbl.Make (struct
   type t = Date.t
@@ -235,7 +393,7 @@ module SpanCellCache = Hashtbl.Make (struct
   let hash = Period.hash
 end)
 
-type span_cache_entry = { cells : span_slot option list SpanCellCache.t; sequence : span Seq.t }
+type span_cache_entry = { cells : span option list SpanCellCache.t; sequence : span Seq.t }
 
 (* ----- Accum checkpoint cache ----- *)
 
@@ -245,56 +403,57 @@ module DateMap = Map.Make (struct
   let compare = Date.compare
 end)
 
-type accum_checkpoint = { point : point_slot; tail : span Seq.t }
+type accum_checkpoint = { point : point; tail : span Seq.t }
 type accum_cache_entry = { mutable checkpoints : accum_checkpoint DateMap.t; sequence : span Seq.t }
+type cell_key = Span_key of int | Point_key of int
+
+module CellValueCache = Hashtbl.Make (struct
+  type t = cell_key
+
+  let equal = ( = )
+  let hash = Hashtbl.hash
+end)
+
+type eval_cell = Span_eval_cell of span | Point_eval_cell of point
+
+type resolving_cell = {
+  cell : eval_cell;
+  mutable current : float;
+  mutable last : float;
+  mutable step : int;
+}
+
+type eval_state = Resolving of resolving_cell | Resolved of { cell : eval_cell; value : float }
 
 type series_cache = {
+  owners : owner_claims;
   point : (series_id, cached_point PointCellCache.t) Hashtbl.t;
   span : (series_id, span_cache_entry) Hashtbl.t;
   accum : (series_id, accum_cache_entry) Hashtbl.t;
-  point_cells : (int, point_slot) Hashtbl.t;
-  span_cells : (int, span_slot) Hashtbl.t;
-  mutable active_context : Cell_eval.context option;
+  span_formulas : (int, float Formula.t) Hashtbl.t;
+  values : eval_state CellValueCache.t;
 }
 
 let make_cache () : series_cache =
   {
+    owners = make_owner_claims ();
     point = Hashtbl.create 20;
     span = Hashtbl.create 20;
     accum = Hashtbl.create 20;
-    point_cells = Hashtbl.create 64;
-    span_cells = Hashtbl.create 64;
-    active_context = None;
+    span_formulas = Hashtbl.create 20;
+    values = CellValueCache.create 100;
   }
 
-let with_context cache ctx f =
-  let previous_context = cache.active_context in
-  cache.active_context <- Some ctx;
-  Fun.protect ~finally:(fun () -> cache.active_context <- previous_context) f
-
-let active_context cache =
-  match cache.active_context with
-  | Some ctx -> ctx
-  | None -> invalid_arg "Series reader used outside an active query"
-
-let make_point_slot () : point_slot = { eval = Cell_eval.create_slot (); cell = None }
-let make_span_slot () : span_slot = { eval = Cell_eval.create_slot (); cell = None }
-
-let point_cell_cache cache series_id =
-  match Hashtbl.find_opt cache.point series_id with
-  | Some cell_cache -> cell_cache
-  | None ->
-      let cell_cache = PointCellCache.create 16 in
-      Hashtbl.add cache.point series_id cell_cache;
-      cell_cache
-
-let span_cell_cache cache series_id make_sequence =
-  match Hashtbl.find_opt cache.span series_id with
-  | Some entry -> entry
-  | None ->
-      let entry = { cells = SpanCellCache.create 16; sequence = make_sequence () } in
-      Hashtbl.add cache.span series_id entry;
-      entry
+let set_point cache series_id date value =
+  let cell_cache =
+    match Hashtbl.find_opt cache.point series_id with
+    | Some cell_cache -> cell_cache
+    | None ->
+        let c = PointCellCache.create 16 in
+        Hashtbl.add cache.point series_id c;
+        c
+  in
+  PointCellCache.replace cell_cache date (Cached_point value)
 
 (* ----- Series query functions ----- *)
 
@@ -345,9 +504,8 @@ let walk_accum_delta tail date =
   in
   loop [] tail
 
-(* Build a buffered, on-demand cell producer for an [Unfold]. *)
-let make_unfold_producer : type b. init:b -> step:(b -> (span * b) option) -> span Seq.t =
- fun ~init ~step ->
+(* Feed an Unfold [cells] stream: each yielded [unfold_cell] becomes a memoized span cell. *)
+let make_unfold_producer ~init ~cells ~register_formula =
   let buf = Dynarray.create () in
   let state = ref init in
   let finished = ref false in
@@ -357,7 +515,7 @@ let make_unfold_producer : type b. init:b -> step:(b -> (span * b) option) -> sp
     else begin
       producing := true;
       let result =
-        try step !state
+        try cells !state
         with e ->
           producing := false;
           raise e
@@ -367,9 +525,10 @@ let make_unfold_producer : type b. init:b -> step:(b -> (span * b) option) -> sp
       | None ->
           finished := true;
           false
-      | Some (cell, next) ->
-          Dynarray.add_last buf cell;
-          state := next;
+      | Some (cell, next_state) ->
+          let period, split, formula = Spans.unpack_unfold_cell cell in
+          Dynarray.add_last buf (register_formula ~period ~split formula);
+          state := next_state;
           true
     end
   in
@@ -380,79 +539,24 @@ let make_unfold_producer : type b. init:b -> step:(b -> (span * b) option) -> sp
   in
   view 0
 
-let rec point_slot_for_cell cache (cell : point) : point_slot =
-  match Hashtbl.find_opt cache.point_cells (point_id cell) with
-  | Some slot -> slot
-  | None ->
-      let slot = make_point_slot () in
-      set_point_slot_cell cache slot cell;
-      slot
+let rec span_seq_after date seq () =
+  match seq () with
+  | Seq.Nil -> Seq.Nil
+  | Seq.Cons (span, rest) -> (
+      let start, end_ = Period.to_tuple (span_period span) in
+      if Date.(end_ <= date) then span_seq_after date rest ()
+      else if Date.(start >= date) then Seq.Cons (span, rest)
+      else
+        match split_span date span with
+        | _, Some right -> Seq.Cons (right, rest)
+        | _, None -> span_seq_after date rest ())
 
-and set_point_slot_cell cache (slot : point_slot) (cell : point) =
-  slot.cell <- Some cell;
-  Hashtbl.replace cache.point_cells (point_id cell) slot;
-  Cell_eval.set_ready slot.eval (fun ctx -> eval_point_cell ctx cache cell)
-
-and point_cell_value ctx cache (cell : point) =
-  let slot = point_slot_for_cell cache cell in
-  match Cell_eval.read ctx slot.eval with Some value -> value | None -> 0.0
-
-and eval_point_cell ctx cache = function
-  | Const { value; _ } -> value ()
-  | Map { dep; f; _ } -> f (point_cell_value ctx cache dep)
-  | Derived { deps; f; _ } ->
-      let values =
-        List.map
-          (function Some point -> Some (point_cell_value ctx cache point) | None -> None)
-          deps
-      in
-      f values
-  | Accum { init; base; delta; _ } ->
-      let start = match base with Some point -> point_cell_value ctx cache point | None -> init in
-      List.fold_left
-        (fun acc -> function Some span -> acc +. span_cell_value ctx cache span | None -> acc)
-        start delta
-
-and span_slot_for_cell cache (cell : span) : span_slot =
-  match Hashtbl.find_opt cache.span_cells (span_id cell) with
-  | Some slot -> slot
-  | None ->
-      let slot = make_span_slot () in
-      set_span_slot_cell cache slot cell;
-      slot
-
-and set_span_slot_cell cache (slot : span_slot) (cell : span) =
-  slot.cell <- Some cell;
-  Hashtbl.replace cache.span_cells (span_id cell) slot;
-  Cell_eval.set_ready slot.eval (fun ctx -> eval_span_cell ctx cache cell)
-
-and span_cell_value ctx cache (cell : span) =
-  let slot = span_slot_for_cell cache cell in
-  match Cell_eval.read ctx slot.eval with Some value -> value | None -> 0.0
-
-and eval_span_cell ctx cache = function
-  | Value { value; _ } -> value ()
-  | Map { dep; f; _ } -> f (span_cell_value ctx cache dep)
-  | Clip { dep; f; _ } -> f (span_cell_value ctx cache dep)
-  | Map2 { a; b; f; _ } ->
-      let value = function Some span -> Some (span_cell_value ctx cache span) | None -> None in
-      f (value a) (value b)
-
-and read_point_slot ctx (slot : point_slot) = Cell_eval.read ctx slot.eval
-and read_span_slot ctx (slot : span_slot) = Cell_eval.read ctx slot.eval
-
-and span_entry_for_series (cache : series_cache) (series : Span_series.t) : span_cache_entry =
-  span_cell_cache cache (Span_series.id series) (fun () -> build_span_sequence cache series)
-
-and seq_for_span_series (cache : series_cache) (series : Span_series.t) : span Seq.t =
-  let ({ sequence; _ } : span_cache_entry) = span_entry_for_series cache series in
-  sequence
-
-and build_span_sequence (cache : series_cache) (series : Span_series.t) : span Seq.t =
+let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq.t =
+  ignore (claim_span_series cache.owners series : series_id);
   match series with
   | Const { period; value; _ } -> Seq.return (f_value period value const_split)
   | Map { dep; f; _ } ->
-      Seq.memoize (Seq.map (fun span -> f_map span f) (seq_for_span_series cache dep))
+      seq_for_span_series cache dep |> Seq.map (fun span -> f_map span f) |> Seq.memoize
   | Map2 { a; b; f; _ } ->
       let paired = align_span_seq (seq_for_span_series cache a) (seq_for_span_series cache b) in
       let seq =
@@ -470,31 +574,35 @@ and build_span_sequence (cache : series_cache) (series : Span_series.t) : span S
           paired
       in
       Seq.memoize seq
-  | Unfold { deps; init; step; _ } ->
-      let readers =
-        Deps.run
-          ~query_span_values:(fun s period ->
-            let ctx = active_context cache in
-            query_span_series cache s period
-            |> List.map (function Some slot -> read_span_slot ctx slot | None -> None))
-          ~query_point_value:(fun s date ->
-            let ctx = active_context cache in
-            match query_point_series cache s date with
-            | Some slot -> read_point_slot ctx slot
-            | None -> None)
-          (deps ())
+  | After { date; dep; _ } -> seq_for_span_series cache dep |> span_seq_after date |> Seq.memoize
+  | Unfold { deps; init; cells; _ } ->
+      let readers = Deps.run (deps ()) in
+      let register_formula ~period ~split formula =
+        let span =
+          f_value period (fun () -> failwith "formula span must be evaluated through Series") split
+        in
+        Hashtbl.replace cache.span_formulas (span_id span) formula;
+        span
       in
-      make_unfold_producer ~init ~step:(step readers)
+      make_unfold_producer ~init ~cells:(cells readers) ~register_formula
 
-and query_span_series cache series period : span_slot option list =
-  let ({ cells; sequence } : span_cache_entry) = span_entry_for_series cache series in
+and query_span_series cache series period : span option list =
+  let series_id = claim_span_series cache.owners series in
+  let series_entry_opt = Hashtbl.find_opt cache.span series_id in
+  let { cells; sequence } =
+    match series_entry_opt with
+    | Some entry -> entry
+    | None ->
+        let c = { cells = SpanCellCache.create 16; sequence = seq_for_span_series cache series } in
+        Hashtbl.add cache.span series_id c;
+        c
+  in
   match SpanCellCache.find_opt cells period with
   | Some values -> values
   | None ->
       let spans = collect_spans sequence period in
-      let slots = List.map (Option.map (span_slot_for_cell cache)) spans in
-      SpanCellCache.replace cells period slots;
-      slots
+      SpanCellCache.replace cells period spans;
+      spans
 
 and get_accum_entry cache point_series_id changes : accum_cache_entry =
   match Hashtbl.find_opt cache.accum point_series_id with
@@ -504,125 +612,407 @@ and get_accum_entry cache point_series_id changes : accum_cache_entry =
       Hashtbl.add cache.accum point_series_id entry;
       entry
 
-and query_accum cache point_series_id init changes date : point_slot =
+and query_accum cache point_series_id init changes date : point =
   let entry = get_accum_entry cache point_series_id changes in
   let nearest = DateMap.find_last_opt (fun k -> Date.(k <= date)) entry.checkpoints in
   match nearest with
   | Some (cp_date, cp) when Date.equal cp_date date -> cp.point
   | _ ->
-      let base_slot, start_tail =
+      let base_point, start_tail =
         match nearest with
         | Some (_, cp) -> (Some cp.point, cp.tail)
         | None -> (None, entry.sequence)
       in
       let delta, new_tail = walk_accum_delta start_tail date in
-      let delta_slots = List.map (Option.map (span_slot_for_cell cache)) delta in
-      let slot = make_point_slot () in
-      Cell_eval.set_ready slot.eval (fun ctx ->
-          let start =
-            match base_slot with
-            | Some base -> (
-                match read_point_slot ctx base with Some value -> value | None -> init)
-            | None -> init
-          in
-          List.fold_left
-            (fun acc -> function
-              | Some delta -> (
-                  match read_span_slot ctx delta with Some value -> acc +. value | None -> acc)
-              | None -> acc)
-            start delta_slots);
-      entry.checkpoints <- DateMap.add date { point = slot; tail = new_tail } entry.checkpoints;
-      slot
+      let new_point = p_accum date init base_point delta in
+      entry.checkpoints <- DateMap.add date { point = new_point; tail = new_tail } entry.checkpoints;
+      new_point
 
-and query_point_series cache series date : point_slot option =
-  let cell_cache = point_cell_cache cache (Point_series.id series) in
-  match PointCellCache.find_opt cell_cache date with
-  | Some (Cached_point slot) -> if Cell_eval.is_missing slot.eval then None else Some slot
+and query_point_series cache series date : point option =
+  let series_id = claim_point_series cache.owners series in
+  let cached_value =
+    match Hashtbl.find_opt cache.point series_id with
+    | Some cache -> PointCellCache.find_opt cache date
+    | None -> None
+  in
+  match cached_value with
+  | Some (Cached_point value) -> value
   | None ->
-      let slot = make_point_slot () in
-      PointCellCache.replace cell_cache date (Cached_point slot);
-      let finish_missing () =
-        Cell_eval.set_missing slot.eval;
-        None
-      in
-      let finish_ready ?cell formula =
-        Option.iter (set_point_slot_cell cache slot) cell;
-        Cell_eval.set_ready slot.eval formula;
-        Some slot
-      in
       let value =
         match series with
         | Const { period; value; _ } ->
-            if Period.contains date period then
-              finish_ready ~cell:(p_const date value) (fun _ctx -> value ())
-            else finish_missing ()
+            if Period.contains date period then Some (p_const date value) else None
         | Map { dep; f; _ } -> (
             match query_point_series cache dep date with
-            | Some dep_slot ->
-                let cell =
-                  match dep_slot.cell with Some dep -> Some (p_map dep f) | None -> None
-                in
-                finish_ready ?cell (fun ctx ->
-                    match read_point_slot ctx dep_slot with
-                    | Some dep_value -> f dep_value
-                    | None -> f 0.0)
-            | None -> finish_missing ())
+            | Some pt -> Some (p_map pt f)
+            | None -> None)
         | Map2 { a; b; f; _ } ->
-            let a_slot, b_slot =
-              (query_point_series cache a date, query_point_series cache b date)
-            in
-            let cell =
-              match (a_slot, b_slot) with
-              | Some { cell = Some a_cell; _ }, Some { cell = Some b_cell; _ } ->
-                  Some
-                    (p_derived date [ Some a_cell; Some b_cell ] (function
-                      | [ va; vb ] -> f va vb
-                      | _ -> assert false))
-              | Some { cell = Some a_cell; _ }, _ ->
-                  Some
-                    (p_derived date [ Some a_cell; None ] (function
-                      | [ va; vb ] -> f va vb
-                      | _ -> assert false))
-              | _, Some { cell = Some b_cell; _ } ->
-                  Some
-                    (p_derived date [ None; Some b_cell ] (function
-                      | [ va; vb ] -> f va vb
-                      | _ -> assert false))
-              | _ -> None
-            in
-            let read_option ctx = function
-              | Some dep_slot -> read_point_slot ctx dep_slot
-              | None -> None
-            in
-            finish_ready ?cell (fun ctx -> f (read_option ctx a_slot) (read_option ctx b_slot))
-        | Accum { init; changes; _ } ->
-            let accum_slot = query_accum cache (Point_series.id series) init changes date in
-            PointCellCache.replace cell_cache date (Cached_point accum_slot);
-            Some accum_slot
+            let oa, ob = (query_point_series cache a date, query_point_series cache b date) in
+            Some (p_derived date [ oa; ob ] (function [ va; vb ] -> f va vb | _ -> assert false))
+        | Accum { init; changes; _ } -> Some (query_accum cache series_id init changes date)
       in
+      set_point cache series_id date value;
       value
+
+(* ----- Iterative cell resolver ----- *)
+
+exception Evaluation_did_not_converge of { iterations : int; tolerance : float; max_delta : float }
+
+let iteration_tolerance = 1e-6
+let max_iterations = 1000
+
+type resolve_roots = Resolve_spans of span option list | Resolve_point of point
+
+let span_key span = Span_key (span_id span)
+let point_key point = Point_key (point_id point)
+
+let current_value cache key =
+  match CellValueCache.find_opt cache.values key with
+  | Some (Resolved { value; _ }) -> value
+  | Some (Resolving state) -> state.current
+  | None -> invalid_arg "unresolved cell value"
+
+let current_span_value cache span = current_value cache (span_key span)
+let current_point_value cache point = current_value cache (point_key point)
+
+let rec current_span_option_values cache = function
+  | [] -> []
+  | None :: rest -> None :: current_span_option_values cache rest
+  | Some span :: rest ->
+      Some (current_span_value cache span) :: current_span_option_values cache rest
+
+let rec current_point_option_values cache = function
+  | [] -> []
+  | None :: rest -> None :: current_point_option_values cache rest
+  | Some point :: rest ->
+      Some (current_point_value cache point) :: current_point_option_values cache rest
+
+let rec sum_current_span_options cache = function
+  | [] -> 0.0
+  | None :: rest -> sum_current_span_options cache rest
+  | Some span :: rest -> current_span_value cache span +. sum_current_span_options cache rest
+
+let clear_touched cache touched =
+  let rec go = function
+    | [] -> ()
+    | key :: rest ->
+        (match CellValueCache.find_opt cache.values key with
+        | Some (Resolving _) -> CellValueCache.remove cache.values key
+        | Some (Resolved _) | None -> ());
+        go rest
+  in
+  go touched
+
+let rec has_resolving cache = function
+  | [] -> false
+  | key :: rest -> (
+      match CellValueCache.find_opt cache.values key with
+      | Some (Resolving _) -> true
+      | Some (Resolved _) | None -> has_resolving cache rest)
+
+let finalize_touched cache touched =
+  let rec go = function
+    | [] -> ()
+    | key :: rest ->
+        (match CellValueCache.find_opt cache.values key with
+        | Some (Resolving state) ->
+            CellValueCache.replace cache.values key
+              (Resolved { cell = state.cell; value = state.current })
+        | Some (Resolved _) | None -> ());
+        go rest
+  in
+  go touched
+
+let rec prime_span cache touched span =
+  let key = span_key span in
+  match CellValueCache.find_opt cache.values key with
+  | Some (Resolved _) -> true
+  | Some (Resolving _) -> false
+  | None -> (
+      let cell = Span_eval_cell span in
+      let state = { cell; current = 0.0; last = 0.0; step = 0 } in
+      CellValueCache.add cache.values key (Resolving state);
+      touched := key :: !touched;
+      match prime_span_value cache touched span with
+      | Some value ->
+          CellValueCache.replace cache.values key (Resolved { cell; value });
+          true
+      | None -> false)
+
+and prime_span_value cache touched = function
+  | Value { id; value; _ } -> (
+      match Hashtbl.find_opt cache.span_formulas id with
+      | None -> Some (value ())
+      | Some formula ->
+          if prime_formula cache touched formula then Some (resolved_formula_value cache formula)
+          else None)
+  | Slice { dep; value; _ } ->
+      if prime_span cache touched dep then Some (value (current_span_value cache dep)) else None
+  | Map { dep; f; _ } ->
+      if prime_span cache touched dep then Some (f (current_span_value cache dep)) else None
+  | Map2 { a; b; f; _ } ->
+      let a_resolved = prime_span_option cache touched a in
+      let b_resolved = prime_span_option cache touched b in
+      if a_resolved && b_resolved then
+        Some (f (Option.map (current_span_value cache) a) (Option.map (current_span_value cache) b))
+      else None
+
+and prime_point cache touched point =
+  let key = point_key point in
+  match CellValueCache.find_opt cache.values key with
+  | Some (Resolved _) -> true
+  | Some (Resolving _) -> false
+  | None -> (
+      let cell = Point_eval_cell point in
+      let state = { cell; current = 0.0; last = 0.0; step = 0 } in
+      CellValueCache.add cache.values key (Resolving state);
+      touched := key :: !touched;
+      match prime_point_value cache touched point with
+      | Some value ->
+          CellValueCache.replace cache.values key (Resolved { cell; value });
+          true
+      | None -> false)
+
+and prime_point_value cache touched = function
+  | Const { value; _ } -> Some (value ())
+  | Map { dep; f; _ } ->
+      if prime_point cache touched dep then Some (f (current_point_value cache dep)) else None
+  | Derived { deps; f; _ } ->
+      if prime_point_options cache touched deps then
+        Some (f (current_point_option_values cache deps))
+      else None
+  | Accum { init; base; delta; _ } ->
+      let base_resolved = prime_point_option cache touched base in
+      let delta_resolved = prime_span_options cache touched delta in
+      if base_resolved && delta_resolved then
+        let start =
+          match base with Some point -> current_point_value cache point | None -> init
+        in
+        Some (start +. sum_current_span_options cache delta)
+      else None
+
+and prime_formula cache touched formula =
+  let rec go = function
+    | [] -> true
+    | query :: rest ->
+        let query_resolved = prime_formula_query cache touched query in
+        let rest_resolved = go rest in
+        query_resolved && rest_resolved
+  in
+  go (Formula.queries formula)
+
+and prime_formula_query cache touched = function
+  | Formula.Span_query_item { series; period } ->
+      query_span_series cache series period |> prime_span_options cache touched
+  | Formula.Point_query_item { series; date } -> (
+      match query_point_series cache series date with
+      | Some point -> prime_point cache touched point
+      | None -> true)
+
+and prime_span_option cache touched = function
+  | None -> true
+  | Some span -> prime_span cache touched span
+
+and prime_span_options cache touched = function
+  | [] -> true
+  | cell :: rest ->
+      let cell_resolved = prime_span_option cache touched cell in
+      let rest_resolved = prime_span_options cache touched rest in
+      cell_resolved && rest_resolved
+
+and prime_point_option cache touched = function
+  | None -> true
+  | Some point -> prime_point cache touched point
+
+and prime_point_options cache touched = function
+  | [] -> true
+  | cell :: rest ->
+      let cell_resolved = prime_point_option cache touched cell in
+      let rest_resolved = prime_point_options cache touched rest in
+      cell_resolved && rest_resolved
+
+and resolved_formula_value cache formula =
+  fst
+    (Formula.eval_with_delta
+       ~query_span_values:(fun series period ->
+         let values = query_span_series cache series period |> current_span_option_values cache in
+         (values, 0.0))
+       ~query_point_value:(fun series date ->
+         let value =
+           Option.map (current_point_value cache) (query_point_series cache series date)
+         in
+         (value, 0.0))
+       formula)
+
+let rec eval_span cache touched iteration span =
+  let key = span_key span in
+  match CellValueCache.find_opt cache.values key with
+  | Some (Resolved { value; _ }) -> (value, 0.0)
+  | Some (Resolving state) when state.step = iteration -> (state.current, 0.0)
+  | Some (Resolving state) ->
+      state.step <- iteration;
+      let previous = state.current in
+      let value, child_delta = eval_span_value cache touched iteration span in
+      let delta = Float.abs (value -. previous) in
+      state.last <- previous;
+      state.current <- value;
+      (value, max delta child_delta)
+  | None ->
+      ignore (prime_span cache touched span);
+      eval_span cache touched iteration span
+
+and eval_span_value cache touched iteration = function
+  | Value { id; value; _ } -> (
+      match Hashtbl.find_opt cache.span_formulas id with
+      | None -> (value (), 0.0)
+      | Some formula -> eval_formula cache touched iteration formula)
+  | Slice { dep; value; _ } ->
+      let dep_value, delta = eval_span cache touched iteration dep in
+      (value dep_value, delta)
+  | Map { dep; f; _ } ->
+      let dep_value, delta = eval_span cache touched iteration dep in
+      (f dep_value, delta)
+  | Map2 { a; b; f; _ } ->
+      let a_value, a_delta = eval_span_option cache touched iteration a in
+      let b_value, b_delta = eval_span_option cache touched iteration b in
+      (f a_value b_value, max a_delta b_delta)
+
+and eval_point cache touched iteration point =
+  let key = point_key point in
+  match CellValueCache.find_opt cache.values key with
+  | Some (Resolved { value; _ }) -> (value, 0.0)
+  | Some (Resolving state) when state.step = iteration -> (state.current, 0.0)
+  | Some (Resolving state) ->
+      state.step <- iteration;
+      let previous = state.current in
+      let value, child_delta = eval_point_value cache touched iteration point in
+      let delta = Float.abs (value -. previous) in
+      state.last <- previous;
+      state.current <- value;
+      (value, max delta child_delta)
+  | None ->
+      ignore (prime_point cache touched point);
+      eval_point cache touched iteration point
+
+and eval_point_value cache touched iteration = function
+  | Const { value; _ } -> (value (), 0.0)
+  | Map { dep; f; _ } ->
+      let dep_value, delta = eval_point cache touched iteration dep in
+      (f dep_value, delta)
+  | Derived { deps; f; _ } ->
+      let values, delta = eval_point_options cache touched iteration deps in
+      (f values, delta)
+  | Accum { init; base; delta; _ } ->
+      let base_value, base_delta =
+        match base with
+        | Some point -> eval_point cache touched iteration point
+        | None -> (init, 0.0)
+      in
+      let delta_value, delta_delta = eval_span_option_sum cache touched iteration delta in
+      (base_value +. delta_value, max base_delta delta_delta)
+
+and eval_formula cache touched iteration formula =
+  Formula.eval_with_delta
+    ~query_span_values:(eval_span_query cache touched iteration)
+    ~query_point_value:(eval_point_query cache touched iteration)
+    formula
+
+and eval_span_query cache touched iteration series period =
+  query_span_series cache series period |> eval_span_options cache touched iteration
+
+and eval_point_query cache touched iteration series date =
+  match query_point_series cache series date with
+  | Some point ->
+      let value, delta = eval_point cache touched iteration point in
+      (Some value, delta)
+  | None -> (None, 0.0)
+
+and eval_span_option cache touched iteration = function
+  | Some span ->
+      let value, delta = eval_span cache touched iteration span in
+      (Some value, delta)
+  | None -> (None, 0.0)
+
+and eval_span_options cache touched iteration = function
+  | [] -> ([], 0.0)
+  | cell :: rest ->
+      let value, delta = eval_span_option cache touched iteration cell in
+      let values, rest_delta = eval_span_options cache touched iteration rest in
+      (value :: values, max delta rest_delta)
+
+and eval_point_option cache touched iteration = function
+  | Some point ->
+      let value, delta = eval_point cache touched iteration point in
+      (Some value, delta)
+  | None -> (None, 0.0)
+
+and eval_point_options cache touched iteration = function
+  | [] -> ([], 0.0)
+  | cell :: rest ->
+      let value, delta = eval_point_option cache touched iteration cell in
+      let values, rest_delta = eval_point_options cache touched iteration rest in
+      (value :: values, max delta rest_delta)
+
+and eval_span_option_sum cache touched iteration = function
+  | [] -> (0.0, 0.0)
+  | cell :: rest ->
+      let value, delta = eval_span_option cache touched iteration cell in
+      let rest_value, rest_delta = eval_span_option_sum cache touched iteration rest in
+      let value = Option.value ~default:0.0 value +. rest_value in
+      (value, max delta rest_delta)
+
+let prime_roots cache touched = function
+  | Resolve_spans spans -> ignore (prime_span_options cache touched spans)
+  | Resolve_point point -> ignore (prime_point cache touched point)
+
+let eval_roots cache touched iteration = function
+  | Resolve_spans spans ->
+      let _values, delta = eval_span_options cache touched iteration spans in
+      delta
+  | Resolve_point point ->
+      let _value, delta = eval_point cache touched iteration point in
+      delta
+
+let solve_roots cache touched roots =
+  let rec loop iteration last_delta =
+    if iteration > max_iterations then
+      raise
+        (Evaluation_did_not_converge
+           { iterations = max_iterations; tolerance = iteration_tolerance; max_delta = last_delta })
+    else
+      let delta = eval_roots cache touched iteration roots in
+      if delta <= iteration_tolerance then finalize_touched cache !touched
+      else loop (iteration + 1) delta
+  in
+  if has_resolving cache !touched then loop 1 0.0
+
+let resolve_roots cache roots =
+  let touched = ref [] in
+  try
+    prime_roots cache touched roots;
+    solve_roots cache touched roots
+  with e ->
+    clear_touched cache !touched;
+    raise e
+
+let resolve_span_options cache spans =
+  resolve_roots cache (Resolve_spans spans);
+  current_span_option_values cache spans
+
+let resolve_point cache point =
+  resolve_roots cache (Resolve_point point);
+  current_point_value cache point
 
 (* ----- Public float-based query API ----- *)
 
 let query_span cache series ~period ~reduce =
-  let ctx = Cell_eval.create_context () in
-  with_context cache ctx (fun () ->
-      let slots = query_span_series cache series period in
-      List.iter (Option.iter (fun slot -> Cell_eval.touch ctx slot.eval)) slots;
-      Cell_eval.solve ctx;
-      slots
-      |> List.map (function Some slot -> Some (Cell_eval.current slot.eval) | None -> None)
-      |> reduce)
+  let spans = query_span_series cache series period in
+  resolve_span_options cache spans |> reduce
 
 let query_point cache series ~date ~default =
-  let ctx = Cell_eval.create_context () in
-  with_context cache ctx (fun () ->
-      match query_point_series cache series date with
-      | None -> default
-      | Some slot ->
-          Cell_eval.touch ctx slot.eval;
-          Cell_eval.solve ctx;
-          Cell_eval.current slot.eval)
+  match query_point_series cache series date with
+  | Some point -> resolve_point cache point
+  | None -> default
 
 (* ----- Series dependencies ----- *)
 
@@ -644,26 +1034,30 @@ let series_dependencies : type a. a series -> packed_series list = function
       | Const _ -> []
       | Map { dep; _ } -> [ Series (Span_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
+      | After { dep; _ } -> [ Series (Span_series dep) ]
       | Unfold { deps; _ } ->
           Deps.dependencies (deps ())
           |> List.map (function
             | Deps.Span_item s -> Series (Span_series s)
             | Deps.Point_item s -> Series (Point_series s)))
 
-let rec build_dependencies active_path (Series series) =
+let rec build_dependencies claims active_path (Series series) =
   let add_dependency dependency =
     let (Series dep_series) = dependency in
-    let dep_id = id dep_series in
+    let dep_id = claim_series claims dep_series in
     if Series_id_set.mem dep_id active_path then
       { series = dependency; dependencies = []; is_back_edge = true }
     else
       {
         series = dependency;
-        dependencies = build_dependencies (Series_id_set.add dep_id active_path) dependency;
+        dependencies = build_dependencies claims (Series_id_set.add dep_id active_path) dependency;
         is_back_edge = false;
       }
   in
   series_dependencies series |> List.map add_dependency
 
 let dependencies : type a. a series -> dependency list =
- fun series -> build_dependencies (Series_id_set.singleton (id series)) (Series series)
+ fun series ->
+  let claims = make_owner_claims () in
+  let root_id = claim_series claims series in
+  build_dependencies claims (Series_id_set.singleton root_id) (Series series)

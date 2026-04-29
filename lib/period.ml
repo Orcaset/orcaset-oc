@@ -58,6 +58,19 @@ let seq_to_dates periods =
   in
   aux None periods
 
+let list_to_dates periods =
+  let rec aux last remaining =
+    match remaining with
+    | [] -> ( match last with None -> [] | Some last_period -> [ end_ last_period ])
+    | period :: next -> (
+        match last with
+        | None -> start period :: aux (Some period) next
+        | Some last_period ->
+            if Date.equal (end_ last_period) (start period) then
+              end_ period :: aux (Some period) next
+            else end_ last_period :: start period :: aux (Some period) next)
+  in
+  aux None periods
 (* Predicates and comparisons *)
 
 let equal p0 p1 = compare p0 p1 = 0

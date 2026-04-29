@@ -4,7 +4,9 @@
 type series_id
 
 val new_id : unit -> series_id
-(** [new_id ()] returns a fresh series id. Required when constructing series variants manually. *)
+(** [new_id ()] returns a fresh series id. Required when constructing series variants. Reusing one
+    id for multiple series is invalid and raises an exception when the affected series are queried
+    or inspected for dependencies. *)
 
 type split
 (** Strategy for assigning value when a span is clipped to a sub-period. *)
@@ -17,122 +19,146 @@ val const_split : split
 (** Assigns the original span's value to each clipped side. E.g. clipping a "40 mph" span to any
     sub-period still yields 40 mph. *)
 
-type step
-(** A single cell emitted by an [Unfold]. Construct with {!step}. *)
+module rec Formula : sig
+  (** A formula describes how to compute a cell value from zero or more declared cell-level
+      dependency queries. Formula construction records the queries; evaluation later resolves them
+      to floats. *)
 
-val step : period:Period.t -> split:split -> (unit -> float) -> step
-(** [step ~period ~split value] creates a cell for [period] whose value is produced lazily by
-    [value], using [split] to apportion the value when the cell is clipped. When [value] references
-    other series, those series must be declared in the enclosing [Unfold]'s [deps] applicative so
-    that the corresponding readers can be used inside the closure. Recursive reads should happen
-    inside [value]; reads performed while constructing the step are scaffold-time reads and can
-    observe placeholder values. *)
+  type 'a t
 
-module rec Span_series : sig
+  type packed_query =
+    | Span_query_item of { series : Spans.t; period : Period.t }
+    | Point_query_item of { series : Points.t; date : Date.t }
+        (** An inspectable cell-level dependency query recorded by a formula. *)
+
+  val pure : 'a -> 'a t
+  (** [pure x] is a formula with no dependency queries. *)
+
+  val map : ('a -> 'b) -> 'a t -> 'b t
+  val map2 : ('a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+  val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
+
+  val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
+  (** Applicative operators for combining dependency query results. *)
+
+  val queries : 'a t -> packed_query list
+  (** [queries formula] returns the cell-level span and point queries needed by [formula]. *)
+end
+
+and Spans : sig
+  type unfold_cell
+  (** Describes one yielded step during {!Spans:t} {!Unfold} evaluation: the period cover,
+      interpolation strategy ({!split}), and lazily-evaluated {!Formula.t}. Produced with {!cell}.
+  *)
+
   type t =
-    | Const of { id : series_id; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; dep : t; f : float -> float }
-    | Map2 of { id : series_id; a : t; b : t; f : float option -> float option -> float }
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | After of { id : series_id; label : string option; date : Date.t; dep : t }
     | Unfold : {
         id : series_id;
+        label : string option;
         deps : unit -> 'readers Deps.t;
-        init : 'b;
-        step : 'readers -> 'b -> (step * 'b) option;
+        init : 'state;
+        cells : 'readers -> 'state -> (unfold_cell * 'state) option;
       }
         -> t
 
-  val neg : t -> t
-  (** Negates each value of the dependency. Implemented with {!Map}; where the dependency has no
-      value, behavior matches {!Map} on that dependency (this constructor does not fill missing
-      values itself). *)
+  val label : t -> string option
+  (** [label series] returns the optional human-readable label attached to [series]. *)
 
-  val scale : float -> t -> t
-  (** [scale k s] multiplies each value of [s] by [k]. Implemented with {!Map}; missing values
-      follow [s] as for {!Map}. *)
+  val neg : ?label:string -> t -> t
+  val scale : ?label:string -> float -> t -> t
+  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sub : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val div : ?label:string -> ?fill:float -> t -> t -> t
 
-  val sum : t -> t -> t
-  (** Element-wise sum using {!Map2}. Each missing operand ([None]) is treated as [0.0] before
-      adding. *)
-
-  val sub : t -> t -> t
-  (** Element-wise difference [a -. b] using {!Map2}. Each missing operand ([None]) is treated as
-      [0.0] before subtracting. *)
+  val after : Date.t -> t -> t
+  (** [after date series] returns a span series containing cells from [series] that start on or
+      after [date]. If [date] falls inside a source cell, that cell is split and the portion from
+      [date] is included. *)
 end
 
-and Point_series : sig
+and Points : sig
   type t =
-    | Const of { id : series_id; period : Period.t; value : unit -> float }
-    | Map of { id : series_id; dep : t; f : float -> float }
-    | Map2 of { id : series_id; a : t; b : t; f : float option -> float option -> float }
-    | Accum of { id : series_id; init : float; changes : Span_series.t }
+    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
+    | Map2 of {
+        id : series_id;
+        label : string option;
+        a : t;
+        b : t;
+        f : float option -> float option -> float;
+      }
+    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
-  val neg : t -> t
-  (** Negates each value of the dependency. Implemented with {!Map}; where the dependency has no
-      value, behavior matches {!Map} on that dependency (this constructor does not fill missing
-      values itself). *)
+  val label : t -> string option
+  (** [label series] returns the optional human-readable label attached to [series]. *)
 
-  val scale : float -> t -> t
-  (** [scale k s] multiplies each value of [s] by [k]. Implemented with {!Map}; missing values
-      follow [s] as for {!Map}. *)
-
-  val sum : t -> t -> t
-  (** Element-wise sum using {!Map2}. Each missing operand ([None]) is treated as [0.0] before
-      adding. *)
-
-  val sub : t -> t -> t
-  (** Element-wise difference [a -. b] using {!Map2}. Each missing operand ([None]) is treated as
-      [0.0] before subtracting. *)
+  val neg : ?label:string -> t -> t
+  val scale : ?label:string -> float -> t -> t
+  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sub : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val div : ?label:string -> ?fill:float -> t -> t -> t
 end
 
 and Deps : sig
-  (** Applicative for declaring an [Unfold]'s dependencies. A value of type ['a t] is a computation
-      that declares zero or more span/point dependencies and, given the corresponding readers,
-      produces an ['a]. The [Unfold.step] function receives the computation's result (typically a
-      labeled tuple of readers). *)
+  (** Applicative for declaring which {!Spans:t} dependency series an {!Unfold} span series reads
+      while running its user-defined [cells] function—those readers compose into formulas under
+      [deps]. *)
 
   (* type span_reader *)
 
-  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float
-  (** A reader bound to a declared span dependency. Calling it inside the step function collects the
-      dep's values over [period] (as [float option list]; [None] for gaps) and folds them with
-      [reduce]. *)
+  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
+  (** A reader bound to a declared span dependency. Calling it records a cell-level span query; the
+      query is resolved only when the formula is evaluated. *)
 
   (* type point_reader *)
 
-  type point_reader = date:Date.t -> default:float -> float
-  (** A reader bound to a declared point dependency. Calling it inside the step function returns the
-      dep's value at [date], or [default] if the series has no value there. *)
+  type point_reader = date:Date.t -> default:float -> float Formula.t
+  (** A reader bound to a declared point dependency. Calling it records a cell-level point query;
+      the query is resolved only when the formula is evaluated. *)
 
   type _ t
   (** Applicative computation. Build with [none], [span_dep], [point_dep], or the [let+]/[and+]
       operators. *)
 
   val none : unit t
-  (** Empty dependency set. Use when an [Unfold]'s [step] needs no readers. *)
+  (** Empty dependency set. Use when an [Unfold]'s [cells] function needs no readers. *)
 
-  val span_dep : Span_series.t -> span_reader t
+  val span_dep : Spans.t -> span_reader t
   (** Declare a span dependency; the produced value is the [span_reader] bound to it. *)
 
-  val point_dep : Point_series.t -> point_reader t
+  val point_dep : Points.t -> point_reader t
   (** Declare a point dependency; the produced value is the [point_reader] bound to it. *)
-
-  val reduce : (float -> float -> float) -> float -> float option list -> float
-  (** [reduce op fill] folds a list of [float option] with [op], starting from [0.0], using [fill]
-      when an element is [None]. *)
 
   val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
   val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
 end
 
+val cell : period:Period.t -> split:split -> float Formula.t -> Spans.unfold_cell
+(** [cell ~period ~split formula] builds a {!Spans.unfold_cell}: one unfolded step spanning [period]
+    with splitting strategy [split]. Dependency readers appearing in [formula] become queries
+    resolved when that step's evaluated span cell is forced (never earlier). *)
+
 type _ series =
-  | Point_series : Point_series.t -> [ `Point ] series
-  | Span_series : Span_series.t -> [ `Span ] series
+  | Point_series : Points.t -> [ `Point ] series
+  | Span_series : Spans.t -> [ `Span ] series
+
+val label : 'a series -> string option
+(** [label series] returns the optional human-readable label attached to [series]. *)
 
 type packed_series = Series : 'a series -> packed_series
 type dependency = { series : packed_series; dependencies : dependency list; is_back_edge : bool }
-
-exception Resolution_failed of { iterations : int; tolerance : float; max_delta : float }
-(** Raised by query functions when recursive cell values do not converge. *)
 
 val dependencies : 'a series -> dependency list
 (** [dependencies series] returns the direct dependencies of [series] as a nested list. Back-edges
@@ -145,17 +171,23 @@ val dependencies : 'a series -> dependency list
 
 type series_cache
 
+exception Evaluation_did_not_converge of { iterations : int; tolerance : float; max_delta : float }
+(** Raised when iterative cell evaluation does not converge within the built-in iteration limit. *)
+
 val make_cache : unit -> series_cache
 (** [make_cache ()] creates a fresh memoization cache for queries. A cache should be reused across
     related queries to benefit from memoization; it is not safe to share across threads. *)
 
-val query_span :
-  series_cache -> Span_series.t -> period:Period.t -> reduce:(float option list -> 'a) -> 'a
-(** [query_span cache s ~period ~reduce] collects [s]'s values clipped to [period] (as
-    [float option list], with [None] filling any gaps at the boundaries), resolves recursive cells
-    by Gauss-Seidel iteration, and folds them with [reduce]. Raises [Resolution_failed] if the
-    induced scaffold does not converge. *)
+val sum_float_opt : fill:float -> float option list -> float
+(** [sum_float_opt ~fill values] sums [values], using [fill] for each [None]. Useful as a
+    {!query_span} reduce function. *)
 
-val query_point : series_cache -> Point_series.t -> date:Date.t -> default:float -> float
+val query_span :
+  series_cache -> Spans.t -> period:Period.t -> reduce:(float option list -> 'a) -> 'a
+(** [query_span cache s ~period ~reduce] collects [s]'s values clipped to [period] (as
+    [float option list], with [None] filling any gaps at the boundaries) and folds them with
+    [reduce]. *)
+
+val query_point : series_cache -> Points.t -> date:Date.t -> default:float -> float
 (** [query_point cache s ~date ~default] returns [s]'s value at [date], or [default] if the series
-    has no value there. Raises [Resolution_failed] if the induced scaffold does not converge. *)
+    has no value there. *)

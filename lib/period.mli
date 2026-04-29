@@ -59,6 +59,10 @@ val seq_to_dates : t Seq.t -> Date.t Seq.t
 (** [seq_to_dates periods] is a sequence of dates in [periods] with equal adjacent start/end dates
     deduplicated. *)
 
+val list_to_dates : t list -> Date.t list
+(** [list_to_dates periods] is a list of dates in [periods] with equal adjacent start/end dates
+    deduplicated. *)
+
 (** {1 Predicates and comparisons} *)
 
 val equal : t -> t -> bool

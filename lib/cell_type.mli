@@ -1,10 +1,20 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
+type split_part = private { period : Period.t; value : float -> float }
+(** One side of an interior span split. The function computes the split-side value from the parent
+    span's value. *)
+
 type span = private
-  | Value of { id : int; period : Period.t; value : unit -> float; split : split_span }
+  | Value of { id : int; period : Period.t; value : unit -> float; split : split_strategy }
+  | Slice of {
+      id : int;
+      period : Period.t;
+      dep : span;
+      value : float -> float;
+      split : split_strategy;
+    }
   | Map of { id : int; dep : span; f : float -> float }
-  | Clip of { id : int; period : Period.t; dep : span; f : float -> float; split : split_span }
   | Map2 of {
       id : int;
       period : Period.t;
@@ -13,9 +23,12 @@ type span = private
       f : float option -> float option -> float;
     }
 
-and split_span = span -> Date.t -> span option * span option
-(** [split_span span date] splits the span at [date]. If [date] is at or outside the span's bounds,
-    one side should be [None] and the other should be the original span. *)
+and split_strategy = span -> Date.t -> split_part * split_part
+(** A split strategy for interior split dates. It returns value projections rather than spans so
+    {!split_span} can wrap each side as a cell that explicitly depends on its parent. *)
+
+val split_part : period:Period.t -> value:(float -> float) -> split_part
+(** [split_part ~period ~value] creates one side of an interior split. *)
 
 type point = private
   | Const of { id : int; date : Date.t; value : unit -> float }
@@ -36,31 +49,26 @@ val p_const : Date.t -> (unit -> float) -> point
 val p_map : point -> (float -> float) -> point
 val p_derived : Date.t -> point option list -> (float option list -> float) -> point
 val p_accum : Date.t -> float -> point option -> span option list -> point
-val point_id : point -> int
 val point_date : point -> Date.t
-val point_value : point -> unit -> float
+val point_id : point -> int
 
 (* Span operations *)
-val f_value : Period.t -> (unit -> float) -> split_span -> span
+val f_value : Period.t -> (unit -> float) -> split_strategy -> span
 val f_map : span -> (float -> float) -> span
-val f_clip : Period.t -> span -> (float -> float) -> split_span -> span
 
 val f_map2 :
   Period.t -> span option -> span option -> (float option -> float option -> float) -> span
 
-val span_id : span -> int
 val span_period : span -> Period.t
-val span_value : span -> unit -> float
+val span_id : span -> int
 
-val proportional_split : split_span
+val proportional_split : split_strategy
 (** [proportional_split span date] splits the span's period at [date], assigning value
-    proportionally. If [date] is at or outside the span's bounds, one side is [None] and the other
-    is the original span. *)
+    proportionally. *)
 
-val const_split : split_span
+val const_split : split_strategy
 (** [const_split span date] splits the span's period at [date], assigning the same value as the
-    original span to each side. If [date] is at or outside the span's bounds, one side is [None] and
-    the other is the original span. *)
+    original span to each side. *)
 
 val split_span : Date.t -> span -> span option * span option
 (** [split_span date span] splits [span] at [date] using its underlying split function. If [date] is
