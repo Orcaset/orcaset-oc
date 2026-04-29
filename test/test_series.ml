@@ -100,6 +100,67 @@ let test_span_convenience_fill () =
   let total = query_span cache filled ~period:query_period ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "filled missing span sides" 15.0 total
 
+let test_span_extend_contiguous () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let a = single_span_series ~period:jan ~split:proportional_split 31.0 in
+  let b = single_span_series ~period:feb ~split:proportional_split 28.0 in
+  let extended = Spans.extend a b in
+  let cache = make_cache () in
+  match query_span cache extended ~period:(p (d 2026 1 1) (d 2026 3 1)) ~reduce:Fun.id with
+  | [ Some jan_value; Some feb_value ] ->
+      Alcotest.(check (float 1e-9)) "jan" 31.0 jan_value;
+      Alcotest.(check (float 1e-9)) "feb" 28.0 feb_value
+  | _ -> Alcotest.fail "expected contiguous extended spans"
+
+let test_span_extend_clips_overlapping_second_series () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let overlap = p (d 2026 1 15) (d 2026 2 15) in
+  let query_period = p (d 2026 2 1) (d 2026 2 15) in
+  let a = single_span_series ~period:jan ~split:proportional_split 31.0 in
+  let b = single_span_series ~period:overlap ~split:proportional_split 31.0 in
+  let extended = Spans.extend a b in
+  let cache = make_cache () in
+  let total = query_span cache extended ~period:query_period ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "clipped second span" 14.0 total
+
+let test_span_extend_skips_covered_second_spans () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let jan_to_mar = p (d 2026 1 1) (d 2026 3 1) in
+  let a = single_span_series ~period:jan_to_mar ~split:const_split 60.0 in
+  let b = Spans.of_list ~split:const_split [ (jan, 10.0); (feb, 20.0); (mar, 30.0) ] in
+  let extended = Spans.extend a b in
+  let cache = make_cache () in
+  let total = query_span cache extended ~period:(p (d 2026 1 1) (d 2026 4 1)) ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "covered second spans skipped" 90.0 total
+
+let test_span_extend_preserves_gap_before_second_series () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let a = single_span_series ~period:jan ~split:proportional_split 31.0 in
+  let b = single_span_series ~period:mar ~split:proportional_split 31.0 in
+  let extended = Spans.extend a b in
+  let cache = make_cache () in
+  match query_span cache extended ~period:(p (d 2026 2 1) (d 2026 4 1)) ~reduce:Fun.id with
+  | [ None; Some mar_value ] -> Alcotest.(check (float 1e-9)) "mar" 31.0 mar_value
+  | _ -> Alcotest.fail "expected gap before second series"
+
+let test_span_extend_empty_first_series () =
+  let open Series in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let empty = Spans.of_list ~split:proportional_split [] in
+  let b = single_span_series ~period:feb ~split:proportional_split 28.0 in
+  let extended = Spans.extend empty b in
+  let cache = make_cache () in
+  let total = query_span cache extended ~period:feb ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "empty first series" 28.0 total
+
 let test_sum_float_opts () =
   let open Series in
   Alcotest.(check (float 1e-9))
@@ -491,6 +552,13 @@ let tests =
       ("span map2 applies function", test_span_map2_applies_function);
       ("span convenience constructors", test_span_convenience_constructors);
       ("span convenience fill", test_span_convenience_fill);
+      ("span extend contiguous", test_span_extend_contiguous);
+      ( "span extend clips overlapping second series",
+        test_span_extend_clips_overlapping_second_series );
+      ("span extend skips covered second spans", test_span_extend_skips_covered_second_spans);
+      ( "span extend preserves gap before second series",
+        test_span_extend_preserves_gap_before_second_series );
+      ("span extend empty first series", test_span_extend_empty_first_series);
       ("sum_float_opts", test_sum_float_opts);
       ( "non-cyclic map preserves gaps and evaluates once",
         test_non_cyclic_map_preserves_gaps_and_evaluates_once );

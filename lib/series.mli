@@ -43,6 +43,10 @@ module rec Spans : sig
       [fill] is provided, missing sides are passed to [f] as [Some fill]; otherwise they are passed
       as [None]. *)
 
+  val extend : t -> t -> t
+  (** [extend a b] yields all spans from [a], then continues with [b]. If [a] ends inside a span
+      from [b], that first overlapping span from [b] is clipped to start at [a]'s end. *)
+
   val unfold :
     ?label:string ->
     deps:(unit -> 'readers Deps.t) ->

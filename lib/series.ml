@@ -29,6 +29,7 @@ module rec Spans : sig
         b : t;
         f : float option -> float option -> float;
       }
+    | Extend of { id : series_id; a : t; b : t }
     | Unfold : {
         id : series_id;
         label : string option;
@@ -48,6 +49,7 @@ module rec Spans : sig
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
+  val extend : t -> t -> t
 
   val unfold :
     ?label:string ->
@@ -82,6 +84,7 @@ end = struct
         b : t;
         f : float option -> float option -> float;
       }
+    | Extend of { id : series_id; a : t; b : t }
     | Unfold : {
         id : series_id;
         label : string option;
@@ -113,15 +116,18 @@ end = struct
     | Const { id; _ } -> id
     | Map { id; _ } -> id
     | Map2 { id; _ } -> id
+    | Extend { id; _ } -> id
     | Unfold { id; _ } -> id
 
   let label = function
     | Const { label; _ } -> label
     | Map { label; _ } -> label
     | Map2 { label; _ } -> label
+    | Extend _ -> None
     | Unfold { label; _ } -> label
 
   let map ?label f dep = Map { id = new_id (); label; dep; f }
+  let extend a b = Extend { id = new_id (); a; b }
   let neg ?label dep = map ?label (fun value -> -.value) dep
   let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
   let fill_option fill = function None -> fill | some -> some
@@ -524,6 +530,27 @@ let make_unfold_producer ~init ~cells ~register_formula =
   in
   view 0
 
+let extend_span_seq a b =
+  let rec continue_b start b () =
+    match b () with
+    | Seq.Nil -> Seq.Nil
+    | Seq.Cons (span, rest) ->
+        let span_start, span_end = Period.to_tuple (span_period span) in
+        if Date.(span_end <= start) then continue_b start rest ()
+        else if Date.(span_start < start) then
+          match split_span start span with
+          | _, Some right -> Seq.Cons (right, rest)
+          | _, None -> continue_b start rest ()
+        else Seq.Cons (span, rest)
+  in
+  let rec continue_a last_end a () =
+    match a () with
+    | Seq.Nil -> ( match last_end with None -> b () | Some end_ -> continue_b end_ b ())
+    | Seq.Cons (span, rest) ->
+        Seq.Cons (span, continue_a (Some (Period.end_ (span_period span))) rest)
+  in
+  continue_a None a
+
 let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq.t =
   match series with
   | Const { period; value; _ } -> Seq.return (f_value period value const_split)
@@ -546,6 +573,8 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
           paired
       in
       Seq.memoize seq
+  | Extend { a; b; _ } ->
+      extend_span_seq (seq_for_span_series cache a) (seq_for_span_series cache b) |> Seq.memoize
   | Unfold { deps; init; cells; _ } ->
       let readers = Deps.run (deps ()) in
       let register_formula ~period ~split formula =
@@ -1014,6 +1043,7 @@ let series_dependencies : type a. a series -> packed_series list = function
       | Const _ -> []
       | Map { dep; _ } -> [ Series (Span_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
+      | Extend { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
       | Unfold { deps; _ } ->
           Deps.dependencies (deps ())
           |> List.map (function
