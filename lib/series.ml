@@ -119,6 +119,7 @@ and Spans : sig
 
   val cell : period:Period.t -> split:split -> float Formula.t -> unfold_cell
   val unpack_unfold_cell : unfold_cell -> Period.t * split * float Formula.t
+  val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   val id : t -> series_id
   val label : t -> string option
   val neg : ?label:string -> t -> t
@@ -151,6 +152,19 @@ end = struct
 
   let cell ~period ~split formula = Cell { period; split; formula }
   let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
+
+  let of_list ?label ~split cells =
+    Unfold
+      {
+        id = new_id ();
+        label;
+        deps = (fun () -> Deps.none);
+        init = cells;
+        cells =
+          (fun () -> function
+            | [] -> None
+            | (period, value) :: rest -> Some (cell ~period ~split (Formula.pure value), rest));
+      }
 
   let id = function
     | Const { id; _ } -> id
@@ -188,6 +202,7 @@ end
 and Points : sig
   type t =
     | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | List of { id : series_id; label : string option; values : (Date.t * float) list }
     | Map of { id : series_id; label : string option; dep : t; f : float -> float }
     | Map2 of {
         id : series_id;
@@ -198,6 +213,7 @@ and Points : sig
       }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
+  val of_list : ?label:string -> (Date.t * float) list -> t
   val id : t -> series_id
   val label : t -> string option
   val neg : ?label:string -> t -> t
@@ -209,6 +225,7 @@ and Points : sig
 end = struct
   type t =
     | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | List of { id : series_id; label : string option; values : (Date.t * float) list }
     | Map of { id : series_id; label : string option; dep : t; f : float -> float }
     | Map2 of {
         id : series_id;
@@ -219,14 +236,18 @@ end = struct
       }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
+  let of_list ?label values = List { id = new_id (); label; values }
+
   let id = function
     | Const { id; _ } -> id
+    | List { id; _ } -> id
     | Map { id; _ } -> id
     | Map2 { id; _ } -> id
     | Accum { id; _ } -> id
 
   let label = function
     | Const { label; _ } -> label
+    | List { label; _ } -> label
     | Map { label; _ } -> label
     | Map2 { label; _ } -> label
     | Accum { label; _ } -> label
@@ -623,6 +644,10 @@ and query_point_series cache series date : point option =
         match series with
         | Const { period; value; _ } ->
             if Period.contains date period then Some (p_const date value) else None
+        | List { values; _ } -> (
+            match List.find_opt (fun (value_date, _) -> Date.equal value_date date) values with
+            | Some (_, value) -> Some (p_const date (fun () -> value))
+            | None -> None)
         | Map { dep; f; _ } -> (
             match query_point_series cache dep date with
             | Some pt -> Some (p_map pt f)
@@ -1007,6 +1032,7 @@ let series_dependencies : type a. a series -> packed_series list = function
   | Point_series series -> (
       match series with
       | Const _ -> []
+      | List _ -> []
       | Map { dep; _ } -> [ Series (Point_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Point_series a); Series (Point_series b) ]
       | Accum { changes; _ } -> [ Series (Span_series changes) ])

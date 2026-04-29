@@ -62,6 +62,21 @@ let test_span_const () =
   let total = query_span cache series ~period ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "const span value" 42.0 total
 
+let test_span_of_list () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let series =
+    Spans.of_list ~label:"Revenue" ~split:proportional_split [ (jan, 31.0); (feb, 28.0) ]
+  in
+  let cache = make_cache () in
+  Alcotest.(check (option string)) "label" (Some "Revenue") (Spans.label series);
+  Alcotest.(check (float 1e-9)) "jan" 31.0 (query_span cache series ~period:jan ~reduce:sum_floats);
+  Alcotest.(check (float 1e-9)) "feb" 28.0 (query_span cache series ~period:feb ~reduce:sum_floats);
+  Alcotest.(check (float 1e-9))
+    "partial proportional" 17.0
+    (query_span cache series ~period:(p (d 2026 1 15) (d 2026 2 1)) ~reduce:sum_floats)
+
 let test_span_map_applies_function () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
@@ -178,6 +193,19 @@ let test_point_const_map_map2 () =
   Alcotest.(check (float 1e-9)) "const point" 10.0 (query_point cache a ~date ~default:0.0);
   Alcotest.(check (float 1e-9)) "mapped point" 20.0 (query_point cache mapped ~date ~default:0.0);
   Alcotest.(check (float 1e-9)) "map2 point" 13.0 (query_point cache mapped2 ~date ~default:0.0)
+
+let test_point_of_list () =
+  let open Series in
+  let jan = d 2026 1 1 in
+  let feb = d 2026 2 1 in
+  let series = Points.of_list ~label:"Balance" [ (jan, 100.0); (feb, 125.0) ] in
+  let cache = make_cache () in
+  Alcotest.(check (option string)) "label" (Some "Balance") (Points.label series);
+  Alcotest.(check (float 1e-9)) "jan" 100.0 (query_point cache series ~date:jan ~default:0.0);
+  Alcotest.(check (float 1e-9)) "feb" 125.0 (query_point cache series ~date:feb ~default:0.0);
+  Alcotest.(check (float 1e-9))
+    "missing default" (-1.0)
+    (query_point cache series ~date:(d 2026 3 1) ~default:(-1.0))
 
 let test_point_convenience_constructors () =
   let open Series in
@@ -605,6 +633,7 @@ let tests =
     (fun (name, f) -> Alcotest.test_case name `Quick f)
     [
       ("span const", test_span_const);
+      ("span of_list", test_span_of_list);
       ("span map applies function", test_span_map_applies_function);
       ("span map2 applies function", test_span_map2_applies_function);
       ("span convenience constructors", test_span_convenience_constructors);
@@ -613,6 +642,7 @@ let tests =
       ( "non-cyclic map preserves gaps and evaluates once",
         test_non_cyclic_map_preserves_gaps_and_evaluates_once );
       ("point const/map/map2", test_point_const_map_map2);
+      ("point of_list", test_point_of_list);
       ("point convenience constructors", test_point_convenience_constructors);
       ("point convenience fill", test_point_convenience_fill);
       ("point accum uses span changes", test_point_accum_uses_span_changes);

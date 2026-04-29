@@ -70,6 +70,10 @@ and Spans : sig
       }
         -> t
 
+  val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
+  (** [of_list ?label ~split cells] is a span series that yields [cells] in list order. No ordering
+      or overlap validation is performed. *)
+
   val label : t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)
 
@@ -84,6 +88,7 @@ end
 and Points : sig
   type t =
     | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | List of { id : series_id; label : string option; values : (Date.t * float) list }
     | Map of { id : series_id; label : string option; dep : t; f : float -> float }
     | Map2 of {
         id : series_id;
@@ -93,6 +98,10 @@ and Points : sig
         f : float option -> float option -> float;
       }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
+
+  val of_list : ?label:string -> (Date.t * float) list -> t
+  (** [of_list ?label values] is a sparse point series with exact values at the listed dates. No
+      ordering or duplicate-date validation is performed. *)
 
   val label : t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)
@@ -160,8 +169,6 @@ val dependencies : 'a series -> dependency list
     dependencies. *)
 
 (** {1 Querying} *)
-
-(* TODO: Temp top-level query API for extracting values. Remove once eval mechanism is in place. *)
 
 type series_cache
 
