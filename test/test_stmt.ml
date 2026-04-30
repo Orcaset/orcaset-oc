@@ -80,6 +80,7 @@ let test_fixed_width_renders_totals_and_indented_children () =
         row "  Costs" "-30.00" "-30.00";
         row "" "----------" "----------";
         row "Gross Profit" "70.00" "80.00";
+        "";
       ]
   in
   Alcotest.(check string) "fixed width total" expected (Stmt.fixed_width resolved)

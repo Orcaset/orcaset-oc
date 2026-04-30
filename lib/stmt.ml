@@ -124,7 +124,7 @@ let fixed_width_rows resolved =
     | RLine { label; values } -> [ Data { depth; label; cells = fixed_width_cells values } ]
     | RTotal { label; values; children } ->
         List.concat_map (go (depth + 1)) children
-        @ [ Rule; Data { depth; label; cells = fixed_width_cells values } ]
+        @ [ Rule; Data { depth; label; cells = fixed_width_cells values }; Blank ]
     | RGroup children -> (Blank :: List.concat_map (go depth) children) @ [ Blank ]
   in
   go 0 resolved
