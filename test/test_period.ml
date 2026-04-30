@@ -149,15 +149,12 @@ let test_seq_to_dates_single_period () =
   check_date_list "single" [ Date.make 2025 1 1; Date.make 2025 2 1 ] dates
 
 let test_seq_to_dates_contiguous_periods () =
-  (* For contiguous periods, seq_to_dates emits start of first, then
-     end_date of each subsequent period (skipping shared boundaries),
-     plus a trailing end_date from the Seq.Nil branch. *)
   let p1 = Period.make (Date.make 2025 1 1) (Date.make 2025 2 1) in
   let p2 = Period.make (Date.make 2025 2 1) (Date.make 2025 3 1) in
   let p3 = Period.make (Date.make 2025 3 1) (Date.make 2025 4 1) in
   let dates = Period.seq_to_dates (List.to_seq [ p1; p2; p3 ]) |> List.of_seq in
   check_date_list "contiguous"
-    [ Date.make 2025 1 1; Date.make 2025 3 1; Date.make 2025 4 1; Date.make 2025 4 1 ]
+    [ Date.make 2025 1 1; Date.make 2025 2 1; Date.make 2025 3 1; Date.make 2025 4 1 ]
     dates
 
 let test_seq_to_dates_non_contiguous_periods () =
@@ -180,13 +177,20 @@ let test_seq_to_dates_overlapping_periods () =
     dates
 
 let test_seq_to_dates_from_make_seq () =
-  (* make_seq produces contiguous periods, so shared boundaries are merged.
-     The Nil branch also emits the final end_date, producing a duplicate. *)
   let offset = Offset.make ~months:1 ~month_end:true () in
   let periods = Period.make_seq ~start:(Date.make 2025 1 31) ~offset |> Seq.take 3 in
   let dates = Period.seq_to_dates periods |> List.of_seq in
   check_date_list "from make_seq"
-    [ Date.make 2025 1 31; Date.make 2025 3 31; Date.make 2025 4 30; Date.make 2025 4 30 ]
+    [ Date.make 2025 1 31; Date.make 2025 2 28; Date.make 2025 3 31; Date.make 2025 4 30 ]
+    dates
+
+let test_list_to_dates_contiguous_periods () =
+  let p1 = Period.make (Date.make 2025 1 1) (Date.make 2025 2 1) in
+  let p2 = Period.make (Date.make 2025 2 1) (Date.make 2025 3 1) in
+  let p3 = Period.make (Date.make 2025 3 1) (Date.make 2025 4 1) in
+  let dates = Period.list_to_dates [ p1; p2; p3 ] in
+  check_date_list "contiguous list"
+    [ Date.make 2025 1 1; Date.make 2025 2 1; Date.make 2025 3 1; Date.make 2025 4 1 ]
     dates
 
 let test_negative_length_period_is_allowed () =
@@ -219,4 +223,5 @@ let tests =
     Alcotest.test_case "seq_to_dates non-contiguous" `Quick test_seq_to_dates_non_contiguous_periods;
     Alcotest.test_case "seq_to_dates overlapping" `Quick test_seq_to_dates_overlapping_periods;
     Alcotest.test_case "seq_to_dates from make_seq" `Quick test_seq_to_dates_from_make_seq;
+    Alcotest.test_case "list_to_dates contiguous" `Quick test_list_to_dates_contiguous_periods;
   ]

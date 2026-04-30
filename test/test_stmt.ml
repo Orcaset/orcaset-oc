@@ -30,6 +30,24 @@ let test_eval_dates_preserves_label_without_values () =
       Alcotest.(check (option string)) "span label" (Some "Revenue") label
   | _ -> Alcotest.fail "expected labeled unresolved date statement"
 
+let test_eval_periods_point_values_include_shared_boundaries () =
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let balance = point_series ~label:(Some "Balance") ~period:(p (d 2026 1 1) (d 2026 4 2)) 100.0 in
+  match Stmt.eval_periods [ jan; feb; mar ] (Stmt.point_line balance) with
+  | Stmt.RLine { values = Some (Stmt.Point_values values); _ } ->
+      Alcotest.(check (list (pair Helpers.date (float 1e-9))))
+        "point values"
+        [
+          (d 2026 1 1, 100.0);
+          (d 2026 2 1, 100.0);
+          (d 2026 3 1, 100.0);
+          (d 2026 4 1, 100.0);
+        ]
+        values
+  | _ -> Alcotest.fail "expected point values for period statement"
+
 let test_fixed_width_renders_totals_and_indented_children () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
@@ -99,6 +117,8 @@ let tests =
     [
       ("eval_periods preserves labels", test_eval_periods_preserves_labels);
       ("eval_dates preserves label without values", test_eval_dates_preserves_label_without_values);
+      ( "eval_periods point values include shared boundaries",
+        test_eval_periods_point_values_include_shared_boundaries );
       ( "fixed_width renders totals and indented children",
         test_fixed_width_renders_totals_and_indented_children );
       ( "fixed_width renders point stub unknown labels and group spacing",

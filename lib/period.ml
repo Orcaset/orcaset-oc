@@ -51,7 +51,7 @@ let seq_to_dates periods =
         | None -> Seq.Cons (start period, aux (Some period) next)
         | Some last_period ->
             if Date.equal (end_ last_period) (start period) then
-              Seq.Cons (end_ period, aux (Some period) next)
+              Seq.Cons (end_ last_period, aux (Some period) next)
             else
               Seq.Cons (end_ last_period, fun () -> Seq.Cons (start period, aux (Some period) next))
         )
@@ -67,7 +67,7 @@ let list_to_dates periods =
         | None -> start period :: aux (Some period) next
         | Some last_period ->
             if Date.equal (end_ last_period) (start period) then
-              end_ period :: aux (Some period) next
+              end_ last_period :: aux (Some period) next
             else end_ last_period :: start period :: aux (Some period) next)
   in
   aux None periods
