@@ -46,6 +46,25 @@ let test_span_of_list () =
     "partial proportional" 17.0
     (query_span cache series ~period:(p (d 2026 1 15) (d 2026 2 1)) ~reduce:sum_floats)
 
+let test_span_custom_split () =
+  let open Series in
+  let full_period = p (d 2026 1 1) (d 2026 4 1) in
+  let first_month = p (d 2026 1 1) (d 2026 2 1) in
+  let remaining_months = p (d 2026 2 1) (d 2026 4 1) in
+  let front_loaded_split : split =
+   fun ~period:_ ~date:_ ->
+    ( Series.split_part ~value:(fun value -> value *. 0.75),
+      Series.split_part ~value:(fun value -> value *. 0.25) )
+  in
+  let series = single_span_series ~period:full_period ~split:front_loaded_split 100.0 in
+  let cache = make_cache () in
+  Alcotest.(check (float 1e-9))
+    "custom split left side" 75.0
+    (query_span cache series ~period:first_month ~reduce:sum_floats);
+  Alcotest.(check (float 1e-9))
+    "custom split right side" 25.0
+    (query_span cache series ~period:remaining_months ~reduce:sum_floats)
+
 let test_span_map_applies_function () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
@@ -621,6 +640,7 @@ let tests =
     [
       ("span const", test_span_const);
       ("span of_list", test_span_of_list);
+      ("span custom split", test_span_custom_split);
       ("span map applies function", test_span_map_applies_function);
       ("span map2 applies function", test_span_map2_applies_function);
       ("span convenience constructors", test_span_convenience_constructors);

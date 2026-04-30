@@ -1,16 +1,25 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-type split
-(** Strategy for assigning value when a span is clipped to a sub-period. *)
+type split_part
+(** One side of a span split. It describes how to project the original span value onto that side. *)
+
+val split_part : value:(float -> float) -> split_part
+(** [split_part ~value] creates one side of a custom split strategy. [value] receives the original
+    span value and returns the split-side value. *)
+
+type split = period:Period.t -> date:Date.t -> split_part * split_part
+(** Strategy for assigning value when a span over [period] is split at an interior [date]. The first
+    returned part is assigned to [Period.make (Period.start period) date]; the second is assigned to
+    [Period.make date (Period.end_ period)]. *)
 
 val proportional_split : split
 (** Splits a span's value proportionally by time. E.g. clipping a $120/yr span to one quarter yields
     $30 for that quarter. *)
 
 val const_split : split
-(** Assigns the original span's value to each clipped side. E.g. clipping a "40 mph" span to any
-    sub-period still yields 40 mph. *)
+(** Assigns the original span's value to each clipped side. E.g. splitting a span with value "10"
+    will create sub-periods with values of "10" as well. *)
 
 module rec Spans : sig
   type unfold_cell
