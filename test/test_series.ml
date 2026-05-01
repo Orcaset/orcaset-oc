@@ -376,7 +376,7 @@ let test_point_convenience_constructors () =
   let check name expected series =
     Alcotest.(check (float 1e-9)) name expected (query_point cache series ~date ~default:0.0)
   in
-  let total = Points.sum ~label:"Total" a b in
+  let total = Points.sum ~label:"Total" [ a; b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Points.label total);
   let mapped = Points.map ~label:"Doubled" (fun value -> value *. 2.0) a in
   Alcotest.(check (option string)) "map label" (Some "Doubled") (Points.label mapped);
@@ -385,20 +385,62 @@ let test_point_convenience_constructors () =
   check "scale" 30.0 (Points.scale 3.0 a);
   check "sum" 12.0 total;
   check "sub" 8.0 (Points.sub a b);
-  check "mul" 20.0 (Points.mul a b);
+  check "mul" 20.0 (Points.mul [ a; b ]);
   check "div" 5.0 (Points.div a b)
 
-let test_point_convenience_fill () =
+let test_point_convenience_identity () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let a = Points.const ~period:jan 10.0 in
   let b = Points.const ~period:feb 3.0 in
-  let filled = Points.sum ~fill:1.0 a b in
+  let cache = make_cache () in
+  let summed = Points.sum [ a; b ] in
+  Alcotest.(check (float 1e-9))
+    "jan sum additive identity"
+    10.0
+    (query_point cache summed ~date:(d 2026 1 15) ~default:0.0);
+  let multiplied = Points.mul [ a; b ] in
+  Alcotest.(check (float 1e-9))
+    "feb mul identity"
+    3.0
+    (query_point cache multiplied ~date:(d 2026 2 15) ~default:0.0)
+
+let test_point_mapn_fill () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let a = Points.const ~period:jan 10.0 in
+  let b = Points.const ~period:feb 3.0 in
+  let filled =
+    Points.mapn ~fill:1.0 [ a; b ]
+      (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc) 0.0)
+  in
   let cache = make_cache () in
   Alcotest.(check (float 1e-9))
-    "filled missing point side" 11.0
+    "mapn fills missing sides before reducing" 11.0
     (query_point cache filled ~date:(d 2026 1 15) ~default:0.0)
+
+let test_point_sum_n_way () =
+  let open Series in
+  let period_all = Period.unbounded in
+  let date = d 2026 1 15 in
+  let x = Points.const ~period:period_all 2.0 in
+  let y = Points.const ~period:period_all 3.0 in
+  let z = Points.const ~period:period_all 4.0 in
+  let cache = make_cache () in
+  Alcotest.(check (float 1e-9))
+    "n-way sum" 9.0
+    (query_point cache (Points.sum [ x; y; z ]) ~date ~default:0.0);
+  Alcotest.(check (float 1e-9))
+    "n-way mul" 24.0
+    (query_point cache (Points.mul [ x; y; z ]) ~date ~default:0.0)
+
+let test_point_sum_empty_raises () =
+  Alcotest.check_raises "empty point sum raises" (Invalid_argument "Points.sum: empty list") (fun () ->
+      ignore (Series.Points.sum []));
+  Alcotest.check_raises "empty point mul raises" (Invalid_argument "Points.mul: empty list") (fun () ->
+      ignore (Series.Points.mul []))
 
 let test_point_accum_uses_span_changes () =
   let open Series in
@@ -723,7 +765,10 @@ let tests =
       ("point const/map/map2", test_point_const_map_map2);
       ("point of_list", test_point_of_list);
       ("point convenience constructors", test_point_convenience_constructors);
-      ("point convenience fill", test_point_convenience_fill);
+      ("point sum/mul use identity for missing sides", test_point_convenience_identity);
+      ("point mapn fill", test_point_mapn_fill);
+      ("point sum/mul n-way", test_point_sum_n_way);
+      ("point sum/mul empty list raises", test_point_sum_empty_raises);
       ("point accum uses span changes", test_point_accum_uses_span_changes);
       ("label accessors", test_label_accessors);
       ("unfold no deps single step", test_unfold_no_deps_single_step);

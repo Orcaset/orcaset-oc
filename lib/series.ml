@@ -241,18 +241,28 @@ and Points : sig
         b : t;
         f : float option -> float option -> float;
       }
+    | MapN of {
+        id : series_id;
+        label : string option;
+        deps : t list;
+        f : float option list -> float;
+      }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sum : ?label:string -> t list -> t
   val sub : ?label:string -> ?fill:float -> t -> t -> t
-  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> t list -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
   val const : ?label:string -> period:Period.t -> float -> t
   val of_list : ?label:string -> (Date.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
+
+  val mapn :
+    ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
+
   val accum : ?label:string -> init:float -> Spans.t -> t
   val id : t -> series_id
   val label : t -> string option
@@ -268,6 +278,12 @@ end = struct
         b : t;
         f : float option -> float option -> float;
       }
+    | MapN of {
+        id : series_id;
+        label : string option;
+        deps : t list;
+        f : float option list -> float;
+      }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
   let const ?label ~period value = Const { id = new_id (); label; period; value }
@@ -279,6 +295,7 @@ end = struct
     | List { id; _ } -> id
     | Map { id; _ } -> id
     | Map2 { id; _ } -> id
+    | MapN { id; _ } -> id
     | Accum { id; _ } -> id
 
   let label = function
@@ -286,6 +303,7 @@ end = struct
     | List { label; _ } -> label
     | Map { label; _ } -> label
     | Map2 { label; _ } -> label
+    | MapN { label; _ } -> label
     | Accum { label; _ } -> label
 
   let map ?label f dep = Map { id = new_id (); label; dep; f }
@@ -297,10 +315,31 @@ end = struct
     Map2
       { id = new_id (); label; a; b; f = (fun a b -> f (fill_option fill a) (fill_option fill b)) }
 
+  let mapn ?label ?fill deps f =
+    let f =
+      match fill with
+      | None -> f
+      | Some fill -> fun values -> f (List.map (fill_option (Some fill)) values)
+    in
+    MapN { id = new_id (); label; deps; f }
+
   let value_or_zero = Option.value ~default:0.0
-  let sum ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a +. value_or_zero b)
+
+  let sum ?label = function
+    | [] -> invalid_arg "Points.sum: empty list"
+    | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
+    | deps ->
+        mapn ?label deps
+          (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc) 0.0)
+
+  let mul ?label = function
+    | [] -> invalid_arg "Points.mul: empty list"
+    | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
+    | deps ->
+        mapn ?label deps
+          (List.fold_left (fun acc -> function Some v -> acc *. v | None -> acc) 1.0)
+
   let sub ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a -. value_or_zero b)
-  let mul ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a *. value_or_zero b)
   let div ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a /. value_or_zero b)
 end
 
@@ -781,6 +820,11 @@ and query_point_series cache series date : point option =
         | Map2 { a; b; f; _ } ->
             let oa, ob = (query_point_series cache a date, query_point_series cache b date) in
             Some (p_derived date [ oa; ob ] (function [ va; vb ] -> f va vb | _ -> assert false))
+        | MapN { deps; f; _ } ->
+            let child_opts =
+              List.map (fun dep -> query_point_series cache dep date) deps
+            in
+            Some (p_derived date child_opts f)
         | Accum { init; changes; _ } -> Some (query_accum cache series_id init changes date)
       in
       set_point cache series_id date value;
@@ -1172,6 +1216,7 @@ let series_dependencies : type a. a series -> packed_series list = function
       | List _ -> []
       | Map { dep; _ } -> [ Series (Point_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Point_series a); Series (Point_series b) ]
+      | MapN { deps; _ } -> List.map (fun d -> Series (Point_series d)) deps
       | Accum { changes; _ } -> [ Series (Span_series changes) ])
   | Span_series series -> (
       match series with

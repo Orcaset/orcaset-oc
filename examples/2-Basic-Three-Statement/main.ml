@@ -104,7 +104,7 @@ let total_cf =
 (* Balance Sheet *)
 
 let cash = Series.Points.accum ~label:"Cash" ~init:initial_cash total_cf
-let total_assets = Series.Points.sum ~label:"Total assets" cash ppe_net
+let total_assets = Series.Points.sum ~label:"Total assets" [ cash; ppe_net ]
 
 let common_stock =
   Series.Points.const ~label:"Common stock" ~period:Period.unbounded initial_common_stock
@@ -113,7 +113,7 @@ let retained_earnings =
   Series.Points.accum ~label:"Retained earnings" ~init:initial_retained_earnings net_income
 
 let total_equity_liabilities =
-  Series.Points.sum ~label:"Total equity and liabilities" common_stock retained_earnings
+  Series.Points.sum ~label:"Total equity and liabilities" [ common_stock; retained_earnings ]
 
 let bs_check = Series.Points.sub ~label:"Balance sheet check" total_assets total_equity_liabilities
 

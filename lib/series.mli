@@ -104,9 +104,9 @@ and Points : sig
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sum : ?label:string -> t list -> t
   val sub : ?label:string -> ?fill:float -> t -> t -> t
-  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> t list -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
 
   val const : ?label:string -> period:Period.t -> float -> t
@@ -123,6 +123,11 @@ and Points : sig
   (** [map2 ?label ?fill a b f] applies [f] to the values of [a] and [b] on each queried date. When
       [fill] is provided, missing sides are passed to [f] as [Some fill]; otherwise they are passed
       as [None]. *)
+
+  val mapn : ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
+  (** [mapn ?label ?fill series f] applies [f] on each queried date to the list of values from
+      [series] (in input order). When [fill] is provided, missing entries are passed as [Some fill];
+      otherwise they are [None]. *)
 
   val accum : ?label:string -> init:float -> Spans.t -> t
   (** [accum ?label ~init changes] is a point series whose value starts at [init] and changes by the
