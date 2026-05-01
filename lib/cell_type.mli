@@ -22,6 +22,7 @@ type span = private
       b : span option;
       f : float option -> float option -> float;
     }
+  | MapN of { id : int; period : Period.t; deps : span option list; f : float option list -> float }
 
 and split_strategy = span -> Date.t -> split_part * split_part
 (** A split strategy for interior split dates. It returns value projections rather than spans so
@@ -59,6 +60,7 @@ val f_map : span -> (float -> float) -> span
 val f_map2 :
   Period.t -> span option -> span option -> (float option -> float option -> float) -> span
 
+val f_mapn : Period.t -> span option list -> (float option list -> float) -> span
 val span_period : span -> Period.t
 val span_id : span -> int
 
@@ -82,3 +84,10 @@ val align_span_seq : span Seq.t -> span Seq.t -> (span option * span option) Seq
 (** [align_span_seq a b] returns a sequence of span option tuples with aligned span periods. Any
     unmatched spans are paired with [None], splitting them as necessary to fill partial period
     overlaps. *)
+
+val align_span_seqs : span Seq.t list -> span option list Seq.t
+(** [align_span_seqs seqs] is the n-ary generalization of {!align_span_seq}. It emits a sequence of
+    rows, where each row is a [span option list] of length [List.length seqs] aligned to a common
+    output period. Streams that do not cover a given output period contribute [None]; partial
+    overlaps are handled by splitting at row boundaries. Each emitted row contains at least one
+    [Some] entry. *)

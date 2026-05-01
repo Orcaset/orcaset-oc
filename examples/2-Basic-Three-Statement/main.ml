@@ -43,7 +43,7 @@ let revenue =
     ()
 
 let cost_of_revenue = Series.Spans.scale ~label:"Cost of revenue" cost_of_revenue_ratio revenue
-let gross_profit = Series.Spans.sum ~label:"Gross profit" revenue cost_of_revenue
+let gross_profit = Series.Spans.sum ~label:"Gross profit" [ revenue; cost_of_revenue ]
 
 let opex =
   Series.Spans.unfold ~label:"Operating expenses"
@@ -77,38 +77,29 @@ let rec lazy_depreciation =
 and lazy_ppe_change =
   lazy
     (let capitalized_capex = Series.Spans.scale (-1.0) capex in
-     Series.Spans.sum ~label:"PPE change" capitalized_capex (Lazy.force lazy_depreciation))
+     Series.Spans.sum ~label:"PPE change" [ capitalized_capex; Lazy.force lazy_depreciation ])
 
 and lazy_ppe_net =
-  lazy
-    (Series.Points.accum ~label:"PPE net" ~init:initial_ppe (Lazy.force lazy_ppe_change))
+  lazy (Series.Points.accum ~label:"PPE net" ~init:initial_ppe (Lazy.force lazy_ppe_change))
 
 let depreciation = Lazy.force lazy_depreciation
 let ppe_net = Lazy.force lazy_ppe_net
-
-let ebit =
-  List.fold_left
-    (fun acc x -> Series.Spans.sum ~label:"EBIT" acc x)
-    gross_profit [ opex; depreciation ]
-
+let ebit = Series.Spans.sum ~label:"EBIT" [ gross_profit; opex; depreciation ]
 let income_tax = Series.Spans.scale ~label:"Income tax" income_tax_rate ebit
-let net_income = Series.Spans.sum ~label:"Net income" ebit income_tax
+let net_income = Series.Spans.sum ~label:"Net income" [ ebit; income_tax ]
 
 (* Cash Flow Statement *)
 
 let depreciation_add_back = Series.Spans.scale ~label:"Depreciation add back" (-1.0) depreciation
-let operating_cf = Series.Spans.sum ~label:"Operating cash flow" net_income depreciation_add_back
-let investing_cf = capex
 
-let cf_financing =
-  Series.Spans.const ~label:"Cash flow from financing"
-    ~period:Period.unbounded
-    0.0
+let operating_cf =
+  Series.Spans.sum ~label:"Operating cash flow" [ net_income; depreciation_add_back ]
+
+let investing_cf = capex
+let cf_financing = Series.Spans.const ~label:"Cash flow from financing" ~period:Period.unbounded 0.0
 
 let total_cf =
-  List.fold_left
-    (fun acc x -> Series.Spans.sum ~label:"Total cash flow" acc x)
-    operating_cf [ investing_cf; cf_financing ]
+  Series.Spans.sum ~label:"Total cash flow" [ operating_cf; investing_cf; cf_financing ]
 
 (* Balance Sheet *)
 
@@ -116,9 +107,7 @@ let cash = Series.Points.accum ~label:"Cash" ~init:initial_cash total_cf
 let total_assets = Series.Points.sum ~label:"Total assets" cash ppe_net
 
 let common_stock =
-  Series.Points.const ~label:"Common stock"
-    ~period:Period.unbounded
-    initial_common_stock
+  Series.Points.const ~label:"Common stock" ~period:Period.unbounded initial_common_stock
 
 let retained_earnings =
   Series.Points.accum ~label:"Retained earnings" ~init:initial_retained_earnings net_income

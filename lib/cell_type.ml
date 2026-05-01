@@ -20,6 +20,7 @@ type span =
       b : span option;
       f : float option -> float option -> float;
     }
+  | MapN of { id : int; period : Period.t; deps : span option list; f : float option list -> float }
 
 and split_strategy = span -> Date.t -> split_part * split_part
 
@@ -65,18 +66,21 @@ let f_value period value split = Value { id = fresh_id (); period; value; split 
 let f_slice period dep value split = Slice { id = fresh_id (); period; dep; value; split }
 let f_map span f : span = Map { id = fresh_id (); dep = span; f }
 let f_map2 period a b f = Map2 { id = fresh_id (); period; a; b; f }
+let f_mapn period deps f = MapN { id = fresh_id (); period; deps; f }
 
 let rec span_period = function
   | Value { period; _ } -> period
   | Slice { period; _ } -> period
   | Map { dep; _ } -> span_period dep
   | Map2 { period; _ } -> period
+  | MapN { period; _ } -> period
 
 let span_id = function
   | Value { id; _ } -> id
   | Slice { id; _ } -> id
   | Map { id; _ } -> id
   | Map2 { id; _ } -> id
+  | MapN { id; _ } -> id
 
 let proportional_split : split_strategy =
  fun span date ->
@@ -102,7 +106,7 @@ let const_split : split_strategy =
 let rec inherited_split = function
   | Value { split; _ } | Slice { split; _ } -> split
   | Map { dep; _ } -> inherited_split dep
-  | Map2 _ -> proportional_split
+  | Map2 _ | MapN _ -> proportional_split
 
 let split_span date span =
   let start, end_ = Period.to_tuple (span_period span) in
@@ -114,11 +118,11 @@ let split_span date span =
         let left, right = split span date in
         ( Some (f_slice left.period span left.value split),
           Some (f_slice right.period span right.value split) )
-    | Map _ | Map2 _ ->
+    | Map _ | Map2 _ | MapN _ ->
         (* Apply the combining function before splitting: build slices that depend on the whole
-           span so its value ([f dep_value] for [Map], [f a b] for [Map2]) is computed over the
-           original period and only then scaled by [split]. Splitting first would push the scaling
-           inside [f], which is only correct when [f] is linear. *)
+           span so its value ([f dep_value] for [Map], [f a b] for [Map2], [f deps] for [MapN]) is
+           computed over the original period and only then scaled by [split]. Splitting first
+           would push the scaling inside [f], which is only correct when [f] is linear. *)
         let split = inherited_split span in
         let left, right = split span date in
         ( Some (f_slice left.period span left.value split),
@@ -141,6 +145,63 @@ let clip_span bounds span =
       else span
     in
     Some span
+
+let rec align_span_seqs (seqs : span Seq.t list) : span option list Seq.t =
+ fun () ->
+  (* Snapshot each stream's head and keep the original [Seq.t] alongside it so we can leave
+     untouched any stream whose head starts after the row we're about to emit. *)
+  let heads = List.map (fun seq -> (Seq.uncons seq, seq)) seqs in
+  let min_start =
+    List.fold_left
+      (fun acc (head, _) ->
+        match head with
+        | None -> acc
+        | Some (sp, _) ->
+            let s = Period.start (span_period sp) in
+            Some (match acc with None -> s | Some s0 -> if Date.(s < s0) then s else s0))
+      None heads
+  in
+  match min_start with
+  | None -> Seq.Nil
+  | Some min_start ->
+      (* The row's end is the earliest of:
+         - the end of any head that starts at [min_start] (those participate in this row), and
+         - the start of any head that starts after [min_start] (so the row stops before a
+           stream that hasn't begun). *)
+      let row_end =
+        List.fold_left
+          (fun acc (head, _) ->
+            match head with
+            | None -> acc
+            | Some (sp, _) ->
+                let sp_start, sp_end = Period.to_tuple (span_period sp) in
+                let candidate = if Date.equal sp_start min_start then sp_end else sp_start in
+                Some
+                  (match acc with
+                  | None -> candidate
+                  | Some e -> if Date.(candidate < e) then candidate else e))
+          None heads
+        |> Option.get
+      in
+      let row_and_next =
+        List.map
+          (fun (head, original) ->
+            match head with
+            | None -> (None, original)
+            | Some (sp, rest) ->
+                let sp_start, sp_end = Period.to_tuple (span_period sp) in
+                if Date.(sp_start > min_start) then (None, original)
+                else if Date.equal sp_end row_end then (Some sp, rest)
+                else
+                  (* sp_end > row_end: split the head and push the right side back. *)
+                  let left, right = split_span row_end sp in
+                  let next = match right with Some r -> Seq.cons r rest | None -> rest in
+                  (left, next))
+          heads
+      in
+      let row = List.map fst row_and_next in
+      let next_seqs = List.map snd row_and_next in
+      Seq.Cons (row, align_span_seqs next_seqs)
 
 let rec align_span_seq a b =
  fun () ->

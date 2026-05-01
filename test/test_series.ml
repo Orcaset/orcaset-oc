@@ -95,7 +95,7 @@ let test_span_convenience_constructors () =
   let check name expected series =
     Alcotest.(check (float 1e-9)) name expected (query_span cache series ~period ~reduce:sum_floats)
   in
-  let total = Spans.sum ~label:"Total" a b in
+  let total = Spans.sum ~label:"Total" [ a; b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Spans.label total);
   let mapped = Spans.map ~label:"Doubled" (fun value -> value *. 2.0) a in
   Alcotest.(check (option string)) "map label" (Some "Doubled") (Spans.label mapped);
@@ -104,20 +104,87 @@ let test_span_convenience_constructors () =
   check "scale" 30.0 (Spans.scale 3.0 a);
   check "sum" 12.0 total;
   check "sub" 8.0 (Spans.sub a b);
-  check "mul" 20.0 (Spans.mul a b);
+  check "mul" 20.0 (Spans.mul [ a; b ]);
   check "div" 5.0 (Spans.div a b)
 
-let test_span_convenience_fill () =
+let test_span_convenience_identity () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let query_period = p (d 2026 1 1) (d 2026 3 1) in
   let a = single_span_series ~period:jan ~split:proportional_split 10.0 in
   let b = single_span_series ~period:feb ~split:proportional_split 3.0 in
-  let filled = Spans.sum ~fill:1.0 a b in
+  let cache = make_cache () in
+  let summed = Spans.sum [ a; b ] in
+  let total = query_span cache summed ~period:query_period ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "sum uses 0 as additive identity for missing sides" 13.0 total;
+  let multiplied = Spans.mul [ a; b ] in
+  (* mul over disjoint periods: jan = 10*1 = 10, feb = 1*3 = 3, total = 13. *)
+  let total = query_span cache multiplied ~period:query_period ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "mul uses 1 as multiplicative identity for missing sides" 13.0 total
+
+let test_span_mapn_fill () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let query_period = p (d 2026 1 1) (d 2026 3 1) in
+  let a = single_span_series ~period:jan ~split:proportional_split 10.0 in
+  let b = single_span_series ~period:feb ~split:proportional_split 3.0 in
+  let filled =
+    Spans.mapn ~fill:1.0 [ a; b ]
+      (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc) 0.0)
+  in
   let cache = make_cache () in
   let total = query_span cache filled ~period:query_period ~reduce:sum_floats in
-  Alcotest.(check (float 1e-9)) "filled missing span sides" 15.0 total
+  Alcotest.(check (float 1e-9)) "mapn fills missing entries before reducing" 15.0 total
+
+let test_span_sum_n_way_mismatched_periods () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let query_period = p (d 2026 1 1) (d 2026 4 1) in
+  (* a: jan, feb. b: feb, mar. c: jan, mar. *)
+  let a = Spans.of_list ~split:proportional_split [ (jan, 10.0); (feb, 20.0) ] in
+  let b = Spans.of_list ~split:proportional_split [ (feb, 200.0); (mar, 300.0) ] in
+  let c = Spans.of_list ~split:proportional_split [ (jan, 1.0); (mar, 2.0) ] in
+  let total = Spans.sum [ a; b; c ] in
+  let cache = make_cache () in
+  let cells = query_span cache total ~period:query_period ~reduce:Fun.id in
+  match cells with
+  | [ Some jan_v; Some feb_v; Some mar_v ] ->
+      (* jan: 10 + 0 + 1 = 11. feb: 20 + 200 + 0 = 220. mar: 0 + 300 + 2 = 302. *)
+      Alcotest.(check (float 1e-9)) "jan sum" 11.0 jan_v;
+      Alcotest.(check (float 1e-9)) "feb sum" 220.0 feb_v;
+      Alcotest.(check (float 1e-9)) "mar sum" 302.0 mar_v
+  | _ -> Alcotest.fail "expected three aligned cells"
+
+let test_span_mul_n_way_uses_one_identity () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let query_period = p (d 2026 1 1) (d 2026 4 1) in
+  (* a: jan=2, feb=3. b: feb=4, mar=5. c: jan=10, mar=11. *)
+  let a = Spans.of_list ~split:proportional_split [ (jan, 2.0); (feb, 3.0) ] in
+  let b = Spans.of_list ~split:proportional_split [ (feb, 4.0); (mar, 5.0) ] in
+  let c = Spans.of_list ~split:proportional_split [ (jan, 10.0); (mar, 11.0) ] in
+  let total = Spans.mul [ a; b; c ] in
+  let cache = make_cache () in
+  let cells = query_span cache total ~period:query_period ~reduce:Fun.id in
+  match cells with
+  | [ Some jan_v; Some feb_v; Some mar_v ] ->
+      (* jan: 2 * 1 * 10 = 20. feb: 3 * 4 * 1 = 12. mar: 1 * 5 * 11 = 55. *)
+      Alcotest.(check (float 1e-9)) "jan mul" 20.0 jan_v;
+      Alcotest.(check (float 1e-9)) "feb mul" 12.0 feb_v;
+      Alcotest.(check (float 1e-9)) "mar mul" 55.0 mar_v
+  | _ -> Alcotest.fail "expected three aligned cells"
+
+let test_span_sum_empty_raises () =
+  Alcotest.check_raises "empty sum raises" (Invalid_argument "Spans.sum: empty list") (fun () ->
+      ignore (Series.Spans.sum []));
+  Alcotest.check_raises "empty mul raises" (Invalid_argument "Spans.mul: empty list") (fun () ->
+      ignore (Series.Spans.mul []))
 
 let test_span_extend_contiguous () =
   let open Series in
@@ -267,9 +334,9 @@ let test_non_cyclic_map_preserves_gaps () =
   let cache = make_cache () in
   let query_period = p (d 2025 12 1) (d 2026 3 1) in
   let values = query_span cache mapped ~period:query_period ~reduce:Fun.id in
-  (match values with
+  match values with
   | [ None; Some value; None ] -> Alcotest.(check (float 1e-9)) "mapped value" 20.0 value
-  | _ -> Alcotest.fail "expected leading and trailing gaps")
+  | _ -> Alcotest.fail "expected leading and trailing gaps"
 
 let test_point_const_map_map2 () =
   let open Series in
@@ -636,7 +703,11 @@ let tests =
       ("span map applies function", test_span_map_applies_function);
       ("span map2 applies function", test_span_map2_applies_function);
       ("span convenience constructors", test_span_convenience_constructors);
-      ("span convenience fill", test_span_convenience_fill);
+      ("span sum/mul use identity for missing sides", test_span_convenience_identity);
+      ("span mapn fill", test_span_mapn_fill);
+      ("span sum n-way mismatched periods", test_span_sum_n_way_mismatched_periods);
+      ("span mul n-way uses 1 as identity", test_span_mul_n_way_uses_one_identity);
+      ("span sum/mul empty list raises", test_span_sum_empty_raises);
       ("span extend contiguous", test_span_extend_contiguous);
       ( "span extend clips overlapping second series",
         test_span_extend_clips_overlapping_second_series );

@@ -47,7 +47,7 @@ let revenue =
     ()
 
 let expenses = Series.Spans.map ~label:"Expenses" (fun r -> r *. -0.30) revenue
-let income = Series.Spans.sum ~label:"Income" revenue expenses
+let income = Series.Spans.sum ~label:"Income" [ revenue; expenses ]
 ```
 
 These fifteen lines of code create a model that is deterministic, tracks all dependencies, and can be queried for values over *any* span of time.

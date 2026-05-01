@@ -30,7 +30,7 @@ let revenue =
     ()
 
 let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue
-let profit = Series.Spans.sum ~label:"Profit" revenue expenses
+let profit = Series.Spans.sum ~label:"Profit" [ revenue; expenses ]
 
 (* ----- Output ----- *)
 

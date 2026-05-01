@@ -51,6 +51,12 @@ module rec Spans : sig
         b : t;
         f : float option -> float option -> float;
       }
+    | MapN of {
+        id : series_id;
+        label : string option;
+        deps : t list;
+        f : float option list -> float;
+      }
     | Extend of { id : series_id; a : t; b : t }
     | Unfold : {
         id : series_id;
@@ -71,14 +77,15 @@ module rec Spans : sig
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> ?fill:float -> t -> t -> t
+  val sum : ?label:string -> t list -> t
   val sub : ?label:string -> ?fill:float -> t -> t -> t
-  val mul : ?label:string -> ?fill:float -> t -> t -> t
+  val mul : ?label:string -> t list -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
   val const : ?label:string -> period:Period.t -> float -> t
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
+  val mapn : ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
   val extend : t -> t -> t
 
   val unfold :
@@ -120,6 +127,12 @@ end = struct
         a : t;
         b : t;
         f : float option -> float option -> float;
+      }
+    | MapN of {
+        id : series_id;
+        label : string option;
+        deps : t list;
+        f : float option list -> float;
       }
     | Extend of { id : series_id; a : t; b : t }
     | Unfold : {
@@ -164,6 +177,7 @@ end = struct
     | Const { id; _ } -> id
     | Map { id; _ } -> id
     | Map2 { id; _ } -> id
+    | MapN { id; _ } -> id
     | Extend { id; _ } -> id
     | Unfold { id; _ } -> id
     | Unfold_from { id; _ } -> id
@@ -172,6 +186,7 @@ end = struct
     | Const { label; _ } -> label
     | Map { label; _ } -> label
     | Map2 { label; _ } -> label
+    | MapN { label; _ } -> label
     | Extend _ -> None
     | Unfold { label; _ } -> label
     | Unfold_from { label; _ } -> label
@@ -186,10 +201,31 @@ end = struct
     Map2
       { id = new_id (); label; a; b; f = (fun a b -> f (fill_option fill a) (fill_option fill b)) }
 
+  let mapn ?label ?fill deps f =
+    let f =
+      match fill with
+      | None -> f
+      | Some fill -> fun values -> f (List.map (fill_option (Some fill)) values)
+    in
+    MapN { id = new_id (); label; deps; f }
+
   let value_or_zero = Option.value ~default:0.0
-  let sum ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a +. value_or_zero b)
+
+  let sum ?label = function
+    | [] -> invalid_arg "Spans.sum: empty list"
+    | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
+    | deps ->
+        mapn ?label deps
+          (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc) 0.0)
+
+  let mul ?label = function
+    | [] -> invalid_arg "Spans.mul: empty list"
+    | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
+    | deps ->
+        mapn ?label deps
+          (List.fold_left (fun acc -> function Some v -> acc *. v | None -> acc) 1.0)
+
   let sub ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a -. value_or_zero b)
-  let mul ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a *. value_or_zero b)
   let div ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a /. value_or_zero b)
 end
 
@@ -653,6 +689,19 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
           paired
       in
       Seq.memoize seq
+  | MapN { deps; f; _ } ->
+      let dep_seqs = List.map (seq_for_span_series cache) deps in
+      let aligned = align_span_seqs dep_seqs in
+      let seq =
+        Seq.map
+          (fun row ->
+            let period =
+              match List.find_map Fun.id row with Some sp -> span_period sp | None -> assert false
+            in
+            f_mapn period row f)
+          aligned
+      in
+      Seq.memoize seq
   | Extend { a; b; _ } ->
       extend_span_seq (seq_for_span_series cache a) (seq_for_span_series cache b) |> Seq.memoize
   | Unfold { deps; init; cells; _ } ->
@@ -839,6 +888,10 @@ and prime_span_value cache touched = function
       if a_resolved && b_resolved then
         Some (f (Option.map (current_span_value cache) a) (Option.map (current_span_value cache) b))
       else None
+  | MapN { deps; f; _ } ->
+      if prime_span_options cache touched deps then
+        Some (f (List.map (Option.map (current_span_value cache)) deps))
+      else None
 
 and prime_point cache touched point =
   let key = point_key point in
@@ -959,6 +1012,9 @@ and eval_span_value cache touched iteration = function
       let a_value, a_delta = eval_span_option cache touched iteration a in
       let b_value, b_delta = eval_span_option cache touched iteration b in
       (f a_value b_value, max a_delta b_delta)
+  | MapN { deps; f; _ } ->
+      let values, delta = eval_span_options cache touched iteration deps in
+      (f values, delta)
 
 and eval_point cache touched iteration point =
   let key = point_key point in
@@ -1122,6 +1178,7 @@ let series_dependencies : type a. a series -> packed_series list = function
       | Const _ -> []
       | Map { dep; _ } -> [ Series (Span_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
+      | MapN { deps; _ } -> List.map (fun d -> Series (Span_series d)) deps
       | Extend { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
       | Unfold_from { base; deps; _ } ->
           Series (Span_series base)

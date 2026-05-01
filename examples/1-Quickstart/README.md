@@ -40,7 +40,7 @@ let revenue =
 (* Expenses are defined as a constant (negative) percent of revenue. *)
 let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue
 (* Sum revenue and expense to get profit. *)
-let profit = Series.Spans.sum ~label:"Profit" revenue expenses
+let profit = Series.Spans.sum ~label:"Profit" [ revenue; expenses ]
 ```
 
 ## Output
