@@ -23,6 +23,9 @@ val make : int -> int -> int -> t
 val lower_bound : t
 (** A library-wide lower-bound date. It is fixed at [0001-01-01]. *)
 
+val upper_bound : t
+(** A library-wide upper-bound date. It is fixed at [9999-12-31]. *)
+
 (** {1:accessors Accessors} *)
 
 val year : t -> int

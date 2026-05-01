@@ -36,9 +36,9 @@ module rec Spans : sig
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
 
-  val const : ?label:string -> period:Period.t -> value:(unit -> float) -> unit -> t
-  (** [const ?label ~period ~value ()] is a span series containing one value over [period]. The
-      value thunk is evaluated lazily through the query cache. *)
+  val const : ?label:string -> period:Period.t -> (unit -> float) -> t
+  (** [const ?label ~period value] is a span series containing one value over [period]. The value
+      thunk is evaluated lazily through the query cache. *)
 
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   (** [of_list ?label ~split cells] is a span series that yields [cells] in list order. No ordering
@@ -67,14 +67,13 @@ module rec Spans : sig
 
   val unfold_from :
     ?label:string ->
-    t ->
     deps:(unit -> 'readers Deps.t) ->
     cells:('readers -> Period.t -> (unfold_cell * Period.t) option) ->
-    unit ->
+    t ->
     t
-  (** [unfold_from ?label base ~deps ~cells ()] yields all spans from [base], then continues by
-      calling [cells] with the final period emitted by [base]. Each continuation step returns the
-      emitted cell and the next period passed to [cells]. If [base] emits no spans, [cells] is never
+  (** [unfold_from ?label ~deps ~cells base] yields all spans from [base], then continues by calling
+      [cells] with the final period emitted by [base]. Each continuation step returns the emitted
+      cell and the next period passed to [cells]. If [base] emits no spans, [cells] is never
       called. *)
 
   val unfold_rec :

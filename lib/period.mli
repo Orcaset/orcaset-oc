@@ -18,6 +18,11 @@ val make : Date.t -> Date.t -> t
 
     {b Note.} No validation is performed on date ordering. *)
 
+val unbounded : t
+(** A period spanning the full representable date range,
+    [Date.lower_bound..Date.upper_bound]. Use it to express a value that applies regardless of when
+    it is queried. *)
+
 (** {1 Accessors} *)
 
 val start : t -> Date.t

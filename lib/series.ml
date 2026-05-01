@@ -75,7 +75,7 @@ module rec Spans : sig
   val sub : ?label:string -> ?fill:float -> t -> t -> t
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
-  val const : ?label:string -> period:Period.t -> value:(unit -> float) -> unit -> t
+  val const : ?label:string -> period:Period.t -> (unit -> float) -> t
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
@@ -91,10 +91,9 @@ module rec Spans : sig
 
   val unfold_from :
     ?label:string ->
-    t ->
     deps:(unit -> 'readers Deps.t) ->
     cells:('readers -> Period.t -> (unfold_cell * Period.t) option) ->
-    unit ->
+    t ->
     t
 
   val unfold_rec :
@@ -142,10 +141,10 @@ end = struct
 
   let cell ~period ~split formula = Cell { period; split; formula }
   let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
-  let const ?label ~period ~value () = Const { id = new_id (); label; period; value }
+  let const ?label ~period value = Const { id = new_id (); label; period; value }
   let unfold ?label ~deps ~init ~cells () = Unfold { id = new_id (); label; deps; init; cells }
 
-  let unfold_from ?label base ~deps ~cells () =
+  let unfold_from ?label ~deps ~cells base =
     Unfold_from { id = new_id (); label; base; deps; cells }
 
   let unfold_rec ?label ~deps ~init ~cells () =

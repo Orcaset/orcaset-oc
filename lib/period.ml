@@ -4,6 +4,7 @@
 type t = { start : Date.t; end_ : Date.t }
 
 let make start end_ = { start; end_ }
+let unbounded = make Date.lower_bound Date.upper_bound
 let to_tuple p = (p.start, p.end_)
 
 (* Accessors *)

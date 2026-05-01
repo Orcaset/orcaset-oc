@@ -102,9 +102,8 @@ let investing_cf = capex
 
 let cf_financing =
   Series.Spans.const ~label:"Cash flow from financing"
-    ~period:(Period.make Date.lower_bound (Date.make 3000 1 1))
-    ~value:(fun () -> 0.0)
-    ()
+    ~period:Period.unbounded
+    (fun () -> 0.0)
 
 let total_cf =
   List.fold_left
@@ -118,7 +117,7 @@ let total_assets = Series.Points.sum ~label:"Total assets" cash ppe_net
 
 let common_stock =
   Series.Points.const ~label:"Common stock"
-    ~period:(Period.make Date.lower_bound (Date.make 3000 1 1))
+    ~period:Period.unbounded
     ~value:(fun () -> initial_common_stock)
     ()
 

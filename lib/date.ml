@@ -48,6 +48,7 @@ let make year month day =
   { year; month; day; jdn = compute_jdn ~year ~month ~day }
 
 let lower_bound = make 1 1 1
+let upper_bound = make 9999 12 31
 
 (* Accessors *)
 

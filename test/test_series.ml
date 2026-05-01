@@ -26,7 +26,7 @@ let single_span_series ~period ~split value = Series.Spans.of_list ~split [ (per
 let test_span_const () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let series = Spans.const ~period ~value:(fun () -> 42.0) () in
+  let series = Spans.const ~period (fun () -> 42.0) in
   let cache = make_cache () in
   let total = query_span cache series ~period ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "const span value" 42.0 total
@@ -188,7 +188,7 @@ let test_unfold_from_replays_base_and_continues () =
   let base = Spans.of_list ~split:proportional_split [ (jan, 31.0); (feb, 28.0) ] in
   let seen = ref [] in
   let series =
-    Spans.unfold_from base
+    Spans.unfold_from
       ~deps:(fun () -> Deps.none)
       ~cells:(fun () previous ->
         seen := previous :: !seen;
@@ -197,7 +197,7 @@ let test_unfold_from_replays_base_and_continues () =
         else
           let value = Float.of_int (Date.month (Period.start period)) in
           Some (Spans.cell ~period ~split:proportional_split (Formula.pure value), period))
-      ()
+      base
   in
   let cache = make_cache () in
   (match query_span cache series ~period:(p (d 2026 1 1) (d 2026 5 1)) ~reduce:Fun.id with
@@ -219,12 +219,12 @@ let test_unfold_from_empty_base_does_not_call_cells () =
   let empty = Spans.of_list ~split:proportional_split [] in
   let called = ref false in
   let series =
-    Spans.unfold_from empty
+    Spans.unfold_from
       ~deps:(fun () -> Deps.none)
       ~cells:(fun () _ ->
         called := true;
         Alcotest.fail "cells should not be called for an empty base")
-      ()
+      empty
   in
   let cache = make_cache () in
   let total = query_span cache series ~period:(p (d 2026 1 1) (d 2026 2 1)) ~reduce:sum_floats in
@@ -237,7 +237,7 @@ let test_unfold_from_dependencies () =
   let base = single_span_series ~period ~split:proportional_split 1.0 in
   let points = Points.of_list [ (d 2026 2 1, 2.0) ] in
   let series =
-    Spans.unfold_from base ~deps:(fun () -> Deps.point_dep points) ~cells:(fun _ _ -> None) ()
+    Spans.unfold_from ~deps:(fun () -> Deps.point_dep points) ~cells:(fun _ _ -> None) base
   in
   let deps = dependencies (Span_series series) in
   Alcotest.(check int) "base plus explicit dep" 2 (List.length deps);
@@ -264,11 +264,9 @@ let test_non_cyclic_map_preserves_gaps_and_evaluates_once () =
   let calls = ref 0 in
   let period = p (d 2026 1 1) (d 2026 2 1) in
   let base =
-    Spans.const ~period
-      ~value:(fun () ->
+    Spans.const ~period (fun () ->
         incr calls;
         10.0)
-      ()
   in
   let mapped = Spans.map (fun value -> value *. 2.0) base in
   let cache = make_cache () in
@@ -357,7 +355,7 @@ let test_point_accum_uses_span_changes () =
 let test_label_accessors () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let span = Spans.const ~label:"Revenue" ~period ~value:(fun () -> 42.0) () in
+  let span = Spans.const ~label:"Revenue" ~period (fun () -> 42.0) in
   let point = Points.const ~label:"Balance" ~period ~value:(fun () -> 10.0) () in
   Alcotest.(check (option string)) "span label" (Some "Revenue") (Spans.label span);
   Alcotest.(check (option string)) "point label" (Some "Balance") (Points.label point);
