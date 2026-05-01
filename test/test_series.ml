@@ -86,6 +86,19 @@ let test_span_map2_applies_function () =
   let total = query_span cache mapped ~period ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "map2 span value" 7.0 total
 
+let test_span_map2_splits_parents_before_mapping () =
+  let open Series in
+  let full_period = p (d 2026 1 1) (d 2026 4 1) in
+  let middle_month = p (d 2026 2 1) (d 2026 3 1) in
+  let a = single_span_series ~period:full_period ~split:const_split 10.0 in
+  let b = single_span_series ~period:full_period ~split:const_split 2.0 in
+  let mapped =
+    Spans.map2 a b (fun a b -> Option.value ~default:0.0 a *. Option.value ~default:0.0 b)
+  in
+  let cache = make_cache () in
+  let total = query_span cache mapped ~period:middle_month ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "map2 split parent values" 20.0 total
+
 let test_span_convenience_constructors () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
@@ -137,6 +150,21 @@ let test_span_mapn_fill () =
   let cache = make_cache () in
   let total = query_span cache filled ~period:query_period ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "mapn fills missing entries before reducing" 15.0 total
+
+let test_span_mapn_splits_parents_before_mapping () =
+  let open Series in
+  let full_period = p (d 2026 1 1) (d 2026 4 1) in
+  let middle_month = p (d 2026 2 1) (d 2026 3 1) in
+  let a = single_span_series ~period:full_period ~split:const_split 10.0 in
+  let b = single_span_series ~period:full_period ~split:const_split 2.0 in
+  let c = single_span_series ~period:full_period ~split:const_split 3.0 in
+  let mapped =
+    Spans.mapn [ a; b; c ]
+      (List.fold_left (fun acc -> function Some value -> acc *. value | None -> acc) 1.0)
+  in
+  let cache = make_cache () in
+  let total = query_span cache mapped ~period:middle_month ~reduce:sum_floats in
+  Alcotest.(check (float 1e-9)) "mapn split parent values" 60.0 total
 
 let test_span_sum_n_way_mismatched_periods () =
   let open Series in
@@ -744,9 +772,11 @@ let tests =
       ("span custom split", test_span_custom_split);
       ("span map applies function", test_span_map_applies_function);
       ("span map2 applies function", test_span_map2_applies_function);
+      ("span map2 splits parents before mapping", test_span_map2_splits_parents_before_mapping);
       ("span convenience constructors", test_span_convenience_constructors);
       ("span sum/mul use identity for missing sides", test_span_convenience_identity);
       ("span mapn fill", test_span_mapn_fill);
+      ("span mapn splits parents before mapping", test_span_mapn_splits_parents_before_mapping);
       ("span sum n-way mismatched periods", test_span_sum_n_way_mismatched_periods);
       ("span mul n-way uses 1 as identity", test_span_mul_n_way_uses_one_identity);
       ("span sum/mul empty list raises", test_span_sum_empty_raises);

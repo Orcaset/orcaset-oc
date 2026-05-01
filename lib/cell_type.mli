@@ -73,8 +73,10 @@ val const_split : split_strategy
     original span to each side. *)
 
 val split_span : Date.t -> span -> span option * span option
-(** [split_span date span] splits [span] at [date] using its underlying split function. If [date] is
-    at or outside the span's bounds, one side is [None] and the other is the original span. *)
+(** [split_span date span] splits [span] at [date]. Stored values, slices, and unary maps use a
+    split strategy to allocate the parent value; multi-input maps split their inputs first and
+    rebuild the mapped cell for each side. If [date] is at or outside the span's bounds, one side is
+    [None] and the other is the original span. *)
 
 val clip_span : Period.t -> span -> span option
 (** [clip_span period span] clips [span] to the overlap with [period]. Returns [None] when there is
