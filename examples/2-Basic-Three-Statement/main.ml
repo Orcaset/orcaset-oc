@@ -81,7 +81,7 @@ and lazy_ppe_change =
 
 and lazy_ppe_net =
   lazy
-    (Series.Points.accum ~label:"PPE net" ~init:initial_ppe ~changes:(Lazy.force lazy_ppe_change) ())
+    (Series.Points.accum ~label:"PPE net" ~init:initial_ppe (Lazy.force lazy_ppe_change))
 
 let depreciation = Lazy.force lazy_depreciation
 let ppe_net = Lazy.force lazy_ppe_net
@@ -103,7 +103,7 @@ let investing_cf = capex
 let cf_financing =
   Series.Spans.const ~label:"Cash flow from financing"
     ~period:Period.unbounded
-    (fun () -> 0.0)
+    0.0
 
 let total_cf =
   List.fold_left
@@ -112,18 +112,16 @@ let total_cf =
 
 (* Balance Sheet *)
 
-let cash = Series.Points.accum ~label:"Cash" ~init:initial_cash ~changes:total_cf ()
+let cash = Series.Points.accum ~label:"Cash" ~init:initial_cash total_cf
 let total_assets = Series.Points.sum ~label:"Total assets" cash ppe_net
 
 let common_stock =
   Series.Points.const ~label:"Common stock"
     ~period:Period.unbounded
-    ~value:(fun () -> initial_common_stock)
-    ()
+    initial_common_stock
 
 let retained_earnings =
-  Series.Points.accum ~label:"Retained earnings" ~init:initial_retained_earnings ~changes:net_income
-    ()
+  Series.Points.accum ~label:"Retained earnings" ~init:initial_retained_earnings net_income
 
 let total_equity_liabilities =
   Series.Points.sum ~label:"Total equity and liabilities" common_stock retained_earnings

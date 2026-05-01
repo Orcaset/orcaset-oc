@@ -2,10 +2,10 @@ open Orcaset
 
 let d y m day = Date.make y m day
 let p s e = Period.make s e
-let span_series ~label ~period value = Series.Spans.const ?label ~period (fun () -> value)
+let span_series ~label ~period value = Series.Spans.const ?label ~period value
 
 let point_series ~label ~period value =
-  Series.Points.const ?label ~period ~value:(fun () -> value) ()
+  Series.Points.const ?label ~period value
 
 let test_eval_periods_preserves_labels () =
   let period = p (d 2026 1 1) (d 2026 2 1) in

@@ -6,7 +6,7 @@ type split_part = private { period : Period.t; value : float -> float }
     span's value. *)
 
 type span = private
-  | Value of { id : int; period : Period.t; value : unit -> float; split : split_strategy }
+  | Value of { id : int; period : Period.t; value : float; split : split_strategy }
   | Slice of {
       id : int;
       period : Period.t;
@@ -31,7 +31,7 @@ val split_part : period:Period.t -> value:(float -> float) -> split_part
 (** [split_part ~period ~value] creates one side of an interior split. *)
 
 type point = private
-  | Const of { id : int; date : Date.t; value : unit -> float }
+  | Const of { id : int; date : Date.t; value : float }
   | Map of { id : int; dep : point; f : float -> float }
   | Derived of { id : int; date : Date.t; deps : point option list; f : float option list -> float }
   | Accum of {
@@ -45,7 +45,7 @@ type point = private
 type _ cell = Point_cell : point -> point cell | Span_cell : span -> span cell
 
 (* Point operations *)
-val p_const : Date.t -> (unit -> float) -> point
+val p_const : Date.t -> float -> point
 val p_map : point -> (float -> float) -> point
 val p_derived : Date.t -> point option list -> (float option list -> float) -> point
 val p_accum : Date.t -> float -> point option -> span option list -> point
@@ -53,7 +53,7 @@ val point_date : point -> Date.t
 val point_id : point -> int
 
 (* Span operations *)
-val f_value : Period.t -> (unit -> float) -> split_strategy -> span
+val f_value : Period.t -> float -> split_strategy -> span
 val f_map : span -> (float -> float) -> span
 
 val f_map2 :

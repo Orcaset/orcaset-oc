@@ -4,7 +4,7 @@
 type split_part = { period : Period.t; value : float -> float }
 
 type span =
-  | Value of { id : int; period : Period.t; value : unit -> float; split : split_strategy }
+  | Value of { id : int; period : Period.t; value : float; split : split_strategy }
   | Slice of {
       id : int;
       period : Period.t;
@@ -26,7 +26,7 @@ and split_strategy = span -> Date.t -> split_part * split_part
 let split_part ~period ~value = { period; value }
 
 type point =
-  | Const of { id : int; date : Date.t; value : unit -> float }
+  | Const of { id : int; date : Date.t; value : float }
   | Map of { id : int; dep : point; f : float -> float }
   | Derived of { id : int; date : Date.t; deps : point option list; f : float option list -> float }
   | Accum of {

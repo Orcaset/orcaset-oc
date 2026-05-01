@@ -36,9 +36,8 @@ module rec Spans : sig
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
 
-  val const : ?label:string -> period:Period.t -> (unit -> float) -> t
-  (** [const ?label ~period value] is a span series containing one value over [period]. The value
-      thunk is evaluated lazily through the query cache. *)
+  val const : ?label:string -> period:Period.t -> float -> t
+  (** [const ?label ~period value] is a span series containing one value over [period]. *)
 
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   (** [of_list ?label ~split cells] is a span series that yields [cells] in list order. No ordering
@@ -73,8 +72,8 @@ module rec Spans : sig
     t
   (** [unfold_from ?label ~deps ~cells base] yields all spans from [base], then continues by calling
       [cells] with the final period emitted by [base]. Each continuation step returns the emitted
-      cell and the next period passed to [cells]. If [base] emits no spans, [cells] is never
-      called. *)
+      cell and the next period passed to [cells]. If [base] emits no spans, [cells] is never called.
+  *)
 
   val unfold_rec :
     ?label:string ->
@@ -105,9 +104,8 @@ and Points : sig
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
 
-  val const : ?label:string -> period:Period.t -> value:(unit -> float) -> unit -> t
-  (** [const ?label ~period ~value ()] is a point series with [value] at dates contained by
-      [period]. The value thunk is evaluated lazily through the query cache. *)
+  val const : ?label:string -> period:Period.t -> float -> t
+  (** [const ?label ~period value] is a point series with [value] at dates contained by [period]. *)
 
   val of_list : ?label:string -> (Date.t * float) list -> t
   (** [of_list ?label values] is a sparse point series with exact values at the listed dates. No
@@ -121,9 +119,9 @@ and Points : sig
       [fill] is provided, missing sides are passed to [f] as [Some fill]; otherwise they are passed
       as [None]. *)
 
-  val accum : ?label:string -> init:float -> changes:Spans.t -> unit -> t
-  (** [accum ?label ~init ~changes ()] is a point series whose value starts at [init] and changes by
-      the cumulative span values in [changes]. *)
+  val accum : ?label:string -> init:float -> Spans.t -> t
+  (** [accum ?label ~init changes] is a point series whose value starts at [init] and changes by the
+      cumulative span values in [changes]. *)
 
   val label : t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)

@@ -26,7 +26,7 @@ let single_span_series ~period ~split value = Series.Spans.of_list ~split [ (per
 let test_span_const () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let series = Spans.const ~period (fun () -> 42.0) in
+  let series = Spans.const ~period 42.0 in
   let cache = make_cache () in
   let total = query_span cache series ~period ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "const span value" 42.0 total
@@ -259,30 +259,24 @@ let test_sum_float_opts () =
     "fills none values" 12.0
     (sum_float_opt ~fill:2.0 [ Some 3.0; None; Some 5.0; None ])
 
-let test_non_cyclic_map_preserves_gaps_and_evaluates_once () =
+let test_non_cyclic_map_preserves_gaps () =
   let open Series in
-  let calls = ref 0 in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let base =
-    Spans.const ~period (fun () ->
-        incr calls;
-        10.0)
-  in
+  let base = Spans.const ~period 10.0 in
   let mapped = Spans.map (fun value -> value *. 2.0) base in
   let cache = make_cache () in
   let query_period = p (d 2025 12 1) (d 2026 3 1) in
   let values = query_span cache mapped ~period:query_period ~reduce:Fun.id in
   (match values with
   | [ None; Some value; None ] -> Alcotest.(check (float 1e-9)) "mapped value" 20.0 value
-  | _ -> Alcotest.fail "expected leading and trailing gaps");
-  Alcotest.(check int) "constant evaluated once" 1 !calls
+  | _ -> Alcotest.fail "expected leading and trailing gaps")
 
 let test_point_const_map_map2 () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
   let date = d 2026 1 15 in
-  let a = Points.const ~period ~value:(fun () -> 10.0) () in
-  let b = Points.const ~period ~value:(fun () -> 3.0) () in
+  let a = Points.const ~period 10.0 in
+  let b = Points.const ~period 3.0 in
   let mapped = Points.map (fun value -> value *. 2.0) a in
   let mapped2 =
     Points.map2 a b (fun a b -> Option.value ~default:0.0 a +. Option.value ~default:0.0 b)
@@ -309,8 +303,8 @@ let test_point_convenience_constructors () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
   let date = d 2026 1 15 in
-  let a = Points.const ~period ~value:(fun () -> 10.0) () in
-  let b = Points.const ~period ~value:(fun () -> 2.0) () in
+  let a = Points.const ~period 10.0 in
+  let b = Points.const ~period 2.0 in
   let cache = make_cache () in
   let check name expected series =
     Alcotest.(check (float 1e-9)) name expected (query_point cache series ~date ~default:0.0)
@@ -331,8 +325,8 @@ let test_point_convenience_fill () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
-  let a = Points.const ~period:jan ~value:(fun () -> 10.0) () in
-  let b = Points.const ~period:feb ~value:(fun () -> 3.0) () in
+  let a = Points.const ~period:jan 10.0 in
+  let b = Points.const ~period:feb 3.0 in
   let filled = Points.sum ~fill:1.0 a b in
   let cache = make_cache () in
   Alcotest.(check (float 1e-9))
@@ -343,7 +337,7 @@ let test_point_accum_uses_span_changes () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
   let changes = single_span_series ~period ~split:proportional_split 10.0 in
-  let balance = Points.accum ~init:100.0 ~changes () in
+  let balance = Points.accum ~init:100.0 changes in
   let cache = make_cache () in
   Alcotest.(check (float 1e-9))
     "initial balance" 100.0
@@ -355,8 +349,8 @@ let test_point_accum_uses_span_changes () =
 let test_label_accessors () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let span = Spans.const ~label:"Revenue" ~period (fun () -> 42.0) in
-  let point = Points.const ~label:"Balance" ~period ~value:(fun () -> 10.0) () in
+  let span = Spans.const ~label:"Revenue" ~period 42.0 in
+  let point = Points.const ~label:"Balance" ~period 10.0 in
   Alcotest.(check (option string)) "span label" (Some "Revenue") (Spans.label span);
   Alcotest.(check (option string)) "point label" (Some "Balance") (Points.label point);
   Alcotest.(check (option string)) "wrapped span label" (Some "Revenue") (label (Span_series span));
@@ -626,7 +620,7 @@ let test_point_span_feedback_converges () =
              in
              Some (Spans.cell ~period ~split:proportional_split formula, true))
          ())
-  and balance_lazy = lazy (Points.accum ~init:100.0 ~changes:(Lazy.force interest_lazy) ()) in
+  and balance_lazy = lazy (Points.accum ~init:100.0 (Lazy.force interest_lazy)) in
   let balance = Lazy.force balance_lazy in
   let cache = make_cache () in
   let ending_balance = query_point cache balance ~date:end_ ~default:0.0 in
@@ -654,8 +648,7 @@ let tests =
       ("unfold_from empty base does not call cells", test_unfold_from_empty_base_does_not_call_cells);
       ("unfold_from dependencies", test_unfold_from_dependencies);
       ("sum_float_opts", test_sum_float_opts);
-      ( "non-cyclic map preserves gaps and evaluates once",
-        test_non_cyclic_map_preserves_gaps_and_evaluates_once );
+      ("non-cyclic map preserves gaps", test_non_cyclic_map_preserves_gaps);
       ("point const/map/map2", test_point_const_map_map2);
       ("point of_list", test_point_of_list);
       ("point convenience constructors", test_point_convenience_constructors);

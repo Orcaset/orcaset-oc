@@ -42,7 +42,7 @@ module rec Spans : sig
   type unfold_cell
 
   type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Const of { id : series_id; label : string option; period : Period.t; value : float }
     | Map of { id : series_id; label : string option; dep : t; f : float -> float }
     | Map2 of {
         id : series_id;
@@ -75,7 +75,7 @@ module rec Spans : sig
   val sub : ?label:string -> ?fill:float -> t -> t -> t
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
-  val const : ?label:string -> period:Period.t -> (unit -> float) -> t
+  val const : ?label:string -> period:Period.t -> float -> t
   val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
@@ -112,7 +112,7 @@ end = struct
   type unfold_cell = Cell of { period : Period.t; split : split; formula : float Formula.t }
 
   type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Const of { id : series_id; label : string option; period : Period.t; value : float }
     | Map of { id : series_id; label : string option; dep : t; f : float -> float }
     | Map2 of {
         id : series_id;
@@ -195,7 +195,7 @@ end
 
 and Points : sig
   type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Const of { id : series_id; label : string option; period : Period.t; value : float }
     | List of { id : series_id; label : string option; values : (Date.t * float) list }
     | Map of { id : series_id; label : string option; dep : t; f : float -> float }
     | Map2 of {
@@ -213,16 +213,16 @@ and Points : sig
   val sub : ?label:string -> ?fill:float -> t -> t -> t
   val mul : ?label:string -> ?fill:float -> t -> t -> t
   val div : ?label:string -> ?fill:float -> t -> t -> t
-  val const : ?label:string -> period:Period.t -> value:(unit -> float) -> unit -> t
+  val const : ?label:string -> period:Period.t -> float -> t
   val of_list : ?label:string -> (Date.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
-  val accum : ?label:string -> init:float -> changes:Spans.t -> unit -> t
+  val accum : ?label:string -> init:float -> Spans.t -> t
   val id : t -> series_id
   val label : t -> string option
 end = struct
   type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : unit -> float }
+    | Const of { id : series_id; label : string option; period : Period.t; value : float }
     | List of { id : series_id; label : string option; values : (Date.t * float) list }
     | Map of { id : series_id; label : string option; dep : t; f : float -> float }
     | Map2 of {
@@ -234,9 +234,9 @@ end = struct
       }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
-  let const ?label ~period ~value () = Const { id = new_id (); label; period; value }
+  let const ?label ~period value = Const { id = new_id (); label; period; value }
   let of_list ?label values = List { id = new_id (); label; values }
-  let accum ?label ~init ~changes () = Accum { id = new_id (); label; init; changes }
+  let accum ?label ~init changes = Accum { id = new_id (); label; init; changes }
 
   let id = function
     | Const { id; _ } -> id
@@ -582,9 +582,9 @@ let make_unfold_producer ~init ~cells ~register_formula =
 
 let register_unfold_formula cache ~period ~split formula =
   let span =
-    f_value period
-      (fun () -> failwith "formula span must be evaluated through Series")
-      (cell_split_strategy split)
+    (* Formula-backed spans store a dummy scalar here; evaluation is redirected through
+       [cache.span_formulas] before this value is ever consulted. *)
+    f_value period Float.nan (cell_split_strategy split)
   in
   Hashtbl.replace cache.span_formulas (span_id span) formula;
   span
@@ -723,7 +723,7 @@ and query_point_series cache series date : point option =
             if Period.contains date period then Some (p_const date value) else None
         | List { values; _ } -> (
             match List.find_opt (fun (value_date, _) -> Date.equal value_date date) values with
-            | Some (_, value) -> Some (p_const date (fun () -> value))
+            | Some (_, value) -> Some (p_const date value)
             | None -> None)
         | Map { dep; f; _ } -> (
             match query_point_series cache dep date with
@@ -825,7 +825,7 @@ let rec prime_span cache touched span =
 and prime_span_value cache touched = function
   | Value { id; value; _ } -> (
       match Hashtbl.find_opt cache.span_formulas id with
-      | None -> Some (value ())
+      | None -> Some value
       | Some formula ->
           if prime_formula cache touched formula then Some (resolved_formula_value cache formula)
           else None)
@@ -857,7 +857,7 @@ and prime_point cache touched point =
       | None -> false)
 
 and prime_point_value cache touched = function
-  | Const { value; _ } -> Some (value ())
+  | Const { value; _ } -> Some value
   | Map { dep; f; _ } ->
       if prime_point cache touched dep then Some (f (current_point_value cache dep)) else None
   | Derived { deps; f; _ } ->
@@ -947,7 +947,7 @@ let rec eval_span cache touched iteration span =
 and eval_span_value cache touched iteration = function
   | Value { id; value; _ } -> (
       match Hashtbl.find_opt cache.span_formulas id with
-      | None -> (value (), 0.0)
+      | None -> (value, 0.0)
       | Some formula -> eval_formula cache touched iteration formula)
   | Slice { dep; value; _ } ->
       let dep_value, delta = eval_span cache touched iteration dep in
@@ -978,7 +978,7 @@ and eval_point cache touched iteration point =
       eval_point cache touched iteration point
 
 and eval_point_value cache touched iteration = function
-  | Const { value; _ } -> (value (), 0.0)
+  | Const { value; _ } -> (value, 0.0)
   | Map { dep; f; _ } ->
       let dep_value, delta = eval_point cache touched iteration dep in
       (f dep_value, delta)
