@@ -3,9 +3,7 @@ open Orcaset
 let d y m day = Date.make y m day
 let p s e = Period.make s e
 let span_series ~label ~period value = Series.Spans.const ?label ~period value
-
-let point_series ~label ~period value =
-  Series.Points.const ?label ~period value
+let point_series ~label ~period value = Series.Points.const ?label ~period value
 
 let test_eval_periods_preserves_labels () =
   let period = p (d 2026 1 1) (d 2026 2 1) in
@@ -39,14 +37,43 @@ let test_eval_periods_point_values_include_shared_boundaries () =
   | Stmt.RLine { values = Some (Stmt.Point_values values); _ } ->
       Alcotest.(check (list (pair Helpers.date (float 1e-9))))
         "point values"
-        [
-          (d 2026 1 1, 100.0);
-          (d 2026 2 1, 100.0);
-          (d 2026 3 1, 100.0);
-          (d 2026 4 1, 100.0);
-        ]
+        [ (d 2026 1 1, 100.0); (d 2026 2 1, 100.0); (d 2026 3 1, 100.0); (d 2026 4 1, 100.0) ]
         values
   | _ -> Alcotest.fail "expected point values for period statement"
+
+let test_eval_periods_supports_nested_span_totals () =
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let revenue = span_series ~label:(Some "Revenue") ~period 100.0 in
+  let costs = span_series ~label:(Some "Costs") ~period (-30.0) in
+  let gross_profit = span_series ~label:(Some "Gross profit") ~period 70.0 in
+  let opex = span_series ~label:(Some "Operating expenses") ~period (-20.0) in
+  let net_income = span_series ~label:(Some "Net income") ~period 50.0 in
+  let stmt =
+    Stmt.span_total net_income
+      [ Stmt.span_total gross_profit (Stmt.span_lines [ revenue; costs ]); Stmt.span_line opex ]
+  in
+  match Stmt.eval_periods [ period ] stmt with
+  | Stmt.RTotal
+      {
+        label = Some "Net income";
+        values = Some (Stmt.Span_values [ (_, Some 50.0) ]);
+        children =
+          [
+            Stmt.RTotal
+              {
+                label = Some "Gross profit";
+                values = Some (Stmt.Span_values [ (_, Some 70.0) ]);
+                children =
+                  [
+                    Stmt.RLine { label = Some "Revenue"; values = Some (Stmt.Span_values _); _ };
+                    Stmt.RLine { label = Some "Costs"; values = Some (Stmt.Span_values _); _ };
+                  ];
+              };
+            Stmt.RLine { label = Some "Operating expenses"; values = Some (Stmt.Span_values _); _ };
+          ];
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected nested span totals"
 
 let test_fixed_width_renders_totals_and_indented_children () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
@@ -120,6 +147,7 @@ let tests =
       ("eval_dates preserves label without values", test_eval_dates_preserves_label_without_values);
       ( "eval_periods point values include shared boundaries",
         test_eval_periods_point_values_include_shared_boundaries );
+      ("eval_periods supports nested span totals", test_eval_periods_supports_nested_span_totals);
       ( "fixed_width renders totals and indented children",
         test_fixed_width_renders_totals_and_indented_children );
       ( "fixed_width renders point stub unknown labels and group spacing",

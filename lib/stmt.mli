@@ -19,14 +19,22 @@ val group : stmt list -> stmt
 val span_line : Series.Spans.t -> stmt
 (** [span_line series] creates a line statement with a span series. *)
 
-val span_total : Series.Spans.t -> Series.Spans.t list -> stmt
-(** [span_total total children] creates a total statement with a span total and span children. *)
+val span_lines : Series.Spans.t list -> stmt list
+(** [span_lines series] converts each span series in [series] to a line statement. *)
+
+val span_total : Series.Spans.t -> stmt list -> stmt
+(** [span_total total children] creates a total statement with a span total and statement children.
+*)
 
 val point_line : Series.Points.t -> stmt
 (** [point_line series] creates a line statement with a point series. *)
 
-val point_total : Series.Points.t -> Series.Points.t list -> stmt
-(** [point_total total children] creates a total statement with a point total and point children. *)
+val point_lines : Series.Points.t list -> stmt list
+(** [point_lines series] converts each point series in [series] to a line statement. *)
+
+val point_total : Series.Points.t -> stmt list -> stmt
+(** [point_total total children] creates a total statement with a point total and statement
+    children. *)
 
 (* Evaluators *)
 

@@ -120,13 +120,25 @@ let bs_check = Series.Points.sub ~label:"Balance sheet check" total_assets total
 (* ----- Output ----- *)
 let income_stmt =
   Stmt.span_total net_income
-    [ revenue; cost_of_revenue; gross_profit; opex; depreciation; income_tax; net_income ]
+    [
+      Stmt.span_total gross_profit (Stmt.span_lines [ revenue; cost_of_revenue ]);
+      Stmt.span_line opex;
+      Stmt.span_line depreciation;
+      Stmt.span_line income_tax;
+      Stmt.span_line net_income;
+    ]
 
-let cash_flow_stmt = Stmt.span_total total_cf [ operating_cf; investing_cf; cf_financing; total_cf ]
+let cash_flow_stmt =
+  Stmt.span_total total_cf (Stmt.span_lines [ operating_cf; investing_cf; cf_financing; total_cf ])
 
 let balance_sheet_stmt =
-  Stmt.point_total total_assets
-    [ cash; ppe_net; common_stock; retained_earnings; total_equity_liabilities; bs_check ]
+  Stmt.group
+    [
+      Stmt.point_total total_assets (Stmt.point_lines [ cash; ppe_net ]);
+      Stmt.point_total total_equity_liabilities
+        (Stmt.point_lines [ common_stock; retained_earnings ]);
+      Stmt.point_line bs_check;
+    ]
 
 let total_stmt = Stmt.group [ income_stmt; cash_flow_stmt; balance_sheet_stmt ]
 

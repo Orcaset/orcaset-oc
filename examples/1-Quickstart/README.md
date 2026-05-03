@@ -56,7 +56,7 @@ let () =
     |> Seq.take output_periods |> List.of_seq
   in
   (* Create a statement and evaluate it over the periods *)
-  let stmt = Stmt.span_total profit [ revenue; expenses ] in
+  let stmt = Stmt.span_total profit (Stmt.span_lines [ revenue; expenses ]) in
   let resolved = Stmt.eval_periods periods stmt in
   (* Print the statement using a fixed-width formatter *)
   Printf.printf "\n%s\n\n" (Stmt.fixed_width resolved)

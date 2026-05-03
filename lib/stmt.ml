@@ -21,13 +21,11 @@ let span_series series = Series.Series (Series.Span_series series)
 let point_series series = Series.Series (Series.Point_series series)
 let group children = Group children
 let span_line series = Line (span_series series)
+let span_lines = List.map span_line
+let span_total total children = Total { total = span_series total; children }
 let point_line series = Line (point_series series)
-
-let span_total total children =
-  Total { total = span_series total; children = List.map span_line children }
-
-let point_total total children =
-  Total { total = point_series total; children = List.map point_line children }
+let point_lines = List.map point_line
+let point_total total children = Total { total = point_series total; children }
 
 (* ----- Evaluators ----- *)
 

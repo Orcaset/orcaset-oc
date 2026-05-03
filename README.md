@@ -57,7 +57,7 @@ These fifteen lines of code create a model that is deterministic, tracks all dep
 While you can query granular results for specific series, it's often helpful to view many line items over many periods in a statement format. Orcaset's `Stmt` module allows users to create and query over different statement views.
 
 ```ocaml
-let stmt = Stmt.span_total income [ revenue; expenses ]
+let stmt = Stmt.span_total income (Stmt.span_lines [ revenue; expenses ])
 
 let query_periods =
   Period.make_seq ~start:(Period.start start_period) ~offset |> Seq.take 4 |> List.of_seq
