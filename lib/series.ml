@@ -58,6 +58,7 @@ module rec Spans : sig
         f : float option list -> float;
       }
     | Extend of { id : series_id; a : t; b : t }
+    | Clipped of { id : series_id; after : Date.t; until : Date.t; base : t }
     | Unfold : {
         id : series_id;
         label : string option;
@@ -87,6 +88,9 @@ module rec Spans : sig
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
   val mapn : ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
   val extend : t -> t -> t
+  val clipped : after:Date.t -> until:Date.t -> t -> t
+  val after : Date.t -> t -> t
+  val until : Date.t -> t -> t
 
   val unfold :
     ?label:string ->
@@ -135,6 +139,7 @@ end = struct
         f : float option list -> float;
       }
     | Extend of { id : series_id; a : t; b : t }
+    | Clipped of { id : series_id; after : Date.t; until : Date.t; base : t }
     | Unfold : {
         id : series_id;
         label : string option;
@@ -155,6 +160,13 @@ end = struct
   let cell ~period ~split formula = Cell { period; split; formula }
   let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
   let const ?label ~period value = Const { id = new_id (); label; period; value }
+
+  let clipped ~after ~until base =
+    if Date.(until < after) then invalid_arg "Spans.clipped: until before after";
+    Clipped { id = new_id (); after; until; base }
+
+  let after date base = clipped ~after:date ~until:Date.upper_bound base
+  let until date base = clipped ~after:Date.lower_bound ~until:date base
   let unfold ?label ~deps ~init ~cells () = Unfold { id = new_id (); label; deps; init; cells }
 
   let unfold_from ?label ~deps ~cells base =
@@ -179,15 +191,17 @@ end = struct
     | Map2 { id; _ } -> id
     | MapN { id; _ } -> id
     | Extend { id; _ } -> id
+    | Clipped { id; _ } -> id
     | Unfold { id; _ } -> id
     | Unfold_from { id; _ } -> id
 
-  let label = function
+  let rec label = function
     | Const { label; _ } -> label
     | Map { label; _ } -> label
     | Map2 { label; _ } -> label
     | MapN { label; _ } -> label
     | Extend _ -> None
+    | Clipped { base; _ } -> label base
     | Unfold { label; _ } -> label
     | Unfold_from { label; _ } -> label
 
@@ -259,10 +273,7 @@ and Points : sig
   val of_list : ?label:string -> (Date.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
   val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
-
-  val mapn :
-    ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
-
+  val mapn : ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
   val accum : ?label:string -> init:float -> Spans.t -> t
   val id : t -> series_id
   val label : t -> string option
@@ -705,6 +716,24 @@ let extend_span_seq a b =
   in
   continue_a None a
 
+let clipped_span_seq ~after ~until seq =
+  if Date.equal after until then Seq.empty
+  else
+    let bounds = Period.make after until in
+    let rec go seq () =
+      match seq () with
+      | Seq.Nil -> Seq.Nil
+      | Seq.Cons (span, rest) -> (
+          let span_start, span_end = Period.to_tuple (span_period span) in
+          if Date.(span_end <= after) then go rest ()
+          else if Date.(span_start >= until) then Seq.Nil
+          else
+            match clip_span bounds span with
+            | Some clipped -> Seq.Cons (clipped, go rest)
+            | None -> go rest ())
+    in
+    go seq
+
 let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq.t =
   match series with
   | Const { period; value; _ } ->
@@ -743,6 +772,8 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
       Seq.memoize seq
   | Extend { a; b; _ } ->
       extend_span_seq (seq_for_span_series cache a) (seq_for_span_series cache b) |> Seq.memoize
+  | Clipped { after; until; base; _ } ->
+      clipped_span_seq ~after ~until (seq_for_span_series cache base) |> Seq.memoize
   | Unfold { deps; init; cells; _ } ->
       let readers = Deps.run (deps ()) in
       make_unfold_producer ~init ~cells:(cells readers)
@@ -753,23 +784,32 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
         ~register_formula:(register_unfold_formula cache)
       |> Seq.memoize
 
-and query_span_series cache series period : span option list =
-  let series_id = Spans.id series in
-  let series_entry_opt = Hashtbl.find_opt cache.span series_id in
-  let { cells; sequence } =
-    match series_entry_opt with
-    | Some entry -> entry
-    | None ->
-        let c = { cells = SpanCellCache.create 16; sequence = seq_for_span_series cache series } in
-        Hashtbl.add cache.span series_id c;
-        c
-  in
-  match SpanCellCache.find_opt cells period with
-  | Some values -> values
-  | None ->
-      let spans = collect_spans sequence period in
-      SpanCellCache.replace cells period spans;
-      spans
+and query_span_series cache (series : Spans.t) period : span option list =
+  match series with
+  | Clipped { after; until; _ }
+    when Date.(until <= after)
+         || Date.(Period.end_ period <= after)
+         || Date.(Period.start period >= until) ->
+      []
+  | _ -> (
+      let series_id = Spans.id series in
+      let series_entry_opt = Hashtbl.find_opt cache.span series_id in
+      let { cells; sequence } =
+        match series_entry_opt with
+        | Some entry -> entry
+        | None ->
+            let c =
+              { cells = SpanCellCache.create 16; sequence = seq_for_span_series cache series }
+            in
+            Hashtbl.add cache.span series_id c;
+            c
+      in
+      match SpanCellCache.find_opt cells period with
+      | Some values -> values
+      | None ->
+          let spans = collect_spans sequence period in
+          SpanCellCache.replace cells period spans;
+          spans)
 
 and get_accum_entry cache point_series_id changes : accum_cache_entry =
   match Hashtbl.find_opt cache.accum point_series_id with
@@ -821,9 +861,7 @@ and query_point_series cache series date : point option =
             let oa, ob = (query_point_series cache a date, query_point_series cache b date) in
             Some (p_derived date [ oa; ob ] (function [ va; vb ] -> f va vb | _ -> assert false))
         | MapN { deps; f; _ } ->
-            let child_opts =
-              List.map (fun dep -> query_point_series cache dep date) deps
-            in
+            let child_opts = List.map (fun dep -> query_point_series cache dep date) deps in
             Some (p_derived date child_opts f)
         | Accum { init; changes; _ } -> Some (query_accum cache series_id init changes date)
       in
@@ -1225,6 +1263,7 @@ let series_dependencies : type a. a series -> packed_series list = function
       | Map2 { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
       | MapN { deps; _ } -> List.map (fun d -> Series (Span_series d)) deps
       | Extend { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
+      | Clipped { base; _ } -> [ Series (Span_series base) ]
       | Unfold_from { base; deps; _ } ->
           Series (Span_series base)
           :: (Deps.dependencies (deps ())

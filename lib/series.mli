@@ -60,6 +60,17 @@ module rec Spans : sig
   (** [extend a b] yields all spans from [a], then continues with [b]. If [a] ends inside a span
       from [b], that first overlapping span from [b] is clipped to start at [a]'s end. *)
 
+  val clipped : after:Date.t -> until:Date.t -> t -> t
+  (** [clipped ~after ~until series] exposes only the portion of [series] from [after] [until].
+      Partially overlapping spans are clipped with their existing split strategy. Raises
+      [Invalid_argument] if [until] is before [after]. *)
+
+  val after : Date.t -> t -> t
+  (** [after date series] exposes the portion of [series] from [date] inclusive onward. *)
+
+  val until : Date.t -> t -> t
+  (** [until date series] exposes the portion of [series] before [date]. *)
+
   val unfold :
     ?label:string ->
     deps:(unit -> 'readers Deps.t) ->
