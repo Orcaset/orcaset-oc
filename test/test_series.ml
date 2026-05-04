@@ -275,6 +275,100 @@ let test_span_extend_empty_first_series () =
   let total = query_span cache extended ~period:feb ~reduce:sum_floats in
   Alcotest.(check (float 1e-9)) "empty first series" 28.0 total
 
+let test_span_clipped_bounds () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let base = Spans.of_list ~split:proportional_split [ (jan, 31.0); (feb, 28.0); (mar, 31.0) ] in
+  let clipped = Spans.clipped ~after:(d 2026 1 15) ~until:(d 2026 3 15) base in
+  let cache = make_cache () in
+  match query_span cache clipped ~period:(p (d 2026 1 1) (d 2026 4 1)) ~reduce:Fun.id with
+  | [ None; Some jan_value; Some feb_value; Some mar_value; None ] ->
+      Alcotest.(check (float 1e-9)) "leading partial" 17.0 jan_value;
+      Alcotest.(check (float 1e-9)) "contained span" 28.0 feb_value;
+      Alcotest.(check (float 1e-9)) "trailing partial" 14.0 mar_value
+  | _ -> Alcotest.fail "expected clipped spans with boundary gaps"
+
+let test_span_clipped_one_sided_constructors () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let base = Spans.of_list ~split:proportional_split [ (jan, 31.0); (feb, 28.0); (mar, 31.0) ] in
+  let cache = make_cache () in
+  let from_mid_feb =
+    query_span cache
+      (Spans.after (d 2026 2 15) base)
+      ~period:(p (d 2026 1 1) (d 2026 4 1))
+      ~reduce:Fun.id
+  in
+  let until_mid_feb =
+    query_span cache
+      (Spans.until (d 2026 2 15) base)
+      ~period:(p (d 2026 1 1) (d 2026 4 1))
+      ~reduce:Fun.id
+  in
+  (match from_mid_feb with
+  | [ None; Some feb_value; Some mar_value ] ->
+      Alcotest.(check (float 1e-9)) "after partial" 14.0 feb_value;
+      Alcotest.(check (float 1e-9)) "after following span" 31.0 mar_value
+  | _ -> Alcotest.fail "expected one-sided after clip");
+  match until_mid_feb with
+  | [ Some jan_value; Some feb_value; None ] ->
+      Alcotest.(check (float 1e-9)) "until preceding span" 31.0 jan_value;
+      Alcotest.(check (float 1e-9)) "until partial" 14.0 feb_value
+  | _ -> Alcotest.fail "expected one-sided until clip"
+
+let test_span_clipped_zero_width_empty () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let base = single_span_series ~period:jan ~split:proportional_split 31.0 in
+  let clipped = Spans.clipped ~after:(d 2026 1 15) ~until:(d 2026 1 15) base in
+  let cache = make_cache () in
+  match query_span cache clipped ~period:jan ~reduce:Fun.id with
+  | [] -> ()
+  | _ -> Alcotest.fail "expected no values for a zero-width clip"
+
+let test_span_clipped_reversed_bounds_raise () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let base = single_span_series ~period ~split:proportional_split 31.0 in
+  Alcotest.check_raises "reversed bounds raise"
+    (Invalid_argument "Spans.clipped: until before after") (fun () ->
+      ignore (Spans.clipped ~after:(d 2026 2 1) ~until:(d 2026 1 1) base))
+
+let test_span_clipped_outside_queries_do_not_force_base () =
+  let open Series in
+  let forced = ref false in
+  let base =
+    Spans.unfold ~init:()
+      ~deps:(fun () -> Deps.none)
+      ~cells:(fun () () ->
+        forced := true;
+        Alcotest.fail "base sequence should not be forced")
+      ()
+  in
+  let clipped = Spans.clipped ~after:(d 2026 2 1) ~until:(d 2026 3 1) base in
+  let cache = make_cache () in
+  let before = query_span cache clipped ~period:(p (d 2026 1 1) (d 2026 2 1)) ~reduce:Fun.id in
+  let after = query_span cache clipped ~period:(p (d 2026 3 1) (d 2026 4 1)) ~reduce:Fun.id in
+  (match (before, after) with
+  | [], [] -> ()
+  | _ -> Alcotest.fail "expected outside queries to be empty");
+  Alcotest.(check bool) "base not forced" false !forced
+
+let test_span_clipped_label_and_dependencies () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let base = Spans.const ~label:"Revenue" ~period 31.0 in
+  let clipped = Spans.clipped ~after:(d 2026 1 15) ~until:(d 2026 2 1) base in
+  Alcotest.(check (option string)) "label" (Some "Revenue") (Spans.label clipped);
+  match dependencies (Span_series clipped) with
+  | [ { series = Series (Span_series dep); dependencies = []; is_back_edge = false } ] ->
+      Alcotest.(check bool) "base dependency" true (dep == base)
+  | _ -> Alcotest.fail "expected clipped series to depend on its base"
+
 let test_unfold_from_replays_base_and_continues () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
@@ -425,13 +519,11 @@ let test_point_convenience_identity () =
   let cache = make_cache () in
   let summed = Points.sum [ a; b ] in
   Alcotest.(check (float 1e-9))
-    "jan sum additive identity"
-    10.0
+    "jan sum additive identity" 10.0
     (query_point cache summed ~date:(d 2026 1 15) ~default:0.0);
   let multiplied = Points.mul [ a; b ] in
   Alcotest.(check (float 1e-9))
-    "feb mul identity"
-    3.0
+    "feb mul identity" 3.0
     (query_point cache multiplied ~date:(d 2026 2 15) ~default:0.0)
 
 let test_point_mapn_fill () =
@@ -465,10 +557,10 @@ let test_point_sum_n_way () =
     (query_point cache (Points.mul [ x; y; z ]) ~date ~default:0.0)
 
 let test_point_sum_empty_raises () =
-  Alcotest.check_raises "empty point sum raises" (Invalid_argument "Points.sum: empty list") (fun () ->
-      ignore (Series.Points.sum []));
-  Alcotest.check_raises "empty point mul raises" (Invalid_argument "Points.mul: empty list") (fun () ->
-      ignore (Series.Points.mul []))
+  Alcotest.check_raises "empty point sum raises" (Invalid_argument "Points.sum: empty list")
+    (fun () -> ignore (Series.Points.sum []));
+  Alcotest.check_raises "empty point mul raises" (Invalid_argument "Points.mul: empty list")
+    (fun () -> ignore (Series.Points.mul []))
 
 let test_point_accum_uses_span_changes () =
   let open Series in
@@ -787,6 +879,13 @@ let tests =
       ( "span extend preserves gap before second series",
         test_span_extend_preserves_gap_before_second_series );
       ("span extend empty first series", test_span_extend_empty_first_series);
+      ("span clipped bounds", test_span_clipped_bounds);
+      ("span clipped one-sided constructors", test_span_clipped_one_sided_constructors);
+      ("span clipped zero-width empty", test_span_clipped_zero_width_empty);
+      ("span clipped reversed bounds raise", test_span_clipped_reversed_bounds_raise);
+      ( "span clipped outside queries do not force base",
+        test_span_clipped_outside_queries_do_not_force_base );
+      ("span clipped label and dependencies", test_span_clipped_label_and_dependencies);
       ("unfold_from replays base and continues", test_unfold_from_replays_base_and_continues);
       ("unfold_from empty base does not call cells", test_unfold_from_empty_base_does_not_call_cells);
       ("unfold_from dependencies", test_unfold_from_dependencies);
