@@ -3,7 +3,7 @@
 
 type evaluated =
   | Span_values of (Period.t * float option) list
-  | Point_values of (Date.t * float) list
+  | Point_values of (Date.t * float option) list
 
 type stmt
 
@@ -39,7 +39,7 @@ val point_total : Series.Points.t -> stmt list -> stmt
 (* Evaluators *)
 
 val eval_periods : Period.t list -> stmt -> resolved
-(** [eval_periods periods stmt] evalutes [stmt] for each period in [periods] and returns a
+(** [eval_periods periods stmt] evaluates [stmt] for each period in [periods] and returns a
     [resolved] statement. Point types are resolved to point values at the set of all unique period
     start and end dates. Every line and total has labels copied from the source series and
     [values = Some _]. *)

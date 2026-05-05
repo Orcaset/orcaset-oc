@@ -16,44 +16,42 @@ let initial_cash = 1_000.0
 let initial_ppe = 10_000.0
 let initial_common_stock = 5_000.0
 let initial_retained_earnings = 6_000.0
+let sum_agg = Series.Agg.sum
 
 (* ----- Model ----- *)
 
 (* Income Statement *)
 let revenue =
-  Series.Spans.unfold_rec ~label:"Revenue"
+  Series.Spans.unfold_rec ~label:"Revenue" ~agg:sum_agg
     ~deps:(fun self -> Series.Deps.span_dep self)
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
     ~cells:(fun read_revenue period ->
       let formula =
-        if Date.equal (Period.start period) start_date then Series.Formula.pure initial_revenue
+        if Date.equal (Period.start period) start_date then
+          Series.Formula.pure (Some initial_revenue)
         else
           let open Series.Formula in
-          let+ prior_revenue =
-            read_revenue
-              ~period:(Period.prev eomonth_lookback period)
-              ~reduce:(Series.sum_float_opt ~fill:0.0)
-          in
-          let yf = Yf.actual_360 (Period.start period) (Period.end_ period) in
-          prior_revenue *. (1. +. (annual_revenue_growth *. yf))
+          let+ prior_revenue = read_revenue ~period:(Period.prev eomonth_lookback period) in
+          Option.map
+            (fun prior_revenue ->
+              let yf = Yf.act_360 (Period.start period) (Period.end_ period) in
+              prior_revenue *. (1. +. (annual_revenue_growth *. yf)))
+            prior_revenue
       in
-      Some
-        ( Series.Spans.cell ~period ~split:Series.proportional_split formula,
-          Period.next eomonth_offset period ))
+      Some (Series.Spans.cell ~period ~split:Split.daily formula, Period.next eomonth_offset period))
     ()
 
 let cost_of_revenue = Series.Spans.scale ~label:"Cost of revenue" cost_of_revenue_ratio revenue
-let gross_profit = Series.Spans.sum ~label:"Gross profit" [ revenue; cost_of_revenue ]
+let gross_profit = Series.Spans.sum ~label:"Gross profit" ~agg:sum_agg [ revenue; cost_of_revenue ]
 
 let opex =
-  Series.Spans.unfold ~label:"Operating expenses"
+  Series.Spans.unfold ~label:"Operating expenses" ~agg:sum_agg
     ~deps:(fun () -> Series.Deps.none)
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
     ~cells:(fun () period ->
       let next_period = Period.next eomonth_offset period in
       Some
-        ( Series.Spans.cell ~period ~split:Series.proportional_split
-            (Series.Formula.pure monthly_opex),
+        ( Series.Spans.cell ~period ~split:Split.daily (Series.Formula.pure (Some monthly_opex)),
           next_period ))
     ()
 
@@ -61,45 +59,50 @@ let capex = Series.Spans.scale ~label:"Capital expenditures" capex_pct_revenue r
 
 let rec lazy_depreciation =
   lazy
-    (Series.Spans.unfold ~label:"Depreciation"
+    (Series.Spans.unfold ~label:"Depreciation" ~agg:sum_agg
        ~deps:(fun () -> Series.Deps.point_dep (Lazy.force lazy_ppe_net))
        ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
        ~cells:(fun read_ppe_net period ->
          let formula =
            let open Series.Formula in
-           let+ ppe_net = read_ppe_net ~date:(Period.start period) ~default:0.0 in
-           -.ppe_net *. monthly_depreciation_rate
+           let+ ppe_net = read_ppe_net ~date:(Period.start period) in
+           Option.map (fun ppe_net -> -.ppe_net *. monthly_depreciation_rate) ppe_net
          in
          let next_period = Period.next eomonth_offset period in
-         Some (Series.Spans.cell ~period ~split:Series.proportional_split formula, next_period))
+         Some (Series.Spans.cell ~period ~split:Split.daily formula, next_period))
        ())
 
 and lazy_ppe_change =
   lazy
     (let capitalized_capex = Series.Spans.scale (-1.0) capex in
-     Series.Spans.sum ~label:"PPE change" [ capitalized_capex; Lazy.force lazy_depreciation ])
+     Series.Spans.sum ~label:"PPE change" ~agg:sum_agg
+       [ capitalized_capex; Lazy.force lazy_depreciation ])
 
 and lazy_ppe_net =
   lazy (Series.Points.accum ~label:"PPE net" ~init:initial_ppe (Lazy.force lazy_ppe_change))
 
 let depreciation = Lazy.force lazy_depreciation
 let ppe_net = Lazy.force lazy_ppe_net
-let ebit = Series.Spans.sum ~label:"EBIT" [ gross_profit; opex; depreciation ]
+let ebit = Series.Spans.sum ~label:"EBIT" ~agg:sum_agg [ gross_profit; opex; depreciation ]
 let income_tax = Series.Spans.scale ~label:"Income tax" income_tax_rate ebit
-let net_income = Series.Spans.sum ~label:"Net income" [ ebit; income_tax ]
+let net_income = Series.Spans.sum ~label:"Net income" ~agg:sum_agg [ ebit; income_tax ]
 
 (* Cash Flow Statement *)
 
 let depreciation_add_back = Series.Spans.scale ~label:"Depreciation add back" (-1.0) depreciation
 
 let operating_cf =
-  Series.Spans.sum ~label:"Operating cash flow" [ net_income; depreciation_add_back ]
+  Series.Spans.sum ~label:"Operating cash flow" ~agg:sum_agg [ net_income; depreciation_add_back ]
 
 let investing_cf = capex
-let cf_financing = Series.Spans.const ~label:"Cash flow from financing" ~period:Period.unbounded 0.0
+
+let cf_financing =
+  Series.Spans.const ~label:"Cash flow from financing" ~split:Split.daily ~agg:sum_agg
+    ~period:Period.unbounded 0.0
 
 let total_cf =
-  Series.Spans.sum ~label:"Total cash flow" [ operating_cf; investing_cf; cf_financing ]
+  Series.Spans.sum ~label:"Total cash flow" ~agg:sum_agg
+    [ operating_cf; investing_cf; cf_financing ]
 
 (* Balance Sheet *)
 

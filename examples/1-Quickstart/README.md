@@ -13,8 +13,10 @@ Profit: Sum of revenue and expenses
 The full model is defined in 23 lines of code which can be queried for values over any arbitrary date range.
 
 ```ocaml
+let sum_agg = Series.Agg.sum
+
 let revenue =
-  Series.Spans.unfold_rec ~label:"Revenue"
+  Series.Spans.unfold_rec ~label:"Revenue" ~agg:sum_agg
     (* Declare revenue as a dependency of itself. *)
     ~deps:(fun self -> Series.Deps.span_dep self)
     (* Revenue unfolds over periods. Set the initial period. *)
@@ -24,23 +26,23 @@ let revenue =
     ~cells:(fun read_revenue period ->
       let formula =
         (* If the current period is the start period, return the initial value. *)
-        if Period.equal period initial_period then Series.Formula.pure 1_000.0
+        if Period.equal period initial_period then Series.Formula.pure (Some 1_000.0)
         (* Otherwise, look up the revenue over the prior period and grow it by the quarterly rate. *)
         else
           let open Series.Formula in
           let+ prior_revenue =
-            read_revenue ~period:(Period.prev qtr_lookback period) ~reduce:(Series.sum_float_opt ~fill:0.0)
+            read_revenue ~period:(Period.prev qtr_lookback period)
           in
-          prior_revenue *. 1.03
+          Option.map (fun prior_revenue -> prior_revenue *. 1.03) prior_revenue
       in
       Some
-        ( Series.cell ~period ~split:Series.proportional_split formula, Period.next qtr_offset period ))
+        ( Series.Spans.cell ~period ~split:Split.daily formula, Period.next qtr_offset period ))
     ()
 
 (* Expenses are defined as a constant (negative) percent of revenue. *)
 let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue
 (* Sum revenue and expense to get profit. *)
-let profit = Series.Spans.sum ~label:"Profit" [ revenue; expenses ]
+let profit = Series.Spans.sum ~label:"Profit" ~agg:sum_agg [ revenue; expenses ]
 ```
 
 ## Output
@@ -77,10 +79,9 @@ The query below spans multiple quarters with boundary dates at mid-quarter point
 let () =
   let query_period = Period.make (Date.make 2026 4 15) (Date.make 2026 9 15) in
   let cache = Series.make_cache () in
-  let profit =
-    Series.query_span cache profit ~period:query_period ~reduce:(Series.sum_float_opt ~fill:0.0)
-  in
-  Printf.printf "Total profit over the period %s: %.2f\n" (Period.to_string query_period) profit
+  let profit = Series.query_span cache profit ~period:query_period in
+  let profit = Option.map (Printf.sprintf "%.2f") profit |> Option.value ~default:"n/a" in
+  Printf.printf "Total profit over the period %s: %s\n" (Period.to_string query_period) profit
 
 (* Total profit over the period 2026-04-15..2026-09-15: 874.07 *)
 ```

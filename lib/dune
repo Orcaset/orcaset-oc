@@ -1,5 +1,5 @@
 (library
  (name orcaset)
  (public_name orcaset)
- (modules cell_type date offset period series stmt yf)
+ (modules cell_type date offset period series split stmt yf)
  (private_modules cell_type))

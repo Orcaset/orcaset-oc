@@ -3,7 +3,7 @@
 
 type evaluated =
   | Span_values of (Period.t * float option) list
-  | Point_values of (Date.t * float) list
+  | Point_values of (Date.t * float option) list
 
 type stmt =
   | Group of stmt list
@@ -29,27 +29,16 @@ let point_total total children = Total { total = point_series total; children }
 
 (* ----- Evaluators ----- *)
 
-let sum_floats values =
-  let has_value, total =
-    List.fold_left
-      (fun (has_value, total) -> function
-        | Some value -> (true, total +. value) | None -> (has_value, total))
-      (false, 0.0) values
-  in
-  if has_value then Some total else None
-
 let eval_series_periods cache periods (Series.Series series) =
   let values =
     match series with
     | Series.Span_series spans ->
         Span_values
-          (List.map
-             (fun period -> (period, Series.query_span cache spans ~period ~reduce:sum_floats))
-             periods)
+          (List.map (fun period -> (period, Series.query_span cache spans ~period)) periods)
     | Series.Point_series points ->
         Point_values
           (Period.list_to_dates periods
-          |> List.map (fun date -> (date, Series.query_point cache points ~date ~default:0.0)))
+          |> List.map (fun date -> (date, Series.query_point cache points ~date)))
   in
   (Series.label series, Some values)
 
@@ -58,10 +47,7 @@ let eval_series_dates cache dates (Series.Series series) =
     match series with
     | Series.Point_series points ->
         Some
-          (Point_values
-             (List.map
-                (fun date -> (date, Series.query_point cache points ~date ~default:0.0))
-                dates))
+          (Point_values (List.map (fun date -> (date, Series.query_point cache points ~date)) dates))
     | Series.Span_series _ -> None
   in
   (Series.label series, values)
@@ -115,7 +101,7 @@ let fixed_width_cells = function
         (fun (period, value) -> (Period.end_ period, Option.map (Printf.sprintf "%.2f") value))
         values
   | Some (Point_values values) ->
-      List.map (fun (date, value) -> (date, Some (Printf.sprintf "%.2f" value))) values
+      List.map (fun (date, value) -> (date, Option.map (Printf.sprintf "%.2f") value)) values
 
 let fixed_width_rows resolved =
   let rec go depth = function

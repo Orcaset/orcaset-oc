@@ -18,9 +18,14 @@ type span =
       period : Period.t;
       a : span option;
       b : span option;
-      f : float option -> float option -> float;
+      f : float option -> float option -> float option;
     }
-  | MapN of { id : int; period : Period.t; deps : span option list; f : float option list -> float }
+  | MapN of {
+      id : int;
+      period : Period.t;
+      deps : span option list;
+      f : float option list -> float option;
+    }
 
 and split_strategy = span -> Date.t -> split_part * split_part
 
@@ -29,7 +34,12 @@ let split_part ~period ~value = { period; value }
 type point =
   | Const of { id : int; date : Date.t; value : float }
   | Map of { id : int; dep : point; f : float -> float }
-  | Derived of { id : int; date : Date.t; deps : point option list; f : float option list -> float }
+  | Derived of {
+      id : int;
+      date : Date.t;
+      deps : point option list;
+      f : float option list -> float option;
+    }
   | Accum of {
       id : int;
       date : Date.t;
@@ -86,7 +96,7 @@ let split_period period date =
   let start, end_ = Period.to_tuple period in
   (Period.make start date, Period.make date end_)
 
-let proportional_split : split_strategy =
+let daily_split : split_strategy =
  fun span date ->
   let period = span_period span in
   let start, end_ = Period.to_tuple period in
@@ -98,15 +108,10 @@ let proportional_split : split_strategy =
   ( split_part ~period:left_period ~value:(fun value -> value *. left_ratio),
     split_part ~period:right_period ~value:(fun value -> value *. right_ratio) )
 
-let const_split : split_strategy =
- fun span date ->
-  let left_period, right_period = split_period (span_period span) date in
-  (split_part ~period:left_period ~value:Fun.id, split_part ~period:right_period ~value:Fun.id)
-
 let rec map_split = function
   | Value { split; _ } | Slice { split; _ } -> split
   | Map { dep; _ } -> map_split dep
-  | Map2 _ | MapN _ -> proportional_split
+  | Map2 _ | MapN _ -> daily_split
 
 let rec split_span date span =
   let start, end_ = Period.to_tuple (span_period span) in
