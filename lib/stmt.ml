@@ -1,7 +1,9 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-type evaluated = Span_values of (Period.t * float) list | Point_values of (Date.t * float) list
+type evaluated =
+  | Span_values of (Period.t * float option) list
+  | Point_values of (Date.t * float option) list
 
 type stmt =
   | Group of stmt list
@@ -36,7 +38,7 @@ let eval_series_periods cache periods (Series.Series series) =
     | Series.Point_series points ->
         Point_values
           (Period.list_to_dates periods
-          |> List.map (fun date -> (date, Series.query_point cache points ~date ~default:0.0)))
+          |> List.map (fun date -> (date, Series.query_point cache points ~date)))
   in
   (Series.label series, Some values)
 
@@ -45,10 +47,7 @@ let eval_series_dates cache dates (Series.Series series) =
     match series with
     | Series.Point_series points ->
         Some
-          (Point_values
-             (List.map
-                (fun date -> (date, Series.query_point cache points ~date ~default:0.0))
-                dates))
+          (Point_values (List.map (fun date -> (date, Series.query_point cache points ~date)) dates))
     | Series.Span_series _ -> None
   in
   (Series.label series, values)
@@ -99,10 +98,10 @@ let fixed_width_cells = function
   | None -> []
   | Some (Span_values values) ->
       List.map
-        (fun (period, value) -> (Period.end_ period, Some (Printf.sprintf "%.2f" value)))
+        (fun (period, value) -> (Period.end_ period, Option.map (Printf.sprintf "%.2f") value))
         values
   | Some (Point_values values) ->
-      List.map (fun (date, value) -> (date, Some (Printf.sprintf "%.2f" value))) values
+      List.map (fun (date, value) -> (date, Option.map (Printf.sprintf "%.2f") value)) values
 
 let fixed_width_rows resolved =
   let rec go depth = function

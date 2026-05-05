@@ -5,6 +5,9 @@ let p s e = Period.make s e
 let agg = Series.Agg.sum
 let days n = Offset.make ~days:n ()
 let months n = Offset.make ~months:n ()
+let option_float = Alcotest.option (Alcotest.float 1e-9)
+let check_some_float name expected actual = Alcotest.check option_float name (Some expected) actual
+let check_none_float name actual = Alcotest.check option_float name None actual
 
 let span_values cache series ~period =
   Series.query_span_samples cache series ~period
@@ -21,7 +24,7 @@ let monthly_series ~start ~n value_of =
         let period = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
         Some
           ( Series.Spans.cell ~period ~split:Series.proportional_split
-              (Series.Formula.pure (value_of i)),
+              (Series.Formula.pure (Some (value_of i))),
             i + 1 ))
     ()
 
@@ -33,7 +36,7 @@ let test_span_const () =
   let series = Spans.const ~split:proportional_split ~agg ~period 42.0 in
   let cache = make_cache () in
   let total = query_span cache series ~period in
-  Alcotest.(check (float 1e-9)) "const span value" 42.0 total
+  check_some_float "const span value" 42.0 total
 
 let test_span_of_list () =
   let open Series in
@@ -44,10 +47,9 @@ let test_span_of_list () =
   in
   let cache = make_cache () in
   Alcotest.(check (option string)) "label" (Some "Revenue") (Spans.label series);
-  Alcotest.(check (float 1e-9)) "jan" 31.0 (query_span cache series ~period:jan);
-  Alcotest.(check (float 1e-9)) "feb" 28.0 (query_span cache series ~period:feb);
-  Alcotest.(check (float 1e-9))
-    "partial proportional" 17.0
+  check_some_float "jan" 31.0 (query_span cache series ~period:jan);
+  check_some_float "feb" 28.0 (query_span cache series ~period:feb);
+  check_some_float "partial proportional" 17.0
     (query_span cache series ~period:(p (d 2026 1 15) (d 2026 2 1)))
 
 let test_span_custom_split () =
@@ -62,12 +64,8 @@ let test_span_custom_split () =
   in
   let series = single_span_series ~period:full_period ~split:front_loaded_split 100.0 in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9))
-    "custom split left side" 75.0
-    (query_span cache series ~period:first_month);
-  Alcotest.(check (float 1e-9))
-    "custom split right side" 25.0
-    (query_span cache series ~period:remaining_months)
+  check_some_float "custom split left side" 75.0 (query_span cache series ~period:first_month);
+  check_some_float "custom split right side" 25.0 (query_span cache series ~period:remaining_months)
 
 let test_span_map_applies_function () =
   let open Series in
@@ -76,7 +74,7 @@ let test_span_map_applies_function () =
   let mapped = Spans.map (fun value -> value *. -0.9) base in
   let cache = make_cache () in
   let total = query_span cache mapped ~period in
-  Alcotest.(check (float 1e-9)) "mapped span value" (-9.0) total
+  check_some_float "mapped span value" (-9.0) total
 
 let test_span_map2_applies_function () =
   let open Series in
@@ -84,11 +82,12 @@ let test_span_map2_applies_function () =
   let a = single_span_series ~period ~split:proportional_split 10.0 in
   let b = single_span_series ~period ~split:proportional_split 3.0 in
   let mapped =
-    Spans.map2 ~agg a b (fun a b -> Option.value ~default:0.0 a -. Option.value ~default:0.0 b)
+    Spans.map2 ~agg a b (fun a b ->
+        Some (Option.value ~default:0.0 a -. Option.value ~default:0.0 b))
   in
   let cache = make_cache () in
   let total = query_span cache mapped ~period in
-  Alcotest.(check (float 1e-9)) "map2 span value" 7.0 total
+  check_some_float "map2 span value" 7.0 total
 
 let test_span_map2_splits_parents_before_mapping () =
   let open Series in
@@ -97,11 +96,12 @@ let test_span_map2_splits_parents_before_mapping () =
   let a = single_span_series ~period:full_period ~split:const_split 10.0 in
   let b = single_span_series ~period:full_period ~split:const_split 2.0 in
   let mapped =
-    Spans.map2 ~agg a b (fun a b -> Option.value ~default:0.0 a *. Option.value ~default:0.0 b)
+    Spans.map2 ~agg a b (fun a b ->
+        Some (Option.value ~default:0.0 a *. Option.value ~default:0.0 b))
   in
   let cache = make_cache () in
   let total = query_span cache mapped ~period:middle_month in
-  Alcotest.(check (float 1e-9)) "map2 split parent values" 20.0 total
+  check_some_float "map2 split parent values" 20.0 total
 
 let test_span_convenience_constructors () =
   let open Series in
@@ -110,7 +110,7 @@ let test_span_convenience_constructors () =
   let b = single_span_series ~period ~split:proportional_split 2.0 in
   let cache = make_cache () in
   let check name expected series =
-    Alcotest.(check (float 1e-9)) name expected (query_span cache series ~period)
+    check_some_float name expected (query_span cache series ~period)
   in
   let total = Spans.sum ~label:"Total" ~agg [ a; b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Spans.label total);
@@ -134,11 +134,11 @@ let test_span_convenience_identity () =
   let cache = make_cache () in
   let summed = Spans.sum ~agg [ a; b ] in
   let total = query_span cache summed ~period:query_period in
-  Alcotest.(check (float 1e-9)) "sum uses 0 as additive identity for missing sides" 13.0 total;
+  check_some_float "sum uses 0 as additive identity for missing sides" 13.0 total;
   let multiplied = Spans.mul ~agg [ a; b ] in
-  (* mul over disjoint periods: jan = 10*1 = 10, feb = 1*3 = 3, total = 13. *)
+  (* mul over disjoint periods is undefined because each aligned row has a missing side. *)
   let total = query_span cache multiplied ~period:query_period in
-  Alcotest.(check (float 1e-9)) "mul uses 1 as multiplicative identity for missing sides" 13.0 total
+  check_none_float "mul requires every input" total
 
 let test_span_mapn_fill () =
   let open Series in
@@ -148,12 +148,15 @@ let test_span_mapn_fill () =
   let a = single_span_series ~period:jan ~split:proportional_split 10.0 in
   let b = single_span_series ~period:feb ~split:proportional_split 3.0 in
   let filled =
-    Spans.mapn ~agg [ a; b ]
-      (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc +. 1.0) 0.0)
+    Spans.mapn ~agg [ a; b ] (fun values ->
+        Some
+          (List.fold_left
+             (fun acc -> function Some v -> acc +. v | None -> acc +. 1.0)
+             0.0 values))
   in
   let cache = make_cache () in
   let total = query_span cache filled ~period:query_period in
-  Alcotest.(check (float 1e-9)) "mapn fills missing entries before reducing" 15.0 total
+  check_some_float "mapn fills missing entries before reducing" 15.0 total
 
 let test_span_mapn_splits_parents_before_mapping () =
   let open Series in
@@ -163,12 +166,15 @@ let test_span_mapn_splits_parents_before_mapping () =
   let b = single_span_series ~period:full_period ~split:const_split 2.0 in
   let c = single_span_series ~period:full_period ~split:const_split 3.0 in
   let mapped =
-    Spans.mapn ~agg [ a; b; c ]
-      (List.fold_left (fun acc -> function Some value -> acc *. value | None -> acc) 1.0)
+    Spans.mapn ~agg [ a; b; c ] (fun values ->
+        Some
+          (List.fold_left
+             (fun acc -> function Some value -> acc *. value | None -> acc)
+             1.0 values))
   in
   let cache = make_cache () in
   let total = query_span cache mapped ~period:middle_month in
-  Alcotest.(check (float 1e-9)) "mapn split parent values" 60.0 total
+  check_some_float "mapn split parent values" 60.0 total
 
 let test_span_sum_n_way_mismatched_periods () =
   let open Series in
@@ -191,7 +197,7 @@ let test_span_sum_n_way_mismatched_periods () =
       Alcotest.(check (float 1e-9)) "mar sum" 302.0 mar_v
   | _ -> Alcotest.fail "expected three aligned cells"
 
-let test_span_mul_n_way_uses_one_identity () =
+let test_span_mul_n_way_requires_all_inputs () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
@@ -205,12 +211,8 @@ let test_span_mul_n_way_uses_one_identity () =
   let cache = make_cache () in
   let cells = span_values cache total ~period:query_period in
   match cells with
-  | [ Some jan_v; Some feb_v; Some mar_v ] ->
-      (* jan: 2 * 1 * 10 = 20. feb: 3 * 4 * 1 = 12. mar: 1 * 5 * 11 = 55. *)
-      Alcotest.(check (float 1e-9)) "jan mul" 20.0 jan_v;
-      Alcotest.(check (float 1e-9)) "feb mul" 12.0 feb_v;
-      Alcotest.(check (float 1e-9)) "mar mul" 55.0 mar_v
-  | _ -> Alcotest.fail "expected three aligned cells"
+  | [ None; None; None ] -> ()
+  | _ -> Alcotest.fail "expected undefined aligned cells"
 
 let test_span_sum_empty_raises () =
   Alcotest.check_raises "empty sum raises" (Invalid_argument "Spans.sum: empty list") (fun () ->
@@ -242,7 +244,7 @@ let test_span_extend_clips_overlapping_second_series () =
   let extended = Spans.extend ~agg a b in
   let cache = make_cache () in
   let total = query_span cache extended ~period:query_period in
-  Alcotest.(check (float 1e-9)) "clipped second span" 14.0 total
+  check_some_float "clipped second span" 14.0 total
 
 let test_span_extend_skips_covered_second_spans () =
   let open Series in
@@ -255,7 +257,7 @@ let test_span_extend_skips_covered_second_spans () =
   let extended = Spans.extend ~agg a b in
   let cache = make_cache () in
   let total = query_span cache extended ~period:(p (d 2026 1 1) (d 2026 4 1)) in
-  Alcotest.(check (float 1e-9)) "covered second spans skipped" 90.0 total
+  check_some_float "covered second spans skipped" 90.0 total
 
 let test_span_extend_preserves_gap_before_second_series () =
   let open Series in
@@ -277,7 +279,7 @@ let test_span_extend_empty_first_series () =
   let extended = Spans.extend ~agg empty b in
   let cache = make_cache () in
   let total = query_span cache extended ~period:feb in
-  Alcotest.(check (float 1e-9)) "empty first series" 28.0 total
+  check_some_float "empty first series" 28.0 total
 
 let test_span_clipped_bounds () =
   let open Series in
@@ -387,7 +389,7 @@ let test_unfold_from_replays_base_and_continues () =
         if Date.(Period.start period >= d 2026 5 1) then None
         else
           let value = Float.of_int (Date.month (Period.start period)) in
-          Some (Spans.cell ~period ~split:proportional_split (Formula.pure value), period))
+          Some (Spans.cell ~period ~split:proportional_split (Formula.pure (Some value)), period))
       base
   in
   let cache = make_cache () in
@@ -419,7 +421,7 @@ let test_unfold_from_empty_base_does_not_call_cells () =
   in
   let cache = make_cache () in
   let total = query_span cache series ~period:(p (d 2026 1 1) (d 2026 2 1)) in
-  Alcotest.(check (float 1e-9)) "empty result" 0.0 total;
+  check_none_float "empty result" total;
   Alcotest.(check bool) "cells not called" false !called
 
 let test_unfold_from_dependencies () =
@@ -451,34 +453,37 @@ let test_agg_helpers () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let samples = [ agg_sample jan 10.0; None; agg_sample feb 30.0 ] in
-  Alcotest.(check (float 1e-9)) "sum ignores missing samples" 40.0 (Agg.reduce Agg.sum samples);
-  Alcotest.(check (float 1e-9)) "min" 10.0 (Agg.reduce Agg.min samples);
-  Alcotest.(check (float 1e-9)) "max" 30.0 (Agg.reduce Agg.max samples);
-  Alcotest.(check (float 1e-9)) "average" 20.0 (Agg.reduce Agg.average samples);
-  Alcotest.(check (float 1e-9))
-    "time-weighted average"
+  let actual_360_average = Agg.time_weighted_average Yf.actual_360 in
+  let custom_average =
+    Agg.time_weighted_average (fun start _ -> if Date.month start = 1 then 1.0 else 3.0)
+  in
+  check_some_float "sum ignores missing samples" 40.0 (Agg.reduce Agg.sum samples);
+  check_some_float "min" 10.0 (Agg.reduce Agg.min samples);
+  check_some_float "max" 30.0 (Agg.reduce Agg.max samples);
+  check_some_float "average" 20.0 (Agg.reduce Agg.average samples);
+  check_some_float "time-weighted average"
     (((10.0 *. 31.0) +. (30.0 *. 28.0)) /. 59.0)
-    (Agg.reduce Agg.time_weighted_average samples);
+    (Agg.reduce actual_360_average samples);
+  check_some_float "time-weighted average uses year fraction" 25.0
+    (Agg.reduce custom_average samples);
   List.iter
     (fun builtin ->
-      Alcotest.(check (float 1e-9)) "empty aggregation" 0.0 (Agg.reduce builtin []);
-      Alcotest.(check (float 1e-9))
-        "all-missing aggregation" 0.0
-        (Agg.reduce builtin [ None; None ]))
-    [ Agg.sum; Agg.min; Agg.max; Agg.average; Agg.time_weighted_average ]
+      check_none_float "empty aggregation" (Agg.reduce builtin []);
+      check_none_float "all-missing aggregation" (Agg.reduce builtin [ None; None ]))
+    [ Agg.sum; Agg.min; Agg.max; Agg.average; actual_360_average ]
 
 let test_span_aggregation_defaults_and_samples () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let mar = p (d 2026 3 1) (d 2026 4 1) in
+  let time_weighted_average = Agg.time_weighted_average Yf.actual_360 in
   let users =
-    Spans.of_list ~split:const_split ~agg:Agg.time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
+    Spans.of_list ~split:const_split ~agg:time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
   in
   let gappy = Spans.of_list ~split:proportional_split ~agg [ (jan, 10.0); (mar, 30.0) ] in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9))
-    "default time-weighted average"
+  check_some_float "default time-weighted average"
     (((100.0 *. 31.0) +. (200.0 *. 28.0)) /. 59.0)
     (query_span cache users ~period:(p (d 2026 1 1) (d 2026 3 1)));
   (match span_values cache gappy ~period:(p (d 2026 1 1) (d 2026 4 1)) with
@@ -487,9 +492,19 @@ let test_span_aggregation_defaults_and_samples () =
       Alcotest.(check (float 1e-9)) "mar sample" 30.0 mar_value
   | _ -> Alcotest.fail "expected samples with an internal gap");
   let avg = Spans.with_agg ~agg:Agg.average gappy in
-  Alcotest.(check (float 1e-9))
-    "with_agg replaces default aggregation" 20.0
+  check_some_float "with_agg replaces default aggregation" 20.0
     (query_span cache avg ~period:(p (d 2026 1 1) (d 2026 4 1)))
+
+let test_span_query_missing_period_returns_none () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let series = Spans.const ~split:proportional_split ~agg ~period:jan 10.0 in
+  let cache = make_cache () in
+  check_none_float "missing query aggregates to none" (query_span cache series ~period:feb);
+  match span_values cache series ~period:feb with
+  | [ None ] -> ()
+  | _ -> Alcotest.fail "expected one uncovered gap"
 
 let test_span_unary_and_clipped_inherit_agg () =
   let open Series in
@@ -497,11 +512,9 @@ let test_span_unary_and_clipped_inherit_agg () =
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let base = Spans.of_list ~split:const_split ~agg:Agg.average [ (jan, 10.0); (feb, 20.0) ] in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9))
-    "scale inherits average aggregation" 30.0
+  check_some_float "scale inherits average aggregation" 30.0
     (query_span cache (Spans.scale 2.0 base) ~period:(p (d 2026 1 1) (d 2026 3 1)));
-  Alcotest.(check (float 1e-9))
-    "clipped inherits average aggregation" 20.0
+  check_some_float "clipped inherits average aggregation" 20.0
     (query_span cache
        (Spans.clipped ~after:(d 2026 2 1) ~until:(d 2026 3 1) base)
        ~period:(p (d 2026 1 1) (d 2026 3 1)))
@@ -526,12 +539,12 @@ let test_point_const_map_map2 () =
   let b = Points.const ~period 3.0 in
   let mapped = Points.map (fun value -> value *. 2.0) a in
   let mapped2 =
-    Points.map2 a b (fun a b -> Option.value ~default:0.0 a +. Option.value ~default:0.0 b)
+    Points.map2 a b (fun a b -> Some (Option.value ~default:0.0 a +. Option.value ~default:0.0 b))
   in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9)) "const point" 10.0 (query_point cache a ~date ~default:0.0);
-  Alcotest.(check (float 1e-9)) "mapped point" 20.0 (query_point cache mapped ~date ~default:0.0);
-  Alcotest.(check (float 1e-9)) "map2 point" 13.0 (query_point cache mapped2 ~date ~default:0.0)
+  check_some_float "const point" 10.0 (query_point cache a ~date);
+  check_some_float "mapped point" 20.0 (query_point cache mapped ~date);
+  check_some_float "map2 point" 13.0 (query_point cache mapped2 ~date)
 
 let test_point_of_list () =
   let open Series in
@@ -540,11 +553,9 @@ let test_point_of_list () =
   let series = Points.of_list ~label:"Balance" [ (jan, 100.0); (feb, 125.0) ] in
   let cache = make_cache () in
   Alcotest.(check (option string)) "label" (Some "Balance") (Points.label series);
-  Alcotest.(check (float 1e-9)) "jan" 100.0 (query_point cache series ~date:jan ~default:0.0);
-  Alcotest.(check (float 1e-9)) "feb" 125.0 (query_point cache series ~date:feb ~default:0.0);
-  Alcotest.(check (float 1e-9))
-    "missing default" (-1.0)
-    (query_point cache series ~date:(d 2026 3 1) ~default:(-1.0))
+  check_some_float "jan" 100.0 (query_point cache series ~date:jan);
+  check_some_float "feb" 125.0 (query_point cache series ~date:feb);
+  check_none_float "missing point" (query_point cache series ~date:(d 2026 3 1))
 
 let test_point_convenience_constructors () =
   let open Series in
@@ -554,7 +565,7 @@ let test_point_convenience_constructors () =
   let b = Points.const ~period 2.0 in
   let cache = make_cache () in
   let check name expected series =
-    Alcotest.(check (float 1e-9)) name expected (query_point cache series ~date ~default:0.0)
+    check_some_float name expected (query_point cache series ~date)
   in
   let total = Points.sum ~label:"Total" [ a; b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Points.label total);
@@ -576,13 +587,9 @@ let test_point_convenience_identity () =
   let b = Points.const ~period:feb 3.0 in
   let cache = make_cache () in
   let summed = Points.sum [ a; b ] in
-  Alcotest.(check (float 1e-9))
-    "jan sum additive identity" 10.0
-    (query_point cache summed ~date:(d 2026 1 15) ~default:0.0);
+  check_some_float "jan sum additive identity" 10.0 (query_point cache summed ~date:(d 2026 1 15));
   let multiplied = Points.mul [ a; b ] in
-  Alcotest.(check (float 1e-9))
-    "feb mul identity" 3.0
-    (query_point cache multiplied ~date:(d 2026 2 15) ~default:0.0)
+  check_none_float "feb mul requires every input" (query_point cache multiplied ~date:(d 2026 2 15))
 
 let test_point_mapn_fill () =
   let open Series in
@@ -591,13 +598,15 @@ let test_point_mapn_fill () =
   let a = Points.const ~period:jan 10.0 in
   let b = Points.const ~period:feb 3.0 in
   let filled =
-    Points.mapn ~fill:1.0 [ a; b ]
-      (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc) 0.0)
+    Points.mapn [ a; b ] (fun values ->
+        Some
+          (List.fold_left
+             (fun acc -> function Some v -> acc +. v | None -> acc +. 1.0)
+             0.0 values))
   in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9))
-    "mapn fills missing sides before reducing" 11.0
-    (query_point cache filled ~date:(d 2026 1 15) ~default:0.0)
+  check_some_float "mapn fills missing sides before reducing" 11.0
+    (query_point cache filled ~date:(d 2026 1 15))
 
 let test_point_sum_n_way () =
   let open Series in
@@ -607,12 +616,8 @@ let test_point_sum_n_way () =
   let y = Points.const ~period:period_all 3.0 in
   let z = Points.const ~period:period_all 4.0 in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9))
-    "n-way sum" 9.0
-    (query_point cache (Points.sum [ x; y; z ]) ~date ~default:0.0);
-  Alcotest.(check (float 1e-9))
-    "n-way mul" 24.0
-    (query_point cache (Points.mul [ x; y; z ]) ~date ~default:0.0)
+  check_some_float "n-way sum" 9.0 (query_point cache (Points.sum [ x; y; z ]) ~date);
+  check_some_float "n-way mul" 24.0 (query_point cache (Points.mul [ x; y; z ]) ~date)
 
 let test_point_sum_empty_raises () =
   Alcotest.check_raises "empty point sum raises" (Invalid_argument "Points.sum: empty list")
@@ -626,12 +631,8 @@ let test_point_accum_uses_span_changes () =
   let changes = single_span_series ~period ~split:proportional_split 10.0 in
   let balance = Points.accum ~init:100.0 changes in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9))
-    "initial balance" 100.0
-    (query_point cache balance ~date:(Period.start period) ~default:0.0);
-  Alcotest.(check (float 1e-9))
-    "ending balance" 110.0
-    (query_point cache balance ~date:(Period.end_ period) ~default:0.0)
+  check_some_float "initial balance" 100.0 (query_point cache balance ~date:(Period.start period));
+  check_some_float "ending balance" 110.0 (query_point cache balance ~date:(Period.end_ period))
 
 let test_label_accessors () =
   let open Series in
@@ -654,13 +655,13 @@ let test_unfold_no_deps_single_step () =
         if n >= 1 then None
         else
           let period = p (d 2026 1 1) (d 2026 2 1) in
-          Some (Spans.cell ~period ~split:proportional_split (Formula.pure 42.0), n + 1))
+          Some (Spans.cell ~period ~split:proportional_split (Formula.pure (Some 42.0)), n + 1))
       ()
   in
   let cache = make_cache () in
   Alcotest.(check (option string)) "label" (Some "Single step") (Spans.label series);
   let total = query_span cache series ~period:(p (d 2026 1 1) (d 2026 2 1)) in
-  Alcotest.(check (float 1e-9)) "value" 42.0 total
+  check_some_float "value" 42.0 total
 
 (* Multi-step Unfold with termination. *)
 let test_unfold_multi_step () =
@@ -675,12 +676,14 @@ let test_unfold_multi_step () =
           let period =
             p (Date.shift (days (30 * n)) start) (Date.shift (days (30 * (n + 1))) start)
           in
-          Some (Spans.cell ~period ~split:proportional_split (Formula.pure (Float.of_int n)), n + 1))
+          Some
+            ( Spans.cell ~period ~split:proportional_split (Formula.pure (Some (Float.of_int n))),
+              n + 1 ))
       ()
   in
   let cache = make_cache () in
   let total = query_span cache series ~period:(p start (Date.shift (days 90) start)) in
-  Alcotest.(check (float 1e-9)) "sum 0+1+2" 3.0 total
+  check_some_float "sum 0+1+2" 3.0 total
 
 (* Unfold with a span dep: derive values by querying the dep. *)
 let test_unfold_with_span_dep () =
@@ -697,14 +700,32 @@ let test_unfold_with_span_dep () =
           let formula =
             let open Formula in
             let+ v = read_base ~period in
-            2.0 *. v
+            Option.map (fun v -> 2.0 *. v) v
           in
           Some (Spans.cell ~period ~split:proportional_split formula, n + 1))
       ()
   in
   let cache = make_cache () in
   let total = query_span cache doubled ~period:(p start (d 2026 4 1)) in
-  Alcotest.(check (float 1e-9)) "sum 20+40+60" 120.0 total
+  check_some_float "sum 20+40+60" 120.0 total
+
+let test_unfold_missing_span_dep_propagates_none () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let base = Spans.const ~split:proportional_split ~agg ~period:jan 10.0 in
+  let derived =
+    Spans.unfold ~agg ~init:false
+      ~deps:(fun () -> Deps.span_dep base)
+      ~cells:(fun read_base emitted ->
+        if emitted then None
+        else
+          let formula = read_base ~period:feb in
+          Some (Spans.cell ~period:feb ~split:proportional_split formula, true))
+      ()
+  in
+  let cache = make_cache () in
+  check_none_float "missing dependency propagates" (query_span cache derived ~period:feb)
 
 let test_repeated_clip_of_split_span () =
   let open Series in
@@ -720,9 +741,8 @@ let test_repeated_clip_of_split_span () =
     let full_days = Float.of_int (Date.diff (d 2026 4 1) (d 2026 1 1)) in
     90.0 *. clipped_days /. full_days
   in
-  Alcotest.(check (float 1e-9))
-    "proportional repeated clip" expected_proportional proportional_total;
-  Alcotest.(check (float 1e-9)) "const repeated clip" 5.0 const_total
+  check_some_float "proportional repeated clip" expected_proportional proportional_total;
+  check_some_float "const repeated clip" 5.0 const_total
 
 let test_formula_tracks_cell_queries () =
   let open Series in
@@ -741,7 +761,7 @@ let test_formula_tracks_cell_queries () =
   in
   let cache = make_cache () in
   let value = query_span cache tracked ~period in
-  Alcotest.(check (float 1e-9)) "tracked value" 10.0 value;
+  check_some_float "tracked value" 10.0 value;
   Alcotest.(check int) "one cell-level query" 1 (List.length !tracked_queries);
   match !tracked_queries with
   | [ Formula.Span_query_item { period = tracked_period; _ } ] ->
@@ -753,8 +773,9 @@ let test_formula_span_dep_uses_series_agg () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let query_period = p (d 2026 1 1) (d 2026 3 1) in
+  let time_weighted_average = Agg.time_weighted_average Yf.actual_360 in
   let base =
-    Spans.of_list ~split:const_split ~agg:Agg.time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
+    Spans.of_list ~split:const_split ~agg:time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
   in
   let derived =
     Spans.unfold ~agg:Agg.sum ~init:false
@@ -767,8 +788,7 @@ let test_formula_span_dep_uses_series_agg () =
       ()
   in
   let cache = make_cache () in
-  Alcotest.(check (float 1e-9))
-    "formula uses dependency aggregation"
+  check_some_float "formula uses dependency aggregation"
     (((100.0 *. 31.0) +. (200.0 *. 28.0)) /. 59.0)
     (query_span cache derived ~period:query_period)
 
@@ -810,13 +830,13 @@ let test_unfold_self_recursive () =
         else
           let period = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
           let formula =
-            if i = 0 then Formula.pure 100.0
+            if i = 0 then Formula.pure (Some 100.0)
             else
               let open Formula in
               let+ previous =
                 prev ~period:(p (Date.shift (months (i - 1)) start) (Date.shift (months i) start))
               in
-              previous *. 1.10
+              Option.map (fun previous -> previous *. 1.10) previous
           in
           Some (Spans.cell ~period ~split:proportional_split formula, i + 1))
       ()
@@ -824,7 +844,7 @@ let test_unfold_self_recursive () =
   let cache = make_cache () in
   let total = query_span cache rev ~period:(p start (Date.shift (months 4) start)) in
   (* 100 + 110 + 121 + 133.1 = 464.1 *)
-  Alcotest.(check (float 1e-9)) "geometric 10% growth, 4 months" 464.1 total
+  check_some_float "geometric 10% growth, 4 months" 464.1 total
 
 let test_unfold_self_future_reference () =
   let open Series in
@@ -837,7 +857,7 @@ let test_unfold_self_future_reference () =
         else
           let period = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
           let formula =
-            if i = 2 then Formula.pure 100.0
+            if i = 2 then Formula.pure (Some 100.0)
             else
               let open Formula in
               let+ future =
@@ -845,14 +865,14 @@ let test_unfold_self_future_reference () =
                   ~period:
                     (p (Date.shift (months (i + 1)) start) (Date.shift (months (i + 2)) start))
               in
-              future *. 0.5
+              Option.map (fun future -> future *. 0.5) future
           in
           Some (Spans.cell ~period ~split:proportional_split formula, i + 1))
       ()
   in
   let cache = make_cache () in
   let first_month = query_span cache rev ~period:(p start (Date.shift (months 1) start)) in
-  Alcotest.(check (float 1e-9)) "future-derived first month" 25.0 first_month
+  check_some_float "future-derived first month" 25.0 first_month
 
 let test_unfold_self_current_converges () =
   let open Series in
@@ -865,14 +885,14 @@ let test_unfold_self_current_converges () =
         let formula =
           let open Formula in
           let+ current = read_self ~period in
-          100.0 +. (0.5 *. current)
+          Option.map (fun current -> 100.0 +. (0.5 *. current)) current
         in
         Some (Spans.cell ~period ~split:proportional_split formula, ()))
       ()
   in
   let cache = make_cache () in
   let total = query_span cache rev ~period:(p start (Date.shift (months 1) start)) in
-  Alcotest.(check (float 1e-5)) "fixed point" 200.0 total
+  Alcotest.check (Alcotest.option (Alcotest.float 1e-5)) "fixed point" (Some 200.0) total
 
 let test_unfold_self_current_diverges () =
   let open Series in
@@ -885,7 +905,7 @@ let test_unfold_self_current_diverges () =
         let formula =
           let open Formula in
           let+ current = read_self ~period in
-          current +. 1.0
+          Option.map (fun current -> current +. 1.0) current
         in
         Some (Spans.cell ~period ~split:proportional_split formula, ()))
       ()
@@ -913,16 +933,20 @@ let test_point_span_feedback_converges () =
            else
              let formula =
                let open Formula in
-               let+ ending_balance = read_balance ~date:end_ ~default:0.0 in
-               ending_balance *. 0.10
+               let+ ending_balance = read_balance ~date:end_ in
+               Option.map (fun ending_balance -> ending_balance *. 0.10) ending_balance
              in
              Some (Spans.cell ~period ~split:proportional_split formula, true))
          ())
   and balance_lazy = lazy (Points.accum ~init:100.0 (Lazy.force interest_lazy)) in
   let balance = Lazy.force balance_lazy in
   let cache = make_cache () in
-  let ending_balance = query_point cache balance ~date:end_ ~default:0.0 in
-  Alcotest.(check (float 1e-5)) "feedback ending balance" (100.0 /. 0.9) ending_balance
+  let ending_balance = query_point cache balance ~date:end_ in
+  Alcotest.check
+    (Alcotest.option (Alcotest.float 1e-5))
+    "feedback ending balance"
+    (Some (100.0 /. 0.9))
+    ending_balance
 
 let tests =
   List.map
@@ -935,11 +959,11 @@ let tests =
       ("span map2 applies function", test_span_map2_applies_function);
       ("span map2 splits parents before mapping", test_span_map2_splits_parents_before_mapping);
       ("span convenience constructors", test_span_convenience_constructors);
-      ("span sum/mul use identity for missing sides", test_span_convenience_identity);
+      ("span sum identity and mul missingness", test_span_convenience_identity);
       ("span mapn fill", test_span_mapn_fill);
       ("span mapn splits parents before mapping", test_span_mapn_splits_parents_before_mapping);
       ("span sum n-way mismatched periods", test_span_sum_n_way_mismatched_periods);
-      ("span mul n-way uses 1 as identity", test_span_mul_n_way_uses_one_identity);
+      ("span mul n-way requires all inputs", test_span_mul_n_way_requires_all_inputs);
       ("span sum/mul empty list raises", test_span_sum_empty_raises);
       ("span extend contiguous", test_span_extend_contiguous);
       ( "span extend clips overlapping second series",
@@ -960,6 +984,7 @@ let tests =
       ("unfold_from dependencies", test_unfold_from_dependencies);
       ("aggregation helpers", test_agg_helpers);
       ("span aggregation defaults and samples", test_span_aggregation_defaults_and_samples);
+      ("span query missing period returns none", test_span_query_missing_period_returns_none);
       ("span unary and clipped inherit aggregation", test_span_unary_and_clipped_inherit_agg);
       ("non-cyclic map preserves gaps", test_non_cyclic_map_preserves_gaps);
       ("point const/map/map2", test_point_const_map_map2);
@@ -974,6 +999,7 @@ let tests =
       ("unfold no deps single step", test_unfold_no_deps_single_step);
       ("unfold multi step", test_unfold_multi_step);
       ("unfold with span dep", test_unfold_with_span_dep);
+      ("unfold missing span dep propagates none", test_unfold_missing_span_dep_propagates_none);
       ("repeated clip of split span", test_repeated_clip_of_split_span);
       ("formula tracks cell queries", test_formula_tracks_cell_queries);
       ("formula span dependency uses series aggregation", test_formula_span_dep_uses_series_agg);

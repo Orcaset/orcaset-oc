@@ -20,9 +20,14 @@ type span = private
       period : Period.t;
       a : span option;
       b : span option;
-      f : float option -> float option -> float;
+      f : float option -> float option -> float option;
     }
-  | MapN of { id : int; period : Period.t; deps : span option list; f : float option list -> float }
+  | MapN of {
+      id : int;
+      period : Period.t;
+      deps : span option list;
+      f : float option list -> float option;
+    }
 
 and split_strategy = span -> Date.t -> split_part * split_part
 (** A split strategy for interior split dates. It returns value projections rather than spans so
@@ -34,7 +39,12 @@ val split_part : period:Period.t -> value:(float -> float) -> split_part
 type point = private
   | Const of { id : int; date : Date.t; value : float }
   | Map of { id : int; dep : point; f : float -> float }
-  | Derived of { id : int; date : Date.t; deps : point option list; f : float option list -> float }
+  | Derived of {
+      id : int;
+      date : Date.t;
+      deps : point option list;
+      f : float option list -> float option;
+    }
   | Accum of {
       id : int;
       date : Date.t;
@@ -48,7 +58,7 @@ type _ cell = Point_cell : point -> point cell | Span_cell : span -> span cell
 (* Point operations *)
 val p_const : Date.t -> float -> point
 val p_map : point -> (float -> float) -> point
-val p_derived : Date.t -> point option list -> (float option list -> float) -> point
+val p_derived : Date.t -> point option list -> (float option list -> float option) -> point
 val p_accum : Date.t -> float -> point option -> span option list -> point
 val point_date : point -> Date.t
 val point_id : point -> int
@@ -58,9 +68,9 @@ val f_value : Period.t -> float -> split_strategy -> span
 val f_map : span -> (float -> float) -> span
 
 val f_map2 :
-  Period.t -> span option -> span option -> (float option -> float option -> float) -> span
+  Period.t -> span option -> span option -> (float option -> float option -> float option) -> span
 
-val f_mapn : Period.t -> span option list -> (float option list -> float) -> span
+val f_mapn : Period.t -> span option list -> (float option list -> float option) -> span
 val span_period : span -> Period.t
 val span_id : span -> int
 

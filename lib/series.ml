@@ -40,7 +40,7 @@ let cell_split_strategy (split : split) : split_strategy =
 (* ----- Span aggregation ----- *)
 module Agg = struct
   type sample = { period : Period.t; value : float }
-  type t = Agg of (sample option list -> float)
+  type t = Agg of (sample option list -> float option)
 
   let make reduce = Agg reduce
   let reduce (Agg f) samples = f samples
@@ -48,21 +48,23 @@ module Agg = struct
 
   let sum =
     make (fun samples ->
-        samples |> present |> List.fold_left (fun total sample -> total +. sample.value) 0.0)
+        match present samples with
+        | [] -> None
+        | present -> Some (List.fold_left (fun total sample -> total +. sample.value) 0.0 present))
 
   let min =
     make (fun samples ->
         match present samples with
-        | [] -> 0.0
+        | [] -> None
         | first :: rest ->
-            List.fold_left (fun acc sample -> Float.min acc sample.value) first.value rest)
+            Some (List.fold_left (fun acc sample -> Float.min acc sample.value) first.value rest))
 
   let max =
     make (fun samples ->
         match present samples with
-        | [] -> 0.0
+        | [] -> None
         | first :: rest ->
-            List.fold_left (fun acc sample -> Float.max acc sample.value) first.value rest)
+            Some (List.fold_left (fun acc sample -> Float.max acc sample.value) first.value rest))
 
   let average =
     make (fun samples ->
@@ -72,19 +74,20 @@ module Agg = struct
                (fun (total, count) sample -> (total +. sample.value, count + 1))
                (0.0, 0)
         in
-        if count = 0 then 0.0 else total /. Float.of_int count)
+        if count = 0 then None else Some (total /. Float.of_int count))
 
-  let time_weighted_average =
+  let time_weighted_average year_frac =
     make (fun samples ->
-        let weighted_total, total_days =
+        let weighted_total, total_weight =
           samples |> present
           |> List.fold_left
-               (fun (weighted_total, total_days) sample ->
-                 let days = Float.of_int (Period.days sample.period) in
-                 (weighted_total +. (sample.value *. days), total_days +. days))
+               (fun (weighted_total, total_weight) sample ->
+                 let start, end_ = Period.to_tuple sample.period in
+                 let weight = year_frac start end_ in
+                 (weighted_total +. (sample.value *. weight), total_weight +. weight))
                (0.0, 0.0)
         in
-        if Float.equal total_days 0.0 then 0.0 else weighted_total /. total_days)
+        if Float.equal total_weight 0.0 then None else Some (weighted_total /. total_weight))
 end
 
 (* ----- Series constructors ----- *)
@@ -107,14 +110,14 @@ module rec Spans : sig
         agg : Agg.t;
         a : t;
         b : t;
-        f : float option -> float option -> float;
+        f : float option -> float option -> float option;
       }
     | MapN of {
         id : series_id;
         label : string option;
         agg : Agg.t;
         deps : t list;
-        f : float option list -> float;
+        f : float option list -> float option;
       }
     | Extend of { id : series_id; agg : Agg.t; a : t; b : t }
     | Clipped of { id : series_id; after : Date.t; until : Date.t; base : t }
@@ -147,8 +150,11 @@ module rec Spans : sig
   val const : ?label:string -> split:split -> agg:Agg.t -> period:Period.t -> float -> t
   val of_list : ?label:string -> split:split -> agg:Agg.t -> (Period.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
-  val map2 : ?label:string -> agg:Agg.t -> t -> t -> (float option -> float option -> float) -> t
-  val mapn : ?label:string -> agg:Agg.t -> t list -> (float option list -> float) -> t
+
+  val map2 :
+    ?label:string -> agg:Agg.t -> t -> t -> (float option -> float option -> float option) -> t
+
+  val mapn : ?label:string -> agg:Agg.t -> t list -> (float option list -> float option) -> t
   val extend : agg:Agg.t -> t -> t -> t
   val clipped : after:Date.t -> until:Date.t -> t -> t
   val after : Date.t -> t -> t
@@ -180,14 +186,15 @@ module rec Spans : sig
     unit ->
     t
 
-  val cell : period:Period.t -> split:split -> float Formula.t -> unfold_cell
+  val cell : period:Period.t -> split:split -> float option Formula.t -> unfold_cell
   val id : t -> series_id
   val label : t -> string option
   val agg : t -> Agg.t
   val with_agg : agg:Agg.t -> t -> t
-  val unpack_unfold_cell : unfold_cell -> Period.t * split * float Formula.t
+  val unpack_unfold_cell : unfold_cell -> Period.t * split * float option Formula.t
 end = struct
-  type unfold_cell = Cell of { period : Period.t; split : split; formula : float Formula.t }
+  type unfold_cell =
+    | Cell of { period : Period.t; split : split; formula : float option Formula.t }
 
   type t =
     | Const of {
@@ -205,14 +212,14 @@ end = struct
         agg : Agg.t;
         a : t;
         b : t;
-        f : float option -> float option -> float;
+        f : float option -> float option -> float option;
       }
     | MapN of {
         id : series_id;
         label : string option;
         agg : Agg.t;
         deps : t list;
-        f : float option list -> float;
+        f : float option list -> float option;
       }
     | Extend of { id : series_id; agg : Agg.t; a : t; b : t }
     | Clipped of { id : series_id; after : Date.t; until : Date.t; base : t }
@@ -267,7 +274,7 @@ end = struct
       ~init:cells
       ~cells:(fun () -> function
         | [] -> None
-        | (period, value) :: rest -> Some (cell ~period ~split (Formula.pure value), rest))
+        | (period, value) :: rest -> Some (cell ~period ~split (Formula.pure (Some value)), rest))
       ()
 
   let id = function
@@ -286,7 +293,7 @@ end = struct
     | Map { label; _ } -> label
     | Map2 { label; _ } -> label
     | MapN { label; _ } -> label
-    | Extend _ -> None
+    | Extend { a; _ } -> label a
     | Clipped { base; _ } -> label base
     | With_agg { base; _ } -> label base
     | Unfold { label; _ } -> label
@@ -310,26 +317,34 @@ end = struct
   let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
   let map2 ?label ~agg a b f = Map2 { id = new_id (); label; agg; a; b; f }
   let mapn ?label ~agg deps f = MapN { id = new_id (); label; agg; deps; f }
-  let value_or_zero = Option.value ~default:0.0
 
   let sum ?label ~agg = function
     | [] -> invalid_arg "Spans.sum: empty list"
     | [ x ] -> Map { id = new_id (); label; agg; dep = x; f = Fun.id }
     | deps ->
-        mapn ?label ~agg deps
-          (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc) 0.0)
+        mapn ?label ~agg deps (fun values ->
+            match List.filter_map Fun.id values with
+            | [] -> None
+            | present -> Some (List.fold_left ( +. ) 0.0 present))
 
   let mul ?label ~agg = function
     | [] -> invalid_arg "Spans.mul: empty list"
     | [ x ] -> Map { id = new_id (); label; agg; dep = x; f = Fun.id }
     | deps ->
-        mapn ?label ~agg deps
-          (List.fold_left (fun acc -> function Some v -> acc *. v | None -> acc) 1.0)
+        mapn ?label ~agg deps (fun values ->
+            if List.for_all Option.is_some values then
+              Some (List.fold_left (fun acc value -> acc *. Option.get value) 1.0 values)
+            else None)
 
-  let sub ?label ~agg a b = map2 ?label ~agg a b (fun a b -> value_or_zero a -. value_or_zero b)
+  let sub ?label ~agg a b =
+    map2 ?label ~agg a b (fun a b ->
+        match (a, b) with
+        | None, None -> None
+        | _ -> Some (Option.value ~default:0.0 a -. Option.value ~default:0.0 b))
 
   let div ?label ~agg a b =
-    map2 ?label ~agg a b (fun a b -> value_or_zero a /. Option.value ~default:1.0 b)
+    map2 ?label ~agg a b (fun a b ->
+        match (a, b) with Some a, Some b -> Some (a /. b) | _ -> None)
 end
 
 and Points : sig
@@ -342,27 +357,27 @@ and Points : sig
         label : string option;
         a : t;
         b : t;
-        f : float option -> float option -> float;
+        f : float option -> float option -> float option;
       }
     | MapN of {
         id : series_id;
         label : string option;
         deps : t list;
-        f : float option list -> float;
+        f : float option list -> float option;
       }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
   val sum : ?label:string -> t list -> t
-  val sub : ?label:string -> ?fill:float -> t -> t -> t
+  val sub : ?label:string -> t -> t -> t
   val mul : ?label:string -> t list -> t
-  val div : ?label:string -> ?fill:float -> t -> t -> t
+  val div : ?label:string -> t -> t -> t
   val const : ?label:string -> period:Period.t -> float -> t
   val of_list : ?label:string -> (Date.t * float) list -> t
   val map : ?label:string -> (float -> float) -> t -> t
-  val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
-  val mapn : ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
+  val map2 : ?label:string -> t -> t -> (float option -> float option -> float option) -> t
+  val mapn : ?label:string -> t list -> (float option list -> float option) -> t
   val accum : ?label:string -> init:float -> Spans.t -> t
   val id : t -> series_id
   val label : t -> string option
@@ -376,13 +391,13 @@ end = struct
         label : string option;
         a : t;
         b : t;
-        f : float option -> float option -> float;
+        f : float option -> float option -> float option;
       }
     | MapN of {
         id : series_id;
         label : string option;
         deps : t list;
-        f : float option list -> float;
+        f : float option list -> float option;
       }
     | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
 
@@ -409,43 +424,40 @@ end = struct
   let map ?label f dep = Map { id = new_id (); label; dep; f }
   let neg ?label dep = map ?label (fun value -> -.value) dep
   let scale ?label factor dep = map ?label (fun value -> factor *. value) dep
-  let fill_option fill = function None -> fill | some -> some
-
-  let map2 ?label ?fill a b f =
-    Map2
-      { id = new_id (); label; a; b; f = (fun a b -> f (fill_option fill a) (fill_option fill b)) }
-
-  let mapn ?label ?fill deps f =
-    let f =
-      match fill with
-      | None -> f
-      | Some fill -> fun values -> f (List.map (fill_option (Some fill)) values)
-    in
-    MapN { id = new_id (); label; deps; f }
-
-  let value_or_zero = Option.value ~default:0.0
+  let map2 ?label a b f = Map2 { id = new_id (); label; a; b; f }
+  let mapn ?label deps f = MapN { id = new_id (); label; deps; f }
 
   let sum ?label = function
     | [] -> invalid_arg "Points.sum: empty list"
     | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
     | deps ->
-        mapn ?label deps
-          (List.fold_left (fun acc -> function Some v -> acc +. v | None -> acc) 0.0)
+        mapn ?label deps (fun values ->
+            match List.filter_map Fun.id values with
+            | [] -> None
+            | present -> Some (List.fold_left ( +. ) 0.0 present))
 
   let mul ?label = function
     | [] -> invalid_arg "Points.mul: empty list"
     | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
     | deps ->
-        mapn ?label deps
-          (List.fold_left (fun acc -> function Some v -> acc *. v | None -> acc) 1.0)
+        mapn ?label deps (fun values ->
+            if List.for_all Option.is_some values then
+              Some (List.fold_left (fun acc value -> acc *. Option.get value) 1.0 values)
+            else None)
 
-  let sub ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a -. value_or_zero b)
-  let div ?label ?fill a b = map2 ?label ?fill a b (fun a b -> value_or_zero a /. value_or_zero b)
+  let sub ?label a b =
+    map2 ?label a b (fun a b ->
+        match (a, b) with
+        | None, None -> None
+        | _ -> Some (Option.value ~default:0.0 a -. Option.value ~default:0.0 b))
+
+  let div ?label a b =
+    map2 ?label a b (fun a b -> match (a, b) with Some a, Some b -> Some (a /. b) | _ -> None)
 end
 
 and Deps : sig
-  type span_reader = period:Period.t -> float Formula.t
-  type point_reader = date:Date.t -> default:float -> float Formula.t
+  type span_reader = period:Period.t -> float option Formula.t
+  type point_reader = date:Date.t -> float option Formula.t
   type _ t
 
   val none : unit t
@@ -459,8 +471,8 @@ and Deps : sig
   val dependencies : 'a t -> packed_dep list
   val run : 'a t -> 'a
 end = struct
-  type span_reader = period:Period.t -> float Formula.t
-  type point_reader = date:Date.t -> default:float -> float Formula.t
+  type span_reader = period:Period.t -> float option Formula.t
+  type point_reader = date:Date.t -> float option Formula.t
   type _ dep = Span_dep : Spans.t -> span_reader dep | Point_dep : Points.t -> point_reader dep
   type _ t = Pure : 'a -> 'a t | Ap : 'x dep * ('x -> 'a) t -> 'a t
 
@@ -493,7 +505,7 @@ end = struct
           let reader ~period = Formula.span_query s ~period in
           go rest reader
       | Ap (Point_dep s, rest) ->
-          let reader ~date ~default = Formula.point_query s ~date ~default in
+          let reader ~date = Formula.point_query s ~date in
           go rest reader
     in
     go d
@@ -512,8 +524,8 @@ and Formula : sig
   val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
   val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
   val queries : 'a t -> packed_query list
-  val span_query : Spans.t -> period:Period.t -> float t
-  val point_query : Points.t -> date:Date.t -> default:float -> float t
+  val span_query : Spans.t -> period:Period.t -> float option t
+  val point_query : Points.t -> date:Date.t -> float option t
 
   val eval_with_delta :
     query_span_values:(Spans.t -> Period.t -> Agg.sample option list * float) ->
@@ -522,8 +534,8 @@ and Formula : sig
     'a * float
 end = struct
   type _ query =
-    | Span_query : { series : Spans.t; period : Period.t } -> float query
-    | Point_query : { series : Points.t; date : Date.t; default : float } -> float query
+    | Span_query : { series : Spans.t; period : Period.t } -> float option query
+    | Point_query : { series : Points.t; date : Date.t } -> float option query
 
   type 'a t =
     | Pure : 'a -> 'a t
@@ -541,14 +553,14 @@ end = struct
   let ( let+ ) x f = map f x
   let ( and+ ) a b = map2 (fun x y -> (x, y)) a b
   let span_query series ~period = Query (Span_query { series; period })
-  let point_query series ~date ~default = Query (Point_query { series; date; default })
+  let point_query series ~date = Query (Point_query { series; date })
 
   let rec queries : type a. a t -> packed_query list = function
     | Pure _ -> []
     | Map (_, x) -> queries x
     | Map2 (_, a, b) -> queries a @ queries b
     | Query (Span_query { series; period }) -> [ Span_query_item { series; period } ]
-    | Query (Point_query { series; date; _ }) -> [ Point_query_item { series; date } ]
+    | Query (Point_query { series; date }) -> [ Point_query_item { series; date } ]
 
   let eval_with_delta (type a)
       ~(query_span_values : Spans.t -> Period.t -> Agg.sample option list * float)
@@ -566,9 +578,9 @@ end = struct
       | Query (Span_query { series; period }) ->
           let samples, delta = query_span_values series period in
           (Agg.reduce (Spans.agg series) samples, delta)
-      | Query (Point_query { series; date; default }) ->
+      | Query (Point_query { series; date }) ->
           let value, delta = query_point_value series date in
-          (Option.value ~default value, delta)
+          (value, delta)
     in
     go formula
 end
@@ -628,18 +640,20 @@ type eval_cell = Span_eval_cell of span | Point_eval_cell of point
 
 type resolving_cell = {
   cell : eval_cell;
-  mutable current : float;
-  mutable last : float;
+  mutable current : float option;
+  mutable last : float option;
   mutable step : int;
 }
 
-type eval_state = Resolving of resolving_cell | Resolved of { cell : eval_cell; value : float }
+type eval_state =
+  | Resolving of resolving_cell
+  | Resolved of { cell : eval_cell; value : float option }
 
 type series_cache = {
   point : (series_id, cached_point PointCellCache.t) Hashtbl.t;
   span : (series_id, span_cache_entry) Hashtbl.t;
   accum : (series_id, accum_cache_entry) Hashtbl.t;
-  span_formulas : (int, float Formula.t) Hashtbl.t;
+  span_formulas : (int, float option Formula.t) Hashtbl.t;
   values : eval_state CellValueCache.t;
 }
 
@@ -971,23 +985,30 @@ let current_value cache key =
 let current_span_value cache span = current_value cache (span_key span)
 let current_point_value cache point = current_value cache (point_key point)
 
+let current_span_option_value cache = function
+  | None -> None
+  | Some span -> current_span_value cache span
+
 let rec current_span_option_samples cache = function
   | [] -> []
   | None :: rest -> None :: current_span_option_samples cache rest
-  | Some span :: rest ->
-      Some { Agg.period = span_period span; value = current_span_value cache span }
-      :: current_span_option_samples cache rest
+  | Some span :: rest -> (
+      match current_span_value cache span with
+      | None -> None :: current_span_option_samples cache rest
+      | Some value ->
+          Some { Agg.period = span_period span; value } :: current_span_option_samples cache rest)
 
 let rec current_point_option_values cache = function
   | [] -> []
   | None :: rest -> None :: current_point_option_values cache rest
-  | Some point :: rest ->
-      Some (current_point_value cache point) :: current_point_option_values cache rest
+  | Some point :: rest -> current_point_value cache point :: current_point_option_values cache rest
 
 let rec sum_current_span_options cache = function
   | [] -> 0.0
   | None :: rest -> sum_current_span_options cache rest
-  | Some span :: rest -> current_span_value cache span +. sum_current_span_options cache rest
+  | Some span :: rest ->
+      Option.value ~default:0.0 (current_span_value cache span)
+      +. sum_current_span_options cache rest
 
 let clear_touched cache touched =
   let rec go = function
@@ -1027,7 +1048,7 @@ let rec prime_span cache touched span =
   | Some (Resolving _) -> false
   | None -> (
       let cell = Span_eval_cell span in
-      let state = { cell; current = 0.0; last = 0.0; step = 0 } in
+      let state = { cell; current = Some 0.0; last = Some 0.0; step = 0 } in
       CellValueCache.add cache.values key (Resolving state);
       touched := key :: !touched;
       match prime_span_value cache touched span with
@@ -1039,23 +1060,25 @@ let rec prime_span cache touched span =
 and prime_span_value cache touched = function
   | Value { id; value; _ } -> (
       match Hashtbl.find_opt cache.span_formulas id with
-      | None -> Some value
+      | None -> Some (Some value)
       | Some formula ->
           if prime_formula cache touched formula then Some (resolved_formula_value cache formula)
           else None)
   | Slice { dep; value; _ } ->
-      if prime_span cache touched dep then Some (value (current_span_value cache dep)) else None
+      if prime_span cache touched dep then Some (Option.map value (current_span_value cache dep))
+      else None
   | Map { dep; f; _ } ->
-      if prime_span cache touched dep then Some (f (current_span_value cache dep)) else None
+      if prime_span cache touched dep then Some (Option.map f (current_span_value cache dep))
+      else None
   | Map2 { a; b; f; _ } ->
       let a_resolved = prime_span_option cache touched a in
       let b_resolved = prime_span_option cache touched b in
       if a_resolved && b_resolved then
-        Some (f (Option.map (current_span_value cache) a) (Option.map (current_span_value cache) b))
+        Some (f (current_span_option_value cache a) (current_span_option_value cache b))
       else None
   | MapN { deps; f; _ } ->
       if prime_span_options cache touched deps then
-        Some (f (List.map (Option.map (current_span_value cache)) deps))
+        Some (f (List.map (current_span_option_value cache) deps))
       else None
 
 and prime_point cache touched point =
@@ -1065,7 +1088,7 @@ and prime_point cache touched point =
   | Some (Resolving _) -> false
   | None -> (
       let cell = Point_eval_cell point in
-      let state = { cell; current = 0.0; last = 0.0; step = 0 } in
+      let state = { cell; current = Some 0.0; last = Some 0.0; step = 0 } in
       CellValueCache.add cache.values key (Resolving state);
       touched := key :: !touched;
       match prime_point_value cache touched point with
@@ -1075,9 +1098,10 @@ and prime_point cache touched point =
       | None -> false)
 
 and prime_point_value cache touched = function
-  | Const { value; _ } -> Some value
+  | Const { value; _ } -> Some (Some value)
   | Map { dep; f; _ } ->
-      if prime_point cache touched dep then Some (f (current_point_value cache dep)) else None
+      if prime_point cache touched dep then Some (Option.map f (current_point_value cache dep))
+      else None
   | Derived { deps; f; _ } ->
       if prime_point_options cache touched deps then
         Some (f (current_point_option_values cache deps))
@@ -1087,9 +1111,11 @@ and prime_point_value cache touched = function
       let delta_resolved = prime_span_options cache touched delta in
       if base_resolved && delta_resolved then
         let start =
-          match base with Some point -> current_point_value cache point | None -> init
+          match base with
+          | Some point -> Option.value ~default:init (current_point_value cache point)
+          | None -> init
         in
-        Some (start +. sum_current_span_options cache delta)
+        Some (Some (start +. sum_current_span_options cache delta))
       else None
 
 and prime_formula cache touched formula =
@@ -1140,10 +1166,18 @@ and resolved_formula_value cache formula =
          (samples, 0.0))
        ~query_point_value:(fun series date ->
          let value =
-           Option.map (current_point_value cache) (query_point_series cache series date)
+           match query_point_series cache series date with
+           | Some point -> current_point_value cache point
+           | None -> None
          in
          (value, 0.0))
        formula)
+
+let value_delta previous value =
+  match (previous, value) with
+  | None, None -> 0.0
+  | Some previous, Some value -> Float.abs (value -. previous)
+  | None, Some _ | Some _, None -> Float.infinity
 
 let rec eval_span cache touched iteration span =
   let key = span_key span in
@@ -1154,7 +1188,7 @@ let rec eval_span cache touched iteration span =
       state.step <- iteration;
       let previous = state.current in
       let value, child_delta = eval_span_value cache touched iteration span in
-      let delta = Float.abs (value -. previous) in
+      let delta = value_delta previous value in
       state.last <- previous;
       state.current <- value;
       (value, max delta child_delta)
@@ -1165,14 +1199,14 @@ let rec eval_span cache touched iteration span =
 and eval_span_value cache touched iteration = function
   | Value { id; value; _ } -> (
       match Hashtbl.find_opt cache.span_formulas id with
-      | None -> (value, 0.0)
+      | None -> (Some value, 0.0)
       | Some formula -> eval_formula cache touched iteration formula)
   | Slice { dep; value; _ } ->
       let dep_value, delta = eval_span cache touched iteration dep in
-      (value dep_value, delta)
+      (Option.map value dep_value, delta)
   | Map { dep; f; _ } ->
       let dep_value, delta = eval_span cache touched iteration dep in
-      (f dep_value, delta)
+      (Option.map f dep_value, delta)
   | Map2 { a; b; f; _ } ->
       let a_value, a_delta = eval_span_option cache touched iteration a in
       let b_value, b_delta = eval_span_option cache touched iteration b in
@@ -1190,7 +1224,7 @@ and eval_point cache touched iteration point =
       state.step <- iteration;
       let previous = state.current in
       let value, child_delta = eval_point_value cache touched iteration point in
-      let delta = Float.abs (value -. previous) in
+      let delta = value_delta previous value in
       state.last <- previous;
       state.current <- value;
       (value, max delta child_delta)
@@ -1199,10 +1233,10 @@ and eval_point cache touched iteration point =
       eval_point cache touched iteration point
 
 and eval_point_value cache touched iteration = function
-  | Const { value; _ } -> (value, 0.0)
+  | Const { value; _ } -> (Some value, 0.0)
   | Map { dep; f; _ } ->
       let dep_value, delta = eval_point cache touched iteration dep in
-      (f dep_value, delta)
+      (Option.map f dep_value, delta)
   | Derived { deps; f; _ } ->
       let values, delta = eval_point_options cache touched iteration deps in
       (f values, delta)
@@ -1210,10 +1244,10 @@ and eval_point_value cache touched iteration = function
       let base_value, base_delta =
         match base with
         | Some point -> eval_point cache touched iteration point
-        | None -> (init, 0.0)
+        | None -> (Some init, 0.0)
       in
       let delta_value, delta_delta = eval_span_option_sum cache touched iteration delta in
-      (base_value +. delta_value, max base_delta delta_delta)
+      (Some (Option.value ~default:init base_value +. delta_value), max base_delta delta_delta)
 
 and eval_formula cache touched iteration formula =
   Formula.eval_with_delta
@@ -1228,13 +1262,11 @@ and eval_point_query cache touched iteration series date =
   match query_point_series cache series date with
   | Some point ->
       let value, delta = eval_point cache touched iteration point in
-      (Some value, delta)
+      (value, delta)
   | None -> (None, 0.0)
 
 and eval_span_option cache touched iteration = function
-  | Some span ->
-      let value, delta = eval_span cache touched iteration span in
-      (Some value, delta)
+  | Some span -> eval_span cache touched iteration span
   | None -> (None, 0.0)
 
 and eval_span_options cache touched iteration = function
@@ -1257,9 +1289,7 @@ and eval_span_option_samples cache touched iteration = function
       (sample :: samples, max delta rest_delta)
 
 and eval_point_option cache touched iteration = function
-  | Some point ->
-      let value, delta = eval_point cache touched iteration point in
-      (Some value, delta)
+  | Some point -> eval_point cache touched iteration point
   | None -> (None, 0.0)
 
 and eval_point_options cache touched iteration = function
@@ -1328,10 +1358,10 @@ let query_span_samples cache series ~period =
 let query_span cache series ~period =
   query_span_samples cache series ~period |> Agg.reduce (Spans.agg series)
 
-let query_point cache series ~date ~default =
+let query_point cache series ~date =
   match query_point_series cache series date with
   | Some point -> resolve_point cache point
-  | None -> default
+  | None -> None
 
 (* ----- Series dependencies ----- *)
 

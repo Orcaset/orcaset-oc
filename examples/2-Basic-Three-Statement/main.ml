@@ -27,12 +27,16 @@ let revenue =
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
     ~cells:(fun read_revenue period ->
       let formula =
-        if Date.equal (Period.start period) start_date then Series.Formula.pure initial_revenue
+        if Date.equal (Period.start period) start_date then
+          Series.Formula.pure (Some initial_revenue)
         else
           let open Series.Formula in
           let+ prior_revenue = read_revenue ~period:(Period.prev eomonth_lookback period) in
-          let yf = Yf.actual_360 (Period.start period) (Period.end_ period) in
-          prior_revenue *. (1. +. (annual_revenue_growth *. yf))
+          Option.map
+            (fun prior_revenue ->
+              let yf = Yf.actual_360 (Period.start period) (Period.end_ period) in
+              prior_revenue *. (1. +. (annual_revenue_growth *. yf)))
+            prior_revenue
       in
       Some
         ( Series.Spans.cell ~period ~split:Series.proportional_split formula,
@@ -50,7 +54,7 @@ let opex =
       let next_period = Period.next eomonth_offset period in
       Some
         ( Series.Spans.cell ~period ~split:Series.proportional_split
-            (Series.Formula.pure monthly_opex),
+            (Series.Formula.pure (Some monthly_opex)),
           next_period ))
     ()
 
@@ -64,8 +68,8 @@ let rec lazy_depreciation =
        ~cells:(fun read_ppe_net period ->
          let formula =
            let open Series.Formula in
-           let+ ppe_net = read_ppe_net ~date:(Period.start period) ~default:0.0 in
-           -.ppe_net *. monthly_depreciation_rate
+           let+ ppe_net = read_ppe_net ~date:(Period.start period) in
+           Option.map (fun ppe_net -> -.ppe_net *. monthly_depreciation_rate) ppe_net
          in
          let next_period = Period.next eomonth_offset period in
          Some (Series.Spans.cell ~period ~split:Series.proportional_split formula, next_period))

@@ -2,6 +2,7 @@ open Orcaset
 
 let d y m day = Date.make y m day
 let p s e = Period.make s e
+let option_float = Alcotest.option (Alcotest.float 1e-9)
 
 let span_series ~label ~period value =
   Series.Spans.const ?label ~split:Series.proportional_split ~agg:Series.Agg.sum ~period value
@@ -38,9 +39,14 @@ let test_eval_periods_point_values_include_shared_boundaries () =
   let balance = point_series ~label:(Some "Balance") ~period:(p (d 2026 1 1) (d 2026 4 2)) 100.0 in
   match Stmt.eval_periods [ jan; feb; mar ] (Stmt.point_line balance) with
   | Stmt.RLine { values = Some (Stmt.Point_values values); _ } ->
-      Alcotest.(check (list (pair Helpers.date (float 1e-9))))
+      Alcotest.(check (list (pair Helpers.date option_float)))
         "point values"
-        [ (d 2026 1 1, 100.0); (d 2026 2 1, 100.0); (d 2026 3 1, 100.0); (d 2026 4 1, 100.0) ]
+        [
+          (d 2026 1 1, Some 100.0);
+          (d 2026 2 1, Some 100.0);
+          (d 2026 3 1, Some 100.0);
+          (d 2026 4 1, Some 100.0);
+        ]
         values
   | _ -> Alcotest.fail "expected point values for period statement"
 
@@ -59,13 +65,13 @@ let test_eval_periods_supports_nested_span_totals () =
   | Stmt.RTotal
       {
         label = Some "Net income";
-        values = Some (Stmt.Span_values [ (_, 50.0) ]);
+        values = Some (Stmt.Span_values [ (_, Some 50.0) ]);
         children =
           [
             Stmt.RTotal
               {
                 label = Some "Gross profit";
-                values = Some (Stmt.Span_values [ (_, 70.0) ]);
+                values = Some (Stmt.Span_values [ (_, Some 70.0) ]);
                 children =
                   [
                     Stmt.RLine { label = Some "Revenue"; values = Some (Stmt.Span_values _); _ };
@@ -78,6 +84,16 @@ let test_eval_periods_supports_nested_span_totals () =
       ()
   | _ -> Alcotest.fail "expected nested span totals"
 
+let test_eval_periods_preserves_missing_span_values () =
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let revenue = span_series ~label:(Some "Revenue") ~period:jan 100.0 in
+  match Stmt.eval_periods [ feb ] (Stmt.span_line revenue) with
+  | Stmt.RLine { values = Some (Stmt.Span_values [ (period, None) ]); _ }
+    when Period.equal period feb ->
+      ()
+  | _ -> Alcotest.fail "expected missing span value"
+
 let test_fixed_width_renders_totals_and_indented_children () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
@@ -89,16 +105,16 @@ let test_fixed_width_renders_totals_and_indented_children () =
             Stmt.RLine
               {
                 label = Some "Revenue";
-                values = Some (Stmt.Span_values [ (jan, 100.0); (feb, 110.0) ]);
+                values = Some (Stmt.Span_values [ (jan, Some 100.0); (feb, Some 110.0) ]);
               };
             Stmt.RLine
               {
                 label = Some "Costs";
-                values = Some (Stmt.Span_values [ (jan, -30.0); (feb, -30.0) ]);
+                values = Some (Stmt.Span_values [ (jan, Some (-30.0)); (feb, Some (-30.0)) ]);
               };
           ];
         label = Some "Gross Profit";
-        values = Some (Stmt.Span_values [ (jan, 70.0); (feb, 80.0) ]);
+        values = Some (Stmt.Span_values [ (jan, Some 70.0); (feb, Some 80.0) ]);
       }
   in
   let row = Printf.sprintf "%-*s  %10s  %10s" 12 in
@@ -123,8 +139,11 @@ let test_fixed_width_renders_point_stub_unknown_labels_and_group_spacing () =
     Stmt.RGroup
       [
         Stmt.RLine
-          { label = None; values = Some (Stmt.Point_values [ (jan, 1000.0); (feb, 1100.0) ]) };
-        Stmt.RLine { label = Some ""; values = Some (Stmt.Span_values [ (period, 50.0) ]) };
+          {
+            label = None;
+            values = Some (Stmt.Point_values [ (jan, Some 1000.0); (feb, Some 1100.0) ]);
+          };
+        Stmt.RLine { label = Some ""; values = Some (Stmt.Span_values [ (period, Some 50.0) ]) };
         Stmt.RLine { label = Some "No values"; values = None };
       ]
   in
@@ -142,6 +161,15 @@ let test_fixed_width_renders_point_stub_unknown_labels_and_group_spacing () =
   in
   Alcotest.(check string) "fixed width group" expected (Stmt.fixed_width resolved)
 
+let test_fixed_width_renders_missing_values_as_blanks () =
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let resolved =
+    Stmt.RLine { label = Some "Revenue"; values = Some (Stmt.Span_values [ (jan, None) ]) }
+  in
+  let row = Printf.sprintf "%-*s  %10s" 7 in
+  let expected = String.concat "\n" [ row "" "2026-02-01"; row "Revenue" "" ] in
+  Alcotest.(check string) "fixed width missing" expected (Stmt.fixed_width resolved)
+
 let tests =
   List.map
     (fun (name, f) -> Alcotest.test_case name `Quick f)
@@ -151,8 +179,11 @@ let tests =
       ( "eval_periods point values include shared boundaries",
         test_eval_periods_point_values_include_shared_boundaries );
       ("eval_periods supports nested span totals", test_eval_periods_supports_nested_span_totals);
+      ("eval_periods preserves missing span values", test_eval_periods_preserves_missing_span_values);
       ( "fixed_width renders totals and indented children",
         test_fixed_width_renders_totals_and_indented_children );
       ( "fixed_width renders point stub unknown labels and group spacing",
         test_fixed_width_renders_point_stub_unknown_labels_and_group_spacing );
+      ( "fixed_width renders missing values as blanks",
+        test_fixed_width_renders_missing_values_as_blanks );
     ]

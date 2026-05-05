@@ -40,7 +40,7 @@ let revenue =
     ~init:(start_period, 1_000.0)
     ~cells:(fun () (period, value) ->
       let next_period = Period.next offset period in
-      let next_value = value *. 1.05 in
+      let next_value = Some (value *. 1.05) in
       Some
         ( Series.Spans.cell ~period ~split:Series.proportional_split (Series.Formula.pure value),
           (next_period, next_value) ))
