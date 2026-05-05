@@ -22,9 +22,7 @@ let revenue =
           let+ prior_revenue = read_revenue ~period:(Period.prev qtr_lookback period) in
           Option.map (fun prior_revenue -> prior_revenue *. 1.03) prior_revenue
       in
-      Some
-        ( Series.Spans.cell ~period ~split:Series.proportional_split formula,
-          Period.next qtr_offset period ))
+      Some (Series.Spans.cell ~period ~split:Split.daily formula, Period.next qtr_offset period))
     ()
 
 let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue

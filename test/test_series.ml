@@ -23,8 +23,7 @@ let monthly_series ~start ~n value_of =
       else
         let period = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
         Some
-          ( Series.Spans.cell ~period ~split:Series.proportional_split
-              (Series.Formula.pure (Some (value_of i))),
+          ( Series.Spans.cell ~period ~split:Split.daily (Series.Formula.pure (Some (value_of i))),
             i + 1 ))
     ()
 
@@ -33,7 +32,7 @@ let single_span_series ~period ~split value = Series.Spans.of_list ~split ~agg [
 let test_span_const () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let series = Spans.const ~split:proportional_split ~agg ~period 42.0 in
+  let series = Spans.const ~split:Split.daily ~agg ~period 42.0 in
   let cache = make_cache () in
   let total = query_span cache series ~period in
   check_some_float "const span value" 42.0 total
@@ -43,7 +42,7 @@ let test_span_of_list () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let series =
-    Spans.of_list ~label:"Revenue" ~split:proportional_split ~agg [ (jan, 31.0); (feb, 28.0) ]
+    Spans.of_list ~label:"Revenue" ~split:Split.daily ~agg [ (jan, 31.0); (feb, 28.0) ]
   in
   let cache = make_cache () in
   Alcotest.(check (option string)) "label" (Some "Revenue") (Spans.label series);
@@ -57,10 +56,9 @@ let test_span_custom_split () =
   let full_period = p (d 2026 1 1) (d 2026 4 1) in
   let first_month = p (d 2026 1 1) (d 2026 2 1) in
   let remaining_months = p (d 2026 2 1) (d 2026 4 1) in
-  let front_loaded_split : split =
+  let front_loaded_split : Split.t =
    fun ~period:_ ~date:_ ->
-    ( Series.split_part ~value:(fun value -> value *. 0.75),
-      Series.split_part ~value:(fun value -> value *. 0.25) )
+    (Split.part ~value:(fun value -> value *. 0.75), Split.part ~value:(fun value -> value *. 0.25))
   in
   let series = single_span_series ~period:full_period ~split:front_loaded_split 100.0 in
   let cache = make_cache () in
@@ -70,7 +68,7 @@ let test_span_custom_split () =
 let test_span_map_applies_function () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let base = single_span_series ~period ~split:proportional_split 10.0 in
+  let base = single_span_series ~period ~split:Split.daily 10.0 in
   let mapped = Spans.map (fun value -> value *. -0.9) base in
   let cache = make_cache () in
   let total = query_span cache mapped ~period in
@@ -79,8 +77,8 @@ let test_span_map_applies_function () =
 let test_span_map2_applies_function () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let a = single_span_series ~period ~split:proportional_split 10.0 in
-  let b = single_span_series ~period ~split:proportional_split 3.0 in
+  let a = single_span_series ~period ~split:Split.daily 10.0 in
+  let b = single_span_series ~period ~split:Split.daily 3.0 in
   let mapped =
     Spans.map2 ~agg a b (fun a b ->
         Some (Option.value ~default:0.0 a -. Option.value ~default:0.0 b))
@@ -93,8 +91,8 @@ let test_span_map2_splits_parents_before_mapping () =
   let open Series in
   let full_period = p (d 2026 1 1) (d 2026 4 1) in
   let middle_month = p (d 2026 2 1) (d 2026 3 1) in
-  let a = single_span_series ~period:full_period ~split:const_split 10.0 in
-  let b = single_span_series ~period:full_period ~split:const_split 2.0 in
+  let a = single_span_series ~period:full_period ~split:Split.const 10.0 in
+  let b = single_span_series ~period:full_period ~split:Split.const 2.0 in
   let mapped =
     Spans.map2 ~agg a b (fun a b ->
         Some (Option.value ~default:0.0 a *. Option.value ~default:0.0 b))
@@ -106,8 +104,8 @@ let test_span_map2_splits_parents_before_mapping () =
 let test_span_convenience_constructors () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let a = single_span_series ~period ~split:proportional_split 10.0 in
-  let b = single_span_series ~period ~split:proportional_split 2.0 in
+  let a = single_span_series ~period ~split:Split.daily 10.0 in
+  let b = single_span_series ~period ~split:Split.daily 2.0 in
   let cache = make_cache () in
   let check name expected series =
     check_some_float name expected (query_span cache series ~period)
@@ -129,8 +127,8 @@ let test_span_convenience_identity () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let query_period = p (d 2026 1 1) (d 2026 3 1) in
-  let a = single_span_series ~period:jan ~split:proportional_split 10.0 in
-  let b = single_span_series ~period:feb ~split:proportional_split 3.0 in
+  let a = single_span_series ~period:jan ~split:Split.daily 10.0 in
+  let b = single_span_series ~period:feb ~split:Split.daily 3.0 in
   let cache = make_cache () in
   let summed = Spans.sum ~agg [ a; b ] in
   let total = query_span cache summed ~period:query_period in
@@ -145,8 +143,8 @@ let test_span_mapn_fill () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let query_period = p (d 2026 1 1) (d 2026 3 1) in
-  let a = single_span_series ~period:jan ~split:proportional_split 10.0 in
-  let b = single_span_series ~period:feb ~split:proportional_split 3.0 in
+  let a = single_span_series ~period:jan ~split:Split.daily 10.0 in
+  let b = single_span_series ~period:feb ~split:Split.daily 3.0 in
   let filled =
     Spans.mapn ~agg [ a; b ] (fun values ->
         Some
@@ -162,9 +160,9 @@ let test_span_mapn_splits_parents_before_mapping () =
   let open Series in
   let full_period = p (d 2026 1 1) (d 2026 4 1) in
   let middle_month = p (d 2026 2 1) (d 2026 3 1) in
-  let a = single_span_series ~period:full_period ~split:const_split 10.0 in
-  let b = single_span_series ~period:full_period ~split:const_split 2.0 in
-  let c = single_span_series ~period:full_period ~split:const_split 3.0 in
+  let a = single_span_series ~period:full_period ~split:Split.const 10.0 in
+  let b = single_span_series ~period:full_period ~split:Split.const 2.0 in
+  let c = single_span_series ~period:full_period ~split:Split.const 3.0 in
   let mapped =
     Spans.mapn ~agg [ a; b; c ] (fun values ->
         Some
@@ -183,9 +181,9 @@ let test_span_sum_n_way_mismatched_periods () =
   let mar = p (d 2026 3 1) (d 2026 4 1) in
   let query_period = p (d 2026 1 1) (d 2026 4 1) in
   (* a: jan, feb. b: feb, mar. c: jan, mar. *)
-  let a = Spans.of_list ~split:proportional_split ~agg [ (jan, 10.0); (feb, 20.0) ] in
-  let b = Spans.of_list ~split:proportional_split ~agg [ (feb, 200.0); (mar, 300.0) ] in
-  let c = Spans.of_list ~split:proportional_split ~agg [ (jan, 1.0); (mar, 2.0) ] in
+  let a = Spans.of_list ~split:Split.daily ~agg [ (jan, 10.0); (feb, 20.0) ] in
+  let b = Spans.of_list ~split:Split.daily ~agg [ (feb, 200.0); (mar, 300.0) ] in
+  let c = Spans.of_list ~split:Split.daily ~agg [ (jan, 1.0); (mar, 2.0) ] in
   let total = Spans.sum ~agg [ a; b; c ] in
   let cache = make_cache () in
   let cells = span_values cache total ~period:query_period in
@@ -204,9 +202,9 @@ let test_span_mul_n_way_requires_all_inputs () =
   let mar = p (d 2026 3 1) (d 2026 4 1) in
   let query_period = p (d 2026 1 1) (d 2026 4 1) in
   (* a: jan=2, feb=3. b: feb=4, mar=5. c: jan=10, mar=11. *)
-  let a = Spans.of_list ~split:proportional_split ~agg [ (jan, 2.0); (feb, 3.0) ] in
-  let b = Spans.of_list ~split:proportional_split ~agg [ (feb, 4.0); (mar, 5.0) ] in
-  let c = Spans.of_list ~split:proportional_split ~agg [ (jan, 10.0); (mar, 11.0) ] in
+  let a = Spans.of_list ~split:Split.daily ~agg [ (jan, 2.0); (feb, 3.0) ] in
+  let b = Spans.of_list ~split:Split.daily ~agg [ (feb, 4.0); (mar, 5.0) ] in
+  let c = Spans.of_list ~split:Split.daily ~agg [ (jan, 10.0); (mar, 11.0) ] in
   let total = Spans.mul ~agg [ a; b; c ] in
   let cache = make_cache () in
   let cells = span_values cache total ~period:query_period in
@@ -224,8 +222,8 @@ let test_span_extend_contiguous () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
-  let a = single_span_series ~period:jan ~split:proportional_split 31.0 in
-  let b = single_span_series ~period:feb ~split:proportional_split 28.0 in
+  let a = single_span_series ~period:jan ~split:Split.daily 31.0 in
+  let b = single_span_series ~period:feb ~split:Split.daily 28.0 in
   let extended = Spans.extend ~agg a b in
   let cache = make_cache () in
   match span_values cache extended ~period:(p (d 2026 1 1) (d 2026 3 1)) with
@@ -239,8 +237,8 @@ let test_span_extend_clips_overlapping_second_series () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let overlap = p (d 2026 1 15) (d 2026 2 15) in
   let query_period = p (d 2026 2 1) (d 2026 2 15) in
-  let a = single_span_series ~period:jan ~split:proportional_split 31.0 in
-  let b = single_span_series ~period:overlap ~split:proportional_split 31.0 in
+  let a = single_span_series ~period:jan ~split:Split.daily 31.0 in
+  let b = single_span_series ~period:overlap ~split:Split.daily 31.0 in
   let extended = Spans.extend ~agg a b in
   let cache = make_cache () in
   let total = query_span cache extended ~period:query_period in
@@ -252,8 +250,8 @@ let test_span_extend_skips_covered_second_spans () =
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let mar = p (d 2026 3 1) (d 2026 4 1) in
   let jan_to_mar = p (d 2026 1 1) (d 2026 3 1) in
-  let a = single_span_series ~period:jan_to_mar ~split:const_split 60.0 in
-  let b = Spans.of_list ~split:const_split ~agg [ (jan, 10.0); (feb, 20.0); (mar, 30.0) ] in
+  let a = single_span_series ~period:jan_to_mar ~split:Split.const 60.0 in
+  let b = Spans.of_list ~split:Split.const ~agg [ (jan, 10.0); (feb, 20.0); (mar, 30.0) ] in
   let extended = Spans.extend ~agg a b in
   let cache = make_cache () in
   let total = query_span cache extended ~period:(p (d 2026 1 1) (d 2026 4 1)) in
@@ -263,8 +261,8 @@ let test_span_extend_preserves_gap_before_second_series () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let mar = p (d 2026 3 1) (d 2026 4 1) in
-  let a = single_span_series ~period:jan ~split:proportional_split 31.0 in
-  let b = single_span_series ~period:mar ~split:proportional_split 31.0 in
+  let a = single_span_series ~period:jan ~split:Split.daily 31.0 in
+  let b = single_span_series ~period:mar ~split:Split.daily 31.0 in
   let extended = Spans.extend ~agg a b in
   let cache = make_cache () in
   match span_values cache extended ~period:(p (d 2026 2 1) (d 2026 4 1)) with
@@ -274,8 +272,8 @@ let test_span_extend_preserves_gap_before_second_series () =
 let test_span_extend_empty_first_series () =
   let open Series in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
-  let empty = Spans.of_list ~split:proportional_split ~agg [] in
-  let b = single_span_series ~period:feb ~split:proportional_split 28.0 in
+  let empty = Spans.of_list ~split:Split.daily ~agg [] in
+  let b = single_span_series ~period:feb ~split:Split.daily 28.0 in
   let extended = Spans.extend ~agg empty b in
   let cache = make_cache () in
   let total = query_span cache extended ~period:feb in
@@ -286,9 +284,7 @@ let test_span_clipped_bounds () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let mar = p (d 2026 3 1) (d 2026 4 1) in
-  let base =
-    Spans.of_list ~split:proportional_split ~agg [ (jan, 31.0); (feb, 28.0); (mar, 31.0) ]
-  in
+  let base = Spans.of_list ~split:Split.daily ~agg [ (jan, 31.0); (feb, 28.0); (mar, 31.0) ] in
   let clipped = Spans.clipped ~after:(d 2026 1 15) ~until:(d 2026 3 15) base in
   let cache = make_cache () in
   match span_values cache clipped ~period:(p (d 2026 1 1) (d 2026 4 1)) with
@@ -303,9 +299,7 @@ let test_span_clipped_one_sided_constructors () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let mar = p (d 2026 3 1) (d 2026 4 1) in
-  let base =
-    Spans.of_list ~split:proportional_split ~agg [ (jan, 31.0); (feb, 28.0); (mar, 31.0) ]
-  in
+  let base = Spans.of_list ~split:Split.daily ~agg [ (jan, 31.0); (feb, 28.0); (mar, 31.0) ] in
   let cache = make_cache () in
   let from_mid_feb =
     span_values cache (Spans.after (d 2026 2 15) base) ~period:(p (d 2026 1 1) (d 2026 4 1))
@@ -327,7 +321,7 @@ let test_span_clipped_one_sided_constructors () =
 let test_span_clipped_zero_width_empty () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
-  let base = single_span_series ~period:jan ~split:proportional_split 31.0 in
+  let base = single_span_series ~period:jan ~split:Split.daily 31.0 in
   let clipped = Spans.clipped ~after:(d 2026 1 15) ~until:(d 2026 1 15) base in
   let cache = make_cache () in
   match span_values cache clipped ~period:jan with
@@ -337,7 +331,7 @@ let test_span_clipped_zero_width_empty () =
 let test_span_clipped_reversed_bounds_raise () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let base = single_span_series ~period ~split:proportional_split 31.0 in
+  let base = single_span_series ~period ~split:Split.daily 31.0 in
   Alcotest.check_raises "reversed bounds raise"
     (Invalid_argument "Spans.clipped: until before after") (fun () ->
       ignore (Spans.clipped ~after:(d 2026 2 1) ~until:(d 2026 1 1) base))
@@ -365,7 +359,7 @@ let test_span_clipped_outside_queries_do_not_force_base () =
 let test_span_clipped_label_and_dependencies () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let base = Spans.const ~label:"Revenue" ~split:proportional_split ~agg ~period 31.0 in
+  let base = Spans.const ~label:"Revenue" ~split:Split.daily ~agg ~period 31.0 in
   let clipped = Spans.clipped ~after:(d 2026 1 15) ~until:(d 2026 2 1) base in
   Alcotest.(check (option string)) "label" (Some "Revenue") (Spans.label clipped);
   match dependencies (Span_series clipped) with
@@ -378,7 +372,7 @@ let test_unfold_from_replays_base_and_continues () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let mar = p (d 2026 3 1) (d 2026 4 1) in
-  let base = Spans.of_list ~split:proportional_split ~agg [ (jan, 31.0); (feb, 28.0) ] in
+  let base = Spans.of_list ~split:Split.daily ~agg [ (jan, 31.0); (feb, 28.0) ] in
   let seen = ref [] in
   let series =
     Spans.unfold_from ~agg
@@ -389,7 +383,7 @@ let test_unfold_from_replays_base_and_continues () =
         if Date.(Period.start period >= d 2026 5 1) then None
         else
           let value = Float.of_int (Date.month (Period.start period)) in
-          Some (Spans.cell ~period ~split:proportional_split (Formula.pure (Some value)), period))
+          Some (Spans.cell ~period ~split:Split.daily (Formula.pure (Some value)), period))
       base
   in
   let cache = make_cache () in
@@ -409,7 +403,7 @@ let test_unfold_from_replays_base_and_continues () =
 
 let test_unfold_from_empty_base_does_not_call_cells () =
   let open Series in
-  let empty = Spans.of_list ~split:proportional_split ~agg [] in
+  let empty = Spans.of_list ~split:Split.daily ~agg [] in
   let called = ref false in
   let series =
     Spans.unfold_from ~agg
@@ -427,7 +421,7 @@ let test_unfold_from_empty_base_does_not_call_cells () =
 let test_unfold_from_dependencies () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let base = single_span_series ~period ~split:proportional_split 1.0 in
+  let base = single_span_series ~period ~split:Split.daily 1.0 in
   let points = Points.of_list [ (d 2026 2 1, 2.0) ] in
   let series =
     Spans.unfold_from ~agg ~deps:(fun () -> Deps.point_dep points) ~cells:(fun _ _ -> None) base
@@ -453,7 +447,7 @@ let test_agg_helpers () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let samples = [ agg_sample jan 10.0; None; agg_sample feb 30.0 ] in
-  let actual_360_average = Agg.time_weighted_average Yf.actual_360 in
+  let act_360_average = Agg.time_weighted_average Yf.act_360 in
   let custom_average =
     Agg.time_weighted_average (fun start _ -> if Date.month start = 1 then 1.0 else 3.0)
   in
@@ -463,25 +457,25 @@ let test_agg_helpers () =
   check_some_float "average" 20.0 (Agg.reduce Agg.average samples);
   check_some_float "time-weighted average"
     (((10.0 *. 31.0) +. (30.0 *. 28.0)) /. 59.0)
-    (Agg.reduce actual_360_average samples);
+    (Agg.reduce act_360_average samples);
   check_some_float "time-weighted average uses year fraction" 25.0
     (Agg.reduce custom_average samples);
   List.iter
     (fun builtin ->
       check_none_float "empty aggregation" (Agg.reduce builtin []);
       check_none_float "all-missing aggregation" (Agg.reduce builtin [ None; None ]))
-    [ Agg.sum; Agg.min; Agg.max; Agg.average; actual_360_average ]
+    [ Agg.sum; Agg.min; Agg.max; Agg.average; act_360_average ]
 
 let test_span_aggregation_defaults_and_samples () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let mar = p (d 2026 3 1) (d 2026 4 1) in
-  let time_weighted_average = Agg.time_weighted_average Yf.actual_360 in
+  let time_weighted_average = Agg.time_weighted_average Yf.act_360 in
   let users =
-    Spans.of_list ~split:const_split ~agg:time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
+    Spans.of_list ~split:Split.const ~agg:time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
   in
-  let gappy = Spans.of_list ~split:proportional_split ~agg [ (jan, 10.0); (mar, 30.0) ] in
+  let gappy = Spans.of_list ~split:Split.daily ~agg [ (jan, 10.0); (mar, 30.0) ] in
   let cache = make_cache () in
   check_some_float "default time-weighted average"
     (((100.0 *. 31.0) +. (200.0 *. 28.0)) /. 59.0)
@@ -499,7 +493,7 @@ let test_span_query_missing_period_returns_none () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
-  let series = Spans.const ~split:proportional_split ~agg ~period:jan 10.0 in
+  let series = Spans.const ~split:Split.daily ~agg ~period:jan 10.0 in
   let cache = make_cache () in
   check_none_float "missing query aggregates to none" (query_span cache series ~period:feb);
   match span_values cache series ~period:feb with
@@ -510,7 +504,7 @@ let test_span_unary_and_clipped_inherit_agg () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
-  let base = Spans.of_list ~split:const_split ~agg:Agg.average [ (jan, 10.0); (feb, 20.0) ] in
+  let base = Spans.of_list ~split:Split.const ~agg:Agg.average [ (jan, 10.0); (feb, 20.0) ] in
   let cache = make_cache () in
   check_some_float "scale inherits average aggregation" 30.0
     (query_span cache (Spans.scale 2.0 base) ~period:(p (d 2026 1 1) (d 2026 3 1)));
@@ -522,7 +516,7 @@ let test_span_unary_and_clipped_inherit_agg () =
 let test_non_cyclic_map_preserves_gaps () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let base = Spans.const ~split:proportional_split ~agg ~period 10.0 in
+  let base = Spans.const ~split:Split.daily ~agg ~period 10.0 in
   let mapped = Spans.map (fun value -> value *. 2.0) base in
   let cache = make_cache () in
   let query_period = p (d 2025 12 1) (d 2026 3 1) in
@@ -628,7 +622,7 @@ let test_point_sum_empty_raises () =
 let test_point_accum_uses_span_changes () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let changes = single_span_series ~period ~split:proportional_split 10.0 in
+  let changes = single_span_series ~period ~split:Split.daily 10.0 in
   let balance = Points.accum ~init:100.0 changes in
   let cache = make_cache () in
   check_some_float "initial balance" 100.0 (query_point cache balance ~date:(Period.start period));
@@ -637,7 +631,7 @@ let test_point_accum_uses_span_changes () =
 let test_label_accessors () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
-  let span = Spans.const ~label:"Revenue" ~split:proportional_split ~agg ~period 42.0 in
+  let span = Spans.const ~label:"Revenue" ~split:Split.daily ~agg ~period 42.0 in
   let point = Points.const ~label:"Balance" ~period 10.0 in
   Alcotest.(check (option string)) "span label" (Some "Revenue") (Spans.label span);
   Alcotest.(check (option string)) "point label" (Some "Balance") (Points.label point);
@@ -655,7 +649,7 @@ let test_unfold_no_deps_single_step () =
         if n >= 1 then None
         else
           let period = p (d 2026 1 1) (d 2026 2 1) in
-          Some (Spans.cell ~period ~split:proportional_split (Formula.pure (Some 42.0)), n + 1))
+          Some (Spans.cell ~period ~split:Split.daily (Formula.pure (Some 42.0)), n + 1))
       ()
   in
   let cache = make_cache () in
@@ -676,9 +670,7 @@ let test_unfold_multi_step () =
           let period =
             p (Date.shift (days (30 * n)) start) (Date.shift (days (30 * (n + 1))) start)
           in
-          Some
-            ( Spans.cell ~period ~split:proportional_split (Formula.pure (Some (Float.of_int n))),
-              n + 1 ))
+          Some (Spans.cell ~period ~split:Split.daily (Formula.pure (Some (Float.of_int n))), n + 1))
       ()
   in
   let cache = make_cache () in
@@ -702,7 +694,7 @@ let test_unfold_with_span_dep () =
             let+ v = read_base ~period in
             Option.map (fun v -> 2.0 *. v) v
           in
-          Some (Spans.cell ~period ~split:proportional_split formula, n + 1))
+          Some (Spans.cell ~period ~split:Split.daily formula, n + 1))
       ()
   in
   let cache = make_cache () in
@@ -713,7 +705,7 @@ let test_unfold_missing_span_dep_propagates_none () =
   let open Series in
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
-  let base = Spans.const ~split:proportional_split ~agg ~period:jan 10.0 in
+  let base = Spans.const ~split:Split.daily ~agg ~period:jan 10.0 in
   let derived =
     Spans.unfold ~agg ~init:false
       ~deps:(fun () -> Deps.span_dep base)
@@ -721,7 +713,7 @@ let test_unfold_missing_span_dep_propagates_none () =
         if emitted then None
         else
           let formula = read_base ~period:feb in
-          Some (Spans.cell ~period:feb ~split:proportional_split formula, true))
+          Some (Spans.cell ~period:feb ~split:Split.daily formula, true))
       ()
   in
   let cache = make_cache () in
@@ -731,8 +723,8 @@ let test_repeated_clip_of_split_span () =
   let open Series in
   let full_period = p (d 2026 1 1) (d 2026 4 1) in
   let clipped_period = p (d 2026 2 1) (d 2026 3 1) in
-  let proportional = single_span_series ~period:full_period ~split:proportional_split 90.0 in
-  let const = single_span_series ~period:full_period ~split:const_split 5.0 in
+  let proportional = single_span_series ~period:full_period ~split:Split.daily 90.0 in
+  let const = single_span_series ~period:full_period ~split:Split.const 5.0 in
   let cache = make_cache () in
   let proportional_total = query_span cache proportional ~period:clipped_period in
   let const_total = query_span cache const ~period:clipped_period in
@@ -756,7 +748,7 @@ let test_formula_tracks_cell_queries () =
       ~cells:(fun read_base () ->
         let formula = read_base ~period in
         tracked_queries := Formula.queries formula;
-        Some (Spans.cell ~period ~split:proportional_split formula, ()))
+        Some (Spans.cell ~period ~split:Split.daily formula, ()))
       ()
   in
   let cache = make_cache () in
@@ -773,9 +765,9 @@ let test_formula_span_dep_uses_series_agg () =
   let jan = p (d 2026 1 1) (d 2026 2 1) in
   let feb = p (d 2026 2 1) (d 2026 3 1) in
   let query_period = p (d 2026 1 1) (d 2026 3 1) in
-  let time_weighted_average = Agg.time_weighted_average Yf.actual_360 in
+  let time_weighted_average = Agg.time_weighted_average Yf.act_360 in
   let base =
-    Spans.of_list ~split:const_split ~agg:time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
+    Spans.of_list ~split:Split.const ~agg:time_weighted_average [ (jan, 100.0); (feb, 200.0) ]
   in
   let derived =
     Spans.unfold ~agg:Agg.sum ~init:false
@@ -784,7 +776,7 @@ let test_formula_span_dep_uses_series_agg () =
         if emitted then None
         else
           let formula = read_base ~period:query_period in
-          Some (Spans.cell ~period:query_period ~split:proportional_split formula, true))
+          Some (Spans.cell ~period:query_period ~split:Split.daily formula, true))
       ()
   in
   let cache = make_cache () in
@@ -838,7 +830,7 @@ let test_unfold_self_recursive () =
               in
               Option.map (fun previous -> previous *. 1.10) previous
           in
-          Some (Spans.cell ~period ~split:proportional_split formula, i + 1))
+          Some (Spans.cell ~period ~split:Split.daily formula, i + 1))
       ()
   in
   let cache = make_cache () in
@@ -867,7 +859,7 @@ let test_unfold_self_future_reference () =
               in
               Option.map (fun future -> future *. 0.5) future
           in
-          Some (Spans.cell ~period ~split:proportional_split formula, i + 1))
+          Some (Spans.cell ~period ~split:Split.daily formula, i + 1))
       ()
   in
   let cache = make_cache () in
@@ -887,7 +879,7 @@ let test_unfold_self_current_converges () =
           let+ current = read_self ~period in
           Option.map (fun current -> 100.0 +. (0.5 *. current)) current
         in
-        Some (Spans.cell ~period ~split:proportional_split formula, ()))
+        Some (Spans.cell ~period ~split:Split.daily formula, ()))
       ()
   in
   let cache = make_cache () in
@@ -907,7 +899,7 @@ let test_unfold_self_current_diverges () =
           let+ current = read_self ~period in
           Option.map (fun current -> current +. 1.0) current
         in
-        Some (Spans.cell ~period ~split:proportional_split formula, ()))
+        Some (Spans.cell ~period ~split:Split.daily formula, ()))
       ()
   in
   let cache = make_cache () in
@@ -936,7 +928,7 @@ let test_point_span_feedback_converges () =
                let+ ending_balance = read_balance ~date:end_ in
                Option.map (fun ending_balance -> ending_balance *. 0.10) ending_balance
              in
-             Some (Spans.cell ~period ~split:proportional_split formula, true))
+             Some (Spans.cell ~period ~split:Split.daily formula, true))
          ())
   and balance_lazy = lazy (Points.accum ~init:100.0 (Lazy.force interest_lazy)) in
   let balance = Lazy.force balance_lazy in

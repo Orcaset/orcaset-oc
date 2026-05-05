@@ -5,7 +5,7 @@ let p s e = Period.make s e
 let option_float = Alcotest.option (Alcotest.float 1e-9)
 
 let span_series ~label ~period value =
-  Series.Spans.const ?label ~split:Series.proportional_split ~agg:Series.Agg.sum ~period value
+  Series.Spans.const ?label ~split:Split.daily ~agg:Series.Agg.sum ~period value
 
 let point_series ~label ~period value = Series.Points.const ?label ~period value
 

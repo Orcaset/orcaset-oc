@@ -96,7 +96,7 @@ let split_period period date =
   let start, end_ = Period.to_tuple period in
   (Period.make start date, Period.make date end_)
 
-let proportional_split : split_strategy =
+let daily_split : split_strategy =
  fun span date ->
   let period = span_period span in
   let start, end_ = Period.to_tuple period in
@@ -108,15 +108,10 @@ let proportional_split : split_strategy =
   ( split_part ~period:left_period ~value:(fun value -> value *. left_ratio),
     split_part ~period:right_period ~value:(fun value -> value *. right_ratio) )
 
-let const_split : split_strategy =
- fun span date ->
-  let left_period, right_period = split_period (span_period span) date in
-  (split_part ~period:left_period ~value:Fun.id, split_part ~period:right_period ~value:Fun.id)
-
 let rec map_split = function
   | Value { split; _ } | Slice { split; _ } -> split
   | Map { dep; _ } -> map_split dep
-  | Map2 _ | MapN _ -> proportional_split
+  | Map2 _ | MapN _ -> daily_split
 
 let rec split_span date span =
   let start, end_ = Period.to_tuple (span_period span) in

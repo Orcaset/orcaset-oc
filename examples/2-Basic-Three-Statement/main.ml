@@ -34,13 +34,11 @@ let revenue =
           let+ prior_revenue = read_revenue ~period:(Period.prev eomonth_lookback period) in
           Option.map
             (fun prior_revenue ->
-              let yf = Yf.actual_360 (Period.start period) (Period.end_ period) in
+              let yf = Yf.act_360 (Period.start period) (Period.end_ period) in
               prior_revenue *. (1. +. (annual_revenue_growth *. yf)))
             prior_revenue
       in
-      Some
-        ( Series.Spans.cell ~period ~split:Series.proportional_split formula,
-          Period.next eomonth_offset period ))
+      Some (Series.Spans.cell ~period ~split:Split.daily formula, Period.next eomonth_offset period))
     ()
 
 let cost_of_revenue = Series.Spans.scale ~label:"Cost of revenue" cost_of_revenue_ratio revenue
@@ -53,8 +51,7 @@ let opex =
     ~cells:(fun () period ->
       let next_period = Period.next eomonth_offset period in
       Some
-        ( Series.Spans.cell ~period ~split:Series.proportional_split
-            (Series.Formula.pure (Some monthly_opex)),
+        ( Series.Spans.cell ~period ~split:Split.daily (Series.Formula.pure (Some monthly_opex)),
           next_period ))
     ()
 
@@ -72,7 +69,7 @@ let rec lazy_depreciation =
            Option.map (fun ppe_net -> -.ppe_net *. monthly_depreciation_rate) ppe_net
          in
          let next_period = Period.next eomonth_offset period in
-         Some (Series.Spans.cell ~period ~split:Series.proportional_split formula, next_period))
+         Some (Series.Spans.cell ~period ~split:Split.daily formula, next_period))
        ())
 
 and lazy_ppe_change =
@@ -100,7 +97,7 @@ let operating_cf =
 let investing_cf = capex
 
 let cf_financing =
-  Series.Spans.const ~label:"Cash flow from financing" ~split:Series.proportional_split ~agg:sum_agg
+  Series.Spans.const ~label:"Cash flow from financing" ~split:Split.daily ~agg:sum_agg
     ~period:Period.unbounded 0.0
 
 let total_cf =

@@ -10,32 +10,16 @@ let next_id = Atomic.make 0
 let new_id () : series_id = Id (Atomic.fetch_and_add next_id 1)
 
 (* ----- Span cells ----- *)
-type split_part = Split_part of { value : float -> float }
-type split = period:Period.t -> date:Date.t -> split_part * split_part
-
-let split_part ~value = Split_part { value }
-
-let proportional_split : split =
- fun ~period ~date ->
-  let start, end_ = Period.to_tuple period in
-  let numerator = Float.of_int (Date.diff date start) in
-  let denominator = Float.of_int (Date.diff end_ start) in
-  let left_ratio = numerator /. denominator in
-  let right_ratio = 1.0 -. left_ratio in
-  ( split_part ~value:(fun value -> value *. left_ratio),
-    split_part ~value:(fun value -> value *. right_ratio) )
-
-let const_split : split =
- fun ~period:_ ~date:_ -> (split_part ~value:Fun.id, split_part ~value:Fun.id)
+type split = Split.t
 
 let cell_split_strategy (split : split) : split_strategy =
  fun span date ->
   let period = span_period span in
   let left_period = Period.make (Period.start period) date in
   let right_period = Period.make date (Period.end_ period) in
-  let Split_part { value = left_value }, Split_part { value = right_value } = split ~period ~date in
-  ( Cell_type.split_part ~period:left_period ~value:left_value,
-    Cell_type.split_part ~period:right_period ~value:right_value )
+  let left_part, right_part = split ~period ~date in
+  ( Cell_type.split_part ~period:left_period ~value:(Split.value left_part),
+    Cell_type.split_part ~period:right_period ~value:(Split.value right_part) )
 
 (* ----- Span aggregation ----- *)
 module Agg = struct

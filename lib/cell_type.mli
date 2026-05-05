@@ -74,14 +74,6 @@ val f_mapn : Period.t -> span option list -> (float option list -> float option)
 val span_period : span -> Period.t
 val span_id : span -> int
 
-val proportional_split : split_strategy
-(** [proportional_split span date] splits the span's period at [date], assigning value
-    proportionally. *)
-
-val const_split : split_strategy
-(** [const_split span date] splits the span's period at [date], assigning the same value as the
-    original span to each side. *)
-
 val split_span : Date.t -> span -> span option * span option
 (** [split_span date span] splits [span] at [date]. Stored values, slices, and unary maps use a
     split strategy to allocate the parent value; multi-input maps split their inputs first and

@@ -36,7 +36,7 @@ let revenue =
           Option.map (fun prior_revenue -> prior_revenue *. 1.03) prior_revenue
       in
       Some
-        ( Series.Spans.cell ~period ~split:Series.proportional_split formula, Period.next qtr_offset period ))
+        ( Series.Spans.cell ~period ~split:Split.daily formula, Period.next qtr_offset period ))
     ()
 
 (* Expenses are defined as a constant (negative) percent of revenue. *)

@@ -42,7 +42,7 @@ let revenue =
       let next_period = Period.next offset period in
       let next_value = Some (value *. 1.05) in
       Some
-        ( Series.Spans.cell ~period ~split:Series.proportional_split (Series.Formula.pure value),
+        ( Series.Spans.cell ~period ~split:Split.daily (Series.Formula.pure value),
           (next_period, next_value) ))
     ()
 

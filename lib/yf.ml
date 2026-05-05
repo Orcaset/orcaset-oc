@@ -6,7 +6,26 @@
 let is_month_end date = Date.day date = Date.days_in_month date
 
 (** Actual/360 day count: returns the actual number of days divided by 360. *)
-let actual_360 dt1 dt2 = float_of_int (Date.diff dt2 dt1) /. 360.0
+let act_360 dt1 dt2 = float_of_int (Date.diff dt2 dt1) /. 360.0
+
+let days_in_year year = if Date.is_leap_year year then 366 else 365
+
+(** Actual/Actual day count: splits actual days by calendar year and divides by that year's day
+    count. *)
+let act_act dt1 dt2 =
+  let flipped, dt1, dt2 = if Date.compare dt1 dt2 > 0 then (-1, dt2, dt1) else (1, dt1, dt2) in
+  let rec loop acc start =
+    let year = Date.year start in
+    if year = Date.year dt2 then
+      acc +. (float_of_int (Date.diff dt2 start) /. float_of_int (days_in_year year))
+    else
+      let next_year_start = Date.make (year + 1) 1 1 in
+      let acc =
+        acc +. (float_of_int (Date.diff next_year_start start) /. float_of_int (days_in_year year))
+      in
+      loop acc next_year_start
+  in
+  loop 0.0 dt1 *. float_of_int flipped
 
 (** 30/360 day count (NASD method): each month is treated as 30 days, each year as 360 days. *)
 let thirty_360 dt1 dt2 =

@@ -8,9 +8,13 @@
 
     {1 Day count conventions} *)
 
-val actual_360 : Date.t -> Date.t -> float
-(** [actual_360 dt1 dt2] is the year fraction from [dt1] to [dt2] using the Actual/360 convention:
-    the actual number of days between the dates divided by 360. *)
+val act_360 : Date.t -> Date.t -> float
+(** [act_360 dt1 dt2] is the year fraction from [dt1] to [dt2] using the Actual/360 convention: the
+    actual number of days between the dates divided by 360. *)
+
+val act_act : Date.t -> Date.t -> float
+(** [act_act dt1 dt2] is the year fraction from [dt1] to [dt2] using the Actual/Actual convention:
+    the actual number of days in each calendar year divided by that year's day count. *)
 
 val thirty_360 : Date.t -> Date.t -> float
 (** [thirty_360 dt1 dt2] is the year fraction from [dt1] to [dt2] using the 30/360 NASD convention:
