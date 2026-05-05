@@ -1,10 +1,7 @@
 (* Copyright (C) 2026 Orcaset Inc.
  * SPDX-License-Identifier: SSPL-1.0 *)
 
-type evaluated =
-  | Span_values of (Period.t * float option) list
-  | Point_values of (Date.t * float) list
-
+type evaluated = Span_values of (Period.t * float) list | Point_values of (Date.t * float) list
 type stmt
 
 type resolved =

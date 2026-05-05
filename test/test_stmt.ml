@@ -2,7 +2,10 @@ open Orcaset
 
 let d y m day = Date.make y m day
 let p s e = Period.make s e
-let span_series ~label ~period value = Series.Spans.const ?label ~period value
+
+let span_series ~label ~period value =
+  Series.Spans.const ?label ~split:Series.proportional_split ~agg:Series.Agg.sum ~period value
+
 let point_series ~label ~period value = Series.Points.const ?label ~period value
 
 let test_eval_periods_preserves_labels () =
@@ -56,13 +59,13 @@ let test_eval_periods_supports_nested_span_totals () =
   | Stmt.RTotal
       {
         label = Some "Net income";
-        values = Some (Stmt.Span_values [ (_, Some 50.0) ]);
+        values = Some (Stmt.Span_values [ (_, 50.0) ]);
         children =
           [
             Stmt.RTotal
               {
                 label = Some "Gross profit";
-                values = Some (Stmt.Span_values [ (_, Some 70.0) ]);
+                values = Some (Stmt.Span_values [ (_, 70.0) ]);
                 children =
                   [
                     Stmt.RLine { label = Some "Revenue"; values = Some (Stmt.Span_values _); _ };
@@ -86,16 +89,16 @@ let test_fixed_width_renders_totals_and_indented_children () =
             Stmt.RLine
               {
                 label = Some "Revenue";
-                values = Some (Stmt.Span_values [ (jan, Some 100.0); (feb, Some 110.0) ]);
+                values = Some (Stmt.Span_values [ (jan, 100.0); (feb, 110.0) ]);
               };
             Stmt.RLine
               {
                 label = Some "Costs";
-                values = Some (Stmt.Span_values [ (jan, Some (-30.0)); (feb, Some (-30.0)) ]);
+                values = Some (Stmt.Span_values [ (jan, -30.0); (feb, -30.0) ]);
               };
           ];
         label = Some "Gross Profit";
-        values = Some (Stmt.Span_values [ (jan, Some 70.0); (feb, Some 80.0) ]);
+        values = Some (Stmt.Span_values [ (jan, 70.0); (feb, 80.0) ]);
       }
   in
   let row = Printf.sprintf "%-*s  %10s  %10s" 12 in
@@ -121,7 +124,7 @@ let test_fixed_width_renders_point_stub_unknown_labels_and_group_spacing () =
       [
         Stmt.RLine
           { label = None; values = Some (Stmt.Point_values [ (jan, 1000.0); (feb, 1100.0) ]) };
-        Stmt.RLine { label = Some ""; values = Some (Stmt.Span_values [ (period, Some 50.0) ]) };
+        Stmt.RLine { label = Some ""; values = Some (Stmt.Span_values [ (period, 50.0) ]) };
         Stmt.RLine { label = Some "No values"; values = None };
       ]
   in

@@ -1,4 +1,4 @@
-# Orcaset - Financial Modeling for AI
+# Orcaset - Financial Models for Computers
 
 Orcaset is a financial modeling framework designed to correctly and efficiently orchestrate analysis at any scale. 
 
@@ -35,7 +35,7 @@ let start_period = Period.make (Date.make 2025 12 31) (Date.make 2026 3 31)
 let offset = Offset.make ~months:3 ~month_end:true ()
 
 let revenue =
-  Series.Spans.unfold ~label:"Revenue"
+  Series.Spans.unfold ~label:"Revenue" ~agg:Series.Agg.sum
     ~deps:(fun () -> Series.Deps.none)
     ~init:(start_period, 1_000.0)
     ~cells:(fun () (period, value) ->
@@ -47,7 +47,7 @@ let revenue =
     ()
 
 let expenses = Series.Spans.map ~label:"Expenses" (fun r -> r *. -0.30) revenue
-let income = Series.Spans.sum ~label:"Income" [ revenue; expenses ]
+let income = Series.Spans.sum ~label:"Income" ~agg:Series.Agg.sum [ revenue; expenses ]
 ```
 
 These fifteen lines of code create a model that is deterministic, tracks all dependencies, and can be queried for values over *any* span of time.

@@ -21,6 +21,27 @@ val const_split : split
 (** Assigns the original span's value to each clipped side. E.g. splitting a span with value "10"
     will create sub-periods with values of "10" as well. *)
 
+module Agg : sig
+  type sample = { period : Period.t; value : float }
+  (** One resolved span sample collected for aggregation. Missing query coverage is represented by
+      [None] in aggregation inputs. *)
+
+  type t
+  (** A span aggregation function. *)
+
+  val make : (sample option list -> float) -> t
+  (** [make f] creates an aggregation from [f]. *)
+
+  val reduce : t -> sample option list -> float
+  (** [reduce agg samples] applies [agg] to [samples]. *)
+
+  val sum : t
+  val min : t
+  val max : t
+  val average : t
+  val time_weighted_average : t
+end
+
 module rec Spans : sig
   type unfold_cell
   (** Describes one yielded step during {!Spans:t} {!unfold} evaluation: the period cover,
@@ -31,34 +52,34 @@ module rec Spans : sig
 
   val neg : ?label:string -> t -> t
   val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> t list -> t
-  val sub : ?label:string -> ?fill:float -> t -> t -> t
-  val mul : ?label:string -> t list -> t
-  val div : ?label:string -> ?fill:float -> t -> t -> t
+  val sum : ?label:string -> agg:Agg.t -> t list -> t
+  val sub : ?label:string -> agg:Agg.t -> t -> t -> t
+  val mul : ?label:string -> agg:Agg.t -> t list -> t
+  val div : ?label:string -> agg:Agg.t -> t -> t -> t
 
-  val const : ?label:string -> period:Period.t -> float -> t
-  (** [const ?label ~period value] is a span series containing one value over [period]. *)
+  val const : ?label:string -> split:split -> agg:Agg.t -> period:Period.t -> float -> t
+  (** [const ?label ~split ~agg ~period value] is a span series containing one value over [period].
+  *)
 
-  val of_list : ?label:string -> split:split -> (Period.t * float) list -> t
-  (** [of_list ?label ~split cells] is a span series that yields [cells] in list order. No ordering
-      or overlap validation is performed. *)
+  val of_list : ?label:string -> split:split -> agg:Agg.t -> (Period.t * float) list -> t
+  (** [of_list ?label ~split ~agg cells] is a span series that yields [cells] in list order. No
+      ordering or overlap validation is performed. *)
 
   val map : ?label:string -> (float -> float) -> t -> t
   (** [map ?label f series] applies [f] to each value in [series]. *)
 
-  val map2 : ?label:string -> ?fill:float -> t -> t -> (float option -> float option -> float) -> t
-  (** [map2 ?label ?fill a b f] aligns [a] and [b], then applies [f] to each aligned pair. When
-      [fill] is provided, missing sides are passed to [f] as [Some fill]; otherwise they are passed
+  val map2 : ?label:string -> agg:Agg.t -> t -> t -> (float option -> float option -> float) -> t
+  (** [map2 ?label ~agg a b f] aligns [a] and [b], then applies [f] to each aligned pair. Missing
+      sides are passed to [f] as [None]. *)
+
+  val mapn : ?label:string -> agg:Agg.t -> t list -> (float option list -> float) -> t
+  (** [mapn ?label ~agg series f] aligns [series] at common boundaries, then applies [f] to each
+      aligned row of values (one entry per input series, in input order). Missing entries are passed
       as [None]. *)
 
-  val mapn : ?label:string -> ?fill:float -> t list -> (float option list -> float) -> t
-  (** [mapn ?label ?fill series f] aligns [series] at common boundaries, then applies [f] to each
-      aligned row of values (one entry per input series, in input order). When [fill] is provided,
-      missing entries are passed to [f] as [Some fill]; otherwise they are passed as [None]. *)
-
-  val extend : t -> t -> t
-  (** [extend a b] yields all spans from [a], then continues with [b]. If [a] ends inside a span
-      from [b], that first overlapping span from [b] is clipped to start at [a]'s end. *)
+  val extend : agg:Agg.t -> t -> t -> t
+  (** [extend ~agg a b] yields all spans from [a], then continues with [b]. If [a] ends inside a
+      span from [b], that first overlapping span from [b] is clipped to start at [a]'s end. *)
 
   val clipped : after:Date.t -> until:Date.t -> t -> t
   (** [clipped ~after ~until series] exposes only the portion of [series] from [after] [until].
@@ -73,15 +94,18 @@ module rec Spans : sig
 
   val unfold :
     ?label:string ->
+    agg:Agg.t ->
     deps:(unit -> 'readers Deps.t) ->
     init:'state ->
     cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
     unit ->
     t
-  (** [unfold ?label ~deps ~init ~cells ()] builds a span series by repeatedly calling [cells]. *)
+  (** [unfold ?label ~agg ~deps ~init ~cells ()] builds a span series by repeatedly calling [cells].
+  *)
 
   val unfold_from :
     ?label:string ->
+    agg:Agg.t ->
     deps:(unit -> 'readers Deps.t) ->
     cells:('readers -> Period.t -> (unfold_cell * Period.t) option) ->
     t ->
@@ -93,6 +117,7 @@ module rec Spans : sig
 
   val unfold_rec :
     ?label:string ->
+    agg:Agg.t ->
     deps:(t -> 'readers Deps.t) ->
     init:'state ->
     cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
@@ -108,6 +133,12 @@ module rec Spans : sig
 
   val label : t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)
+
+  val agg : t -> Agg.t
+  (** [agg series] returns the series' span aggregation function. *)
+
+  val with_agg : agg:Agg.t -> t -> t
+  (** [with_agg ~agg series] returns [series] with a replacement aggregation function. *)
 end
 
 and Points : sig
@@ -155,7 +186,7 @@ and Deps : sig
 
   (* type span_reader *)
 
-  type span_reader = period:Period.t -> reduce:(float option list -> float) -> float Formula.t
+  type span_reader = period:Period.t -> float Formula.t
   (** A reader bound to a declared span dependency. Calling it records a cell-level span query; the
       query is resolved only when the formula is evaluated. *)
 
@@ -234,15 +265,13 @@ val make_cache : unit -> series_cache
 (** [make_cache ()] creates a fresh memoization cache for queries. A cache should be reused across
     related queries to benefit from memoization; it is not safe to share across threads. *)
 
-val sum_float_opt : fill:float -> float option list -> float
-(** [sum_float_opt ~fill values] sums [values], using [fill] for each [None]. Useful as a
-    {!query_span} reduce function. *)
+val query_span_samples : series_cache -> Spans.t -> period:Period.t -> Agg.sample option list
+(** [query_span_samples cache s ~period] collects resolved clipped samples from [s]. Missing query
+    coverage is represented by [None]. *)
 
-val query_span :
-  series_cache -> Spans.t -> period:Period.t -> reduce:(float option list -> 'a) -> 'a
-(** [query_span cache s ~period ~reduce] collects [s]'s values clipped to [period] (as
-    [float option list], with [None] filling any gaps at the boundaries) and folds them with
-    [reduce]. *)
+val query_span : series_cache -> Spans.t -> period:Period.t -> float
+(** [query_span cache s ~period] aggregates [s]'s resolved samples over [period] using {!Spans.agg}.
+*)
 
 val query_point : series_cache -> Points.t -> date:Date.t -> default:float -> float
 (** [query_point cache s ~date ~default] returns [s]'s value at [date], or [default] if the series
