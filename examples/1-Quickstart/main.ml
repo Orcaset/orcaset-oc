@@ -8,10 +8,9 @@ let qtr_lookback = Offset.make ~quarters:(-1) ~month_end:true ()
 let initial_period = Period.make initial_period_start (Date.shift qtr_offset initial_period_start)
 let sum_agg = Series.Agg.sum
 let sp = Series.Spans.pack
-
 (* ----- Model ----- *)
 
-let revenue : [ `Revenue ] Series.Spans.t =
+let revenue =
   Series.Spans.unfold_rec ~label:"Revenue" ~agg:sum_agg
     ~deps:(fun self -> Series.Deps.span_dep self)
     ~init:initial_period
@@ -26,15 +25,8 @@ let revenue : [ `Revenue ] Series.Spans.t =
       Some (Series.Spans.cell ~period ~split:Split.daily formula, Period.next qtr_offset period))
     ()
 
-let make_expenses (revenue : [ `Revenue ] Series.Spans.t) : [ `Expenses ] Series.Spans.t =
-  Series.Spans.scale ~label:"Expenses" (-0.50) revenue
-
-let make_profit (revenue : [ `Revenue ] Series.Spans.t) (expenses : [ `Expenses ] Series.Spans.t) :
-    [ `Profit ] Series.Spans.t =
-  Series.Spans.sum ~label:"Profit" ~agg:sum_agg [ sp revenue; sp expenses ]
-
-let expenses = make_expenses revenue
-let profit = make_profit revenue expenses
+let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue
+let profit = Series.Spans.sum ~label:"Profit" ~agg:sum_agg [ sp revenue; sp expenses ]
 
 (* ----- Output ----- *)
 

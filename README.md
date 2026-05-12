@@ -33,6 +33,7 @@ open Orcaset
 
 let start_period = Period.make (Date.make 2025 12 31) (Date.make 2026 3 31)
 let offset = Offset.make ~months:3 ~month_end:true ()
+let sp = Series.Spans.pack
 
 let revenue =
   Series.Spans.unfold ~label:"Revenue" ~agg:Series.Agg.sum
@@ -40,17 +41,48 @@ let revenue =
     ~init:(start_period, 1_000.0)
     ~cells:(fun () (period, value) ->
       let next_period = Period.next offset period in
-      let next_value = Some (value *. 1.05) in
+      let next_value = value *. 1.05 in
       Some
-        ( Series.Spans.cell ~period ~split:Split.daily (Series.Formula.pure value),
+        ( Series.Spans.cell ~period ~split:Split.daily (Series.Formula.pure (Some value)),
           (next_period, next_value) ))
     ()
 
-let expenses = Series.Spans.map ~label:"Expenses" (fun r -> r *. -0.30) revenue
-let income = Series.Spans.sum ~label:"Income" ~agg:Series.Agg.sum [ revenue; expenses ]
+let expenses = Series.Spans.scale ~label:"Expenses" (-0.30) revenue
+let income = Series.Spans.sum ~label:"Income" ~agg:Series.Agg.sum [ sp revenue; sp expenses ]
 ```
 
-These fifteen lines of code create a model that is deterministic, tracks all dependencies, and can be queried for values over *any* span of time.
+These sixteen lines of code create a model that is deterministic, tracks all dependencies, and can be queried for values over *any* span of time.
+
+### Enforcing line item relationships with types
+
+Line items carry phantom types that can be used to ensure combinators reference the correct type of dependencies.
+
+In the previous example, we could define revenue as having a `` [ `Revenue ] `` type.
+
+```ocaml
+let revenue : [ `Revenue ] Series.Spans.t = ...
+```
+
+Then, the expenses and income constructors can be redefined to depend specifically on revenue series.
+
+```ocaml
+let make_expenses (revenue : [ `Revenue ] Series.Spans.t) : [ `Expenses ] Series.Spans.t =
+  Series.Spans.scale ~label:"Expenses" (-0.30) revenue
+let make_income (revenue : [ `Revenue ] Series.Spans.t) (expenses : [ `Expenses ] Series.Spans.t) :
+    [ `Income ] Series.Spans.t =
+  Series.Spans.sum ~label:"Income" ~agg:Series.Agg.sum [ sp revenue; sp expenses ]
+
+let expenses = make_expenses revenue
+let income = make_income revenue expenses
+```
+
+Passing the incorrectly typed series will cause a compile-time error that is caught quickly.
+
+![Orcaset Series Typing Error Example](./images/orcaset-series-type-error-example.png)
+
+*For example, trying to build income from two revenue series raises a type error.*
+
+Typing series in this manner makes models more composable and reusable. It allows components to be easily defined across files while ensuring their inputs are correct.
 
 ### Querying values
 
@@ -74,7 +106,7 @@ let () =
 Income          700.00      735.00      771.75      810.34 *)
 ```
 
-This example prints out the table to the console using a fixed-width table format, but you can create your own formatters save outputs to JSON, CSV, markdown, or any other format.
+This example prints out the table to the console using a fixed-width table format, but you can create your own formatters to save outputs to JSON, CSV, markdown, or any other format.
 
 As mentioned previously, orcaset automatically interpolates partial periods meaning you can query over partial periods. You can also easily aggregate over multiple periods without changing the model (e.g. annual view of quarterly detail).
 

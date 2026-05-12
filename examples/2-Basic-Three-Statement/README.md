@@ -7,7 +7,7 @@ Circular references between line items are resolved correctly (between depreciat
 Example:
 
 ```sh
-dune build && dune exec examples/2-Simple-Three-Statement/main.exe
+dune build && dune exec examples/2-Basic-Three-Statement/main.exe
 ```
 
 ## Statement Structure
@@ -16,29 +16,28 @@ dune build && dune exec examples/2-Simple-Three-Statement/main.exe
 Financial model
 ├── Income statement
 │   └── Net income
-│       ├── Income tax
-│       └── EBIT
-│           ├── Depreciation
-│           └── Operating expenses
-│               └── Gross profit
-│                   ├── Revenue
-│                   └── Cost of revenue
+│       ├── EBIT
+│       │   ├── Gross profit
+│       │   │   ├── Revenue
+│       │   │   └── Cost of revenue
+│       │   ├── Operating expenses
+│       │   └── Depreciation
+│       └── Income tax
 ├── Cash flow statement
 │   └── Total cash flow
-│       ├── Operating
+│       ├── Operating cash flow
 │       │   ├── Net income
-│       │   └── Depreciation
-│       ├── Investing
-│       │   └── Capital expenses
-│       └── Financing        
+│       │   └── Depreciation add back
+│       ├── Capital expenditures
+│       └── Cash flow from financing
 └── Balance sheet
-    ├── Assets
+    ├── Total assets
     │   ├── Cash
     │   └── PPE net
-    ├── Liabilities & equity
+    ├── Total equity and liabilities
     │   ├── Common stock
     │   └── Retained earnings
-    └── Balance check
+    └── Balance sheet check
 ```
 
 ## Line Items
@@ -50,19 +49,19 @@ Financial model
 | **Gross profit**          | Revenue + cost of revenue.                                                |
 | **Operating expenses**    | Constant -$200/month.                                                     |
 | **Depreciation**          | Prior period's PPE net x (10% / 12).                                      |
-| **EBIT**                  | Gross profit + operating expenses +  depreciation expense.                |
-| **Tax**                   | EBIT x -0.20 (20% tax rate).                                              |
-| **Net income**            | Earnings before tax + tax.                                                |
+| **EBIT**                  | Gross profit + operating expenses + depreciation.                         |
+| **Income tax**            | EBIT x -0.20 (20% tax rate).                                              |
+| **Net income**            | EBIT + income tax.                                                        |
 | **Depreciation add back** | Reverses the non-cash depreciation charge.                                |
 | **Operating cash flow**   | Net income + depreciation add back.                                       |
 | **Capital expenditures**  | Revenue x -0.05 (5% of revenue).                                          |
 | **Financing cash flow**   | Constant $0.                                                              |
-| **Net change in cash**    | Sum of cash flow from operations + investing + financing.                 |
+| **Total cash flow**       | Sum of cash flow from operations + investing + financing.                 |
 | **Cash**                  | Starts at $1,000. Accumulates net cash change.                            |
 | **PPE, net**              | Starts at $10,000. Increases by capex, decreases by depreciation.         |
 | **Common stock**          | Constant $5,000.                                                          |
 | **Retained earnings**     | Starts at $6,000 (initial assets - common stock). Accumulates net income. |
-| **Balance check**         | Total assets - total liabilities & equity. Should be $0.                  |
+| **Balance sheet check**   | Total assets - total equity and liabilities. Should be $0.                |
 
 
 ## Output
