@@ -55,3 +55,4 @@ scratch/
 .opencode/
 .claude/
 comps/
+.agent/
