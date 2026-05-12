@@ -17,11 +17,13 @@ let initial_ppe = 10_000.0
 let initial_common_stock = 5_000.0
 let initial_retained_earnings = 6_000.0
 let sum_agg = Series.Agg.sum
+let sp = Series.Spans.pack
+let pt = Series.Points.pack
 
 (* ----- Model ----- *)
 
 (* Income Statement *)
-let revenue =
+let revenue : [ `Revenue ] Series.Spans.t =
   Series.Spans.unfold_rec ~label:"Revenue" ~agg:sum_agg
     ~deps:(fun self -> Series.Deps.span_dep self)
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
@@ -41,10 +43,18 @@ let revenue =
       Some (Series.Spans.cell ~period ~split:Split.daily formula, Period.next eomonth_offset period))
     ()
 
-let cost_of_revenue = Series.Spans.scale ~label:"Cost of revenue" cost_of_revenue_ratio revenue
-let gross_profit = Series.Spans.sum ~label:"Gross profit" ~agg:sum_agg [ revenue; cost_of_revenue ]
+let make_cost_of_revenue (revenue : [ `Revenue ] Series.Spans.t) :
+    [ `Cost_of_revenue ] Series.Spans.t =
+  Series.Spans.scale ~label:"Cost of revenue" cost_of_revenue_ratio revenue
 
-let opex =
+let make_gross_profit (revenue : [ `Revenue ] Series.Spans.t)
+    (cost_of_revenue : [ `Cost_of_revenue ] Series.Spans.t) : [ `Gross_profit ] Series.Spans.t =
+  Series.Spans.sum ~label:"Gross profit" ~agg:sum_agg [ sp revenue; sp cost_of_revenue ]
+
+let cost_of_revenue = make_cost_of_revenue revenue
+let gross_profit = make_gross_profit revenue cost_of_revenue
+
+let opex : [ `Operating_expenses ] Series.Spans.t =
   Series.Spans.unfold ~label:"Operating expenses" ~agg:sum_agg
     ~deps:(fun () -> Series.Deps.none)
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
@@ -55,70 +65,126 @@ let opex =
           next_period ))
     ()
 
-let capex = Series.Spans.scale ~label:"Capital expenditures" capex_pct_revenue revenue
+let make_capex (revenue : [ `Revenue ] Series.Spans.t) : [ `Capital_expenditures ] Series.Spans.t =
+  Series.Spans.scale ~label:"Capital expenditures" capex_pct_revenue revenue
 
-let rec lazy_depreciation =
-  lazy
-    (Series.Spans.unfold ~label:"Depreciation" ~agg:sum_agg
-       ~deps:(fun () -> Series.Deps.point_dep (Lazy.force lazy_ppe_net))
-       ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
-       ~cells:(fun read_ppe_net period ->
-         let formula =
-           let open Series.Formula in
-           let+ ppe_net = read_ppe_net ~date:(Period.start period) in
-           Option.map (fun ppe_net -> -.ppe_net *. monthly_depreciation_rate) ppe_net
-         in
-         let next_period = Period.next eomonth_offset period in
-         Some (Series.Spans.cell ~period ~split:Split.daily formula, next_period))
-       ())
+let capex = make_capex revenue
 
-and lazy_ppe_change =
-  lazy
-    (let capitalized_capex = Series.Spans.scale (-1.0) capex in
-     Series.Spans.sum ~label:"PPE change" ~agg:sum_agg
-       [ capitalized_capex; Lazy.force lazy_depreciation ])
+let rec lazy_depreciation : [ `Depreciation ] Series.Spans.t Lazy.t =
+  lazy (make_depreciation lazy_ppe_net)
 
-and lazy_ppe_net =
-  lazy (Series.Points.accum ~label:"PPE net" ~init:initial_ppe (Lazy.force lazy_ppe_change))
+and lazy_ppe_change : [ `Ppe_change ] Series.Spans.t Lazy.t =
+  lazy (make_ppe_change (make_capitalized_capex capex) (Lazy.force lazy_depreciation))
 
-let depreciation = Lazy.force lazy_depreciation
-let ppe_net = Lazy.force lazy_ppe_net
-let ebit = Series.Spans.sum ~label:"EBIT" ~agg:sum_agg [ gross_profit; opex; depreciation ]
-let income_tax = Series.Spans.scale ~label:"Income tax" income_tax_rate ebit
-let net_income = Series.Spans.sum ~label:"Net income" ~agg:sum_agg [ ebit; income_tax ]
+and lazy_ppe_net : [ `Ppe_net ] Series.Points.t Lazy.t =
+  lazy (make_ppe_net (Lazy.force lazy_ppe_change))
+
+and make_depreciation (ppe_net : [ `Ppe_net ] Series.Points.t Lazy.t) :
+    [ `Depreciation ] Series.Spans.t =
+  Series.Spans.unfold ~label:"Depreciation" ~agg:sum_agg
+    ~deps:(fun () -> Series.Deps.point_dep (Lazy.force ppe_net))
+    ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
+    ~cells:(fun read_ppe_net period ->
+      let formula =
+        let open Series.Formula in
+        let+ ppe_net = read_ppe_net ~date:(Period.start period) in
+        Option.map (fun ppe_net -> -.ppe_net *. monthly_depreciation_rate) ppe_net
+      in
+      let next_period = Period.next eomonth_offset period in
+      Some (Series.Spans.cell ~period ~split:Split.daily formula, next_period))
+    ()
+
+and make_capitalized_capex (capex : [ `Capital_expenditures ] Series.Spans.t) :
+    [ `Capitalized_capex ] Series.Spans.t =
+  Series.Spans.scale (-1.0) capex
+
+and make_ppe_change (capitalized_capex : [ `Capitalized_capex ] Series.Spans.t)
+    (depreciation : [ `Depreciation ] Series.Spans.t) : [ `Ppe_change ] Series.Spans.t =
+  Series.Spans.sum ~label:"PPE change" ~agg:sum_agg [ sp capitalized_capex; sp depreciation ]
+
+and make_ppe_net (ppe_change : [ `Ppe_change ] Series.Spans.t) : [ `Ppe_net ] Series.Points.t =
+  Series.Points.accum ~label:"PPE net" ~init:initial_ppe ppe_change
+
+let depreciation : [ `Depreciation ] Series.Spans.t = Lazy.force lazy_depreciation
+let ppe_net : [ `Ppe_net ] Series.Points.t = Lazy.force lazy_ppe_net
+
+let make_ebit (gross_profit : [ `Gross_profit ] Series.Spans.t)
+    (opex : [ `Operating_expenses ] Series.Spans.t)
+    (depreciation : [ `Depreciation ] Series.Spans.t) : [ `Ebit ] Series.Spans.t =
+  Series.Spans.sum ~label:"EBIT" ~agg:sum_agg [ sp gross_profit; sp opex; sp depreciation ]
+
+let make_income_tax (ebit : [ `Ebit ] Series.Spans.t) : [ `Income_tax ] Series.Spans.t =
+  Series.Spans.scale ~label:"Income tax" income_tax_rate ebit
+
+let make_net_income (ebit : [ `Ebit ] Series.Spans.t) (income_tax : [ `Income_tax ] Series.Spans.t)
+    : [ `Net_income ] Series.Spans.t =
+  Series.Spans.sum ~label:"Net income" ~agg:sum_agg [ sp ebit; sp income_tax ]
+
+let ebit = make_ebit gross_profit opex depreciation
+let income_tax = make_income_tax ebit
+let net_income = make_net_income ebit income_tax
 
 (* Cash Flow Statement *)
 
-let depreciation_add_back = Series.Spans.scale ~label:"Depreciation add back" (-1.0) depreciation
+let make_depreciation_add_back (depreciation : [ `Depreciation ] Series.Spans.t) :
+    [ `Depreciation_add_back ] Series.Spans.t =
+  Series.Spans.scale ~label:"Depreciation add back" (-1.0) depreciation
 
-let operating_cf =
-  Series.Spans.sum ~label:"Operating cash flow" ~agg:sum_agg [ net_income; depreciation_add_back ]
+let make_operating_cf (net_income : [ `Net_income ] Series.Spans.t)
+    (depreciation_add_back : [ `Depreciation_add_back ] Series.Spans.t) :
+    [ `Operating_cash_flow ] Series.Spans.t =
+  Series.Spans.sum ~label:"Operating cash flow" ~agg:sum_agg
+    [ sp net_income; sp depreciation_add_back ]
 
-let investing_cf = capex
+let depreciation_add_back = make_depreciation_add_back depreciation
+let operating_cf = make_operating_cf net_income depreciation_add_back
+let investing_cf : [ `Capital_expenditures ] Series.Spans.t = capex
 
-let cf_financing =
+let cf_financing : [ `Cash_flow_from_financing ] Series.Spans.t =
   Series.Spans.const ~label:"Cash flow from financing" ~split:Split.daily ~agg:sum_agg
     ~period:Period.unbounded 0.0
 
-let total_cf =
+let make_total_cf (operating_cf : [ `Operating_cash_flow ] Series.Spans.t)
+    (investing_cf : [ `Capital_expenditures ] Series.Spans.t)
+    (cf_financing : [ `Cash_flow_from_financing ] Series.Spans.t) :
+    [ `Total_cash_flow ] Series.Spans.t =
   Series.Spans.sum ~label:"Total cash flow" ~agg:sum_agg
-    [ operating_cf; investing_cf; cf_financing ]
+    [ sp operating_cf; sp investing_cf; sp cf_financing ]
+
+let total_cf = make_total_cf operating_cf investing_cf cf_financing
 
 (* Balance Sheet *)
 
-let cash = Series.Points.accum ~label:"Cash" ~init:initial_cash total_cf
-let total_assets = Series.Points.sum ~label:"Total assets" [ cash; ppe_net ]
+let make_cash (total_cf : [ `Total_cash_flow ] Series.Spans.t) : [ `Cash ] Series.Points.t =
+  Series.Points.accum ~label:"Cash" ~init:initial_cash total_cf
 
-let common_stock =
+let make_total_assets (cash : [ `Cash ] Series.Points.t) (ppe_net : [ `Ppe_net ] Series.Points.t) :
+    [ `Total_assets ] Series.Points.t =
+  Series.Points.sum ~label:"Total assets" [ pt cash; pt ppe_net ]
+
+let cash = make_cash total_cf
+let total_assets = make_total_assets cash ppe_net
+
+let common_stock : [ `Common_stock ] Series.Points.t =
   Series.Points.const ~label:"Common stock" ~period:Period.unbounded initial_common_stock
 
-let retained_earnings =
+let make_retained_earnings (net_income : [ `Net_income ] Series.Spans.t) :
+    [ `Retained_earnings ] Series.Points.t =
   Series.Points.accum ~label:"Retained earnings" ~init:initial_retained_earnings net_income
 
-let total_equity_liabilities =
-  Series.Points.sum ~label:"Total equity and liabilities" [ common_stock; retained_earnings ]
+let make_total_equity_liabilities (common_stock : [ `Common_stock ] Series.Points.t)
+    (retained_earnings : [ `Retained_earnings ] Series.Points.t) :
+    [ `Total_equity_and_liabilities ] Series.Points.t =
+  Series.Points.sum ~label:"Total equity and liabilities" [ pt common_stock; pt retained_earnings ]
 
-let bs_check = Series.Points.sub ~label:"Balance sheet check" total_assets total_equity_liabilities
+let make_bs_check (total_assets : [ `Total_assets ] Series.Points.t)
+    (total_equity_liabilities : [ `Total_equity_and_liabilities ] Series.Points.t) :
+    [ `Balance_sheet_check ] Series.Points.t =
+  Series.Points.sub ~label:"Balance sheet check" total_assets total_equity_liabilities
+
+let retained_earnings = make_retained_earnings net_income
+let total_equity_liabilities = make_total_equity_liabilities common_stock retained_earnings
+let bs_check = make_bs_check total_assets total_equity_liabilities
 
 (* ----- Output ----- *)
 let income_stmt =
@@ -126,7 +192,7 @@ let income_stmt =
     [
       Stmt.span_total ebit
         [
-          Stmt.span_total gross_profit (Stmt.span_lines [ revenue; cost_of_revenue ]);
+          Stmt.span_total gross_profit [ Stmt.span_line revenue; Stmt.span_line cost_of_revenue ];
           Stmt.span_line opex;
           Stmt.span_line depreciation;
         ];
@@ -136,7 +202,8 @@ let income_stmt =
 let cash_flow_stmt =
   Stmt.span_total total_cf
     [
-      Stmt.span_total operating_cf (Stmt.span_lines [ net_income; depreciation_add_back ]);
+      Stmt.span_total operating_cf
+        [ Stmt.span_line net_income; Stmt.span_line depreciation_add_back ];
       Stmt.span_line investing_cf;
       Stmt.span_line cf_financing;
     ]
@@ -144,9 +211,9 @@ let cash_flow_stmt =
 let balance_sheet_stmt =
   Stmt.group
     [
-      Stmt.point_total total_assets (Stmt.point_lines [ cash; ppe_net ]);
+      Stmt.point_total total_assets [ Stmt.point_line cash; Stmt.point_line ppe_net ];
       Stmt.point_total total_equity_liabilities
-        (Stmt.point_lines [ common_stock; retained_earnings ]);
+        [ Stmt.point_line common_stock; Stmt.point_line retained_earnings ];
       Stmt.point_line bs_check;
     ]
 

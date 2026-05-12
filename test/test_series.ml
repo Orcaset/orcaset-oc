@@ -5,6 +5,8 @@ let p s e = Period.make s e
 let agg = Series.Agg.sum
 let days n = Offset.make ~days:n ()
 let months n = Offset.make ~months:n ()
+let sp = Series.Spans.pack
+let pt = Series.Points.pack
 let option_float = Alcotest.option (Alcotest.float 1e-9)
 let check_some_float name expected actual = Alcotest.check option_float name (Some expected) actual
 let check_none_float name actual = Alcotest.check option_float name None actual
@@ -110,7 +112,7 @@ let test_span_convenience_constructors () =
   let check name expected series =
     check_some_float name expected (query_span cache series ~period)
   in
-  let total = Spans.sum ~label:"Total" ~agg [ a; b ] in
+  let total = Spans.sum ~label:"Total" ~agg [ sp a; sp b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Spans.label total);
   let mapped = Spans.map ~label:"Doubled" (fun value -> value *. 2.0) a in
   Alcotest.(check (option string)) "map label" (Some "Doubled") (Spans.label mapped);
@@ -119,7 +121,7 @@ let test_span_convenience_constructors () =
   check "scale" 30.0 (Spans.scale 3.0 a);
   check "sum" 12.0 total;
   check "sub" 8.0 (Spans.sub ~agg a b);
-  check "mul" 20.0 (Spans.mul ~agg [ a; b ]);
+  check "mul" 20.0 (Spans.mul ~agg [ sp a; sp b ]);
   check "div" 5.0 (Spans.div ~agg a b)
 
 let test_span_convenience_identity () =
@@ -130,10 +132,10 @@ let test_span_convenience_identity () =
   let a = single_span_series ~period:jan ~split:Split.daily 10.0 in
   let b = single_span_series ~period:feb ~split:Split.daily 3.0 in
   let cache = make_cache () in
-  let summed = Spans.sum ~agg [ a; b ] in
+  let summed = Spans.sum ~agg [ sp a; sp b ] in
   let total = query_span cache summed ~period:query_period in
   check_some_float "sum uses 0 as additive identity for missing sides" 13.0 total;
-  let multiplied = Spans.mul ~agg [ a; b ] in
+  let multiplied = Spans.mul ~agg [ sp a; sp b ] in
   (* mul over disjoint periods is undefined because each aligned row has a missing side. *)
   let total = query_span cache multiplied ~period:query_period in
   check_none_float "mul requires every input" total
@@ -146,7 +148,9 @@ let test_span_mapn_fill () =
   let a = single_span_series ~period:jan ~split:Split.daily 10.0 in
   let b = single_span_series ~period:feb ~split:Split.daily 3.0 in
   let filled =
-    Spans.mapn ~agg [ a; b ] (fun values ->
+    Spans.mapn ~agg
+      [ sp a; sp b ]
+      (fun values ->
         Some
           (List.fold_left
              (fun acc -> function Some v -> acc +. v | None -> acc +. 1.0)
@@ -164,7 +168,9 @@ let test_span_mapn_splits_parents_before_mapping () =
   let b = single_span_series ~period:full_period ~split:Split.const 2.0 in
   let c = single_span_series ~period:full_period ~split:Split.const 3.0 in
   let mapped =
-    Spans.mapn ~agg [ a; b; c ] (fun values ->
+    Spans.mapn ~agg
+      [ sp a; sp b; sp c ]
+      (fun values ->
         Some
           (List.fold_left
              (fun acc -> function Some value -> acc *. value | None -> acc)
@@ -184,7 +190,7 @@ let test_span_sum_n_way_mismatched_periods () =
   let a = Spans.of_list ~split:Split.daily ~agg [ (jan, 10.0); (feb, 20.0) ] in
   let b = Spans.of_list ~split:Split.daily ~agg [ (feb, 200.0); (mar, 300.0) ] in
   let c = Spans.of_list ~split:Split.daily ~agg [ (jan, 1.0); (mar, 2.0) ] in
-  let total = Spans.sum ~agg [ a; b; c ] in
+  let total = Spans.sum ~agg [ sp a; sp b; sp c ] in
   let cache = make_cache () in
   let cells = span_values cache total ~period:query_period in
   match cells with
@@ -205,7 +211,7 @@ let test_span_mul_n_way_requires_all_inputs () =
   let a = Spans.of_list ~split:Split.daily ~agg [ (jan, 2.0); (feb, 3.0) ] in
   let b = Spans.of_list ~split:Split.daily ~agg [ (feb, 4.0); (mar, 5.0) ] in
   let c = Spans.of_list ~split:Split.daily ~agg [ (jan, 10.0); (mar, 11.0) ] in
-  let total = Spans.mul ~agg [ a; b; c ] in
+  let total = Spans.mul ~agg [ sp a; sp b; sp c ] in
   let cache = make_cache () in
   let cells = span_values cache total ~period:query_period in
   match cells with
@@ -561,7 +567,7 @@ let test_point_convenience_constructors () =
   let check name expected series =
     check_some_float name expected (query_point cache series ~date)
   in
-  let total = Points.sum ~label:"Total" [ a; b ] in
+  let total = Points.sum ~label:"Total" [ pt a; pt b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Points.label total);
   let mapped = Points.map ~label:"Doubled" (fun value -> value *. 2.0) a in
   Alcotest.(check (option string)) "map label" (Some "Doubled") (Points.label mapped);
@@ -570,7 +576,7 @@ let test_point_convenience_constructors () =
   check "scale" 30.0 (Points.scale 3.0 a);
   check "sum" 12.0 total;
   check "sub" 8.0 (Points.sub a b);
-  check "mul" 20.0 (Points.mul [ a; b ]);
+  check "mul" 20.0 (Points.mul [ pt a; pt b ]);
   check "div" 5.0 (Points.div a b)
 
 let test_point_convenience_identity () =
@@ -580,9 +586,9 @@ let test_point_convenience_identity () =
   let a = Points.const ~period:jan 10.0 in
   let b = Points.const ~period:feb 3.0 in
   let cache = make_cache () in
-  let summed = Points.sum [ a; b ] in
+  let summed = Points.sum [ pt a; pt b ] in
   check_some_float "jan sum additive identity" 10.0 (query_point cache summed ~date:(d 2026 1 15));
-  let multiplied = Points.mul [ a; b ] in
+  let multiplied = Points.mul [ pt a; pt b ] in
   check_none_float "feb mul requires every input" (query_point cache multiplied ~date:(d 2026 2 15))
 
 let test_point_mapn_fill () =
@@ -592,7 +598,9 @@ let test_point_mapn_fill () =
   let a = Points.const ~period:jan 10.0 in
   let b = Points.const ~period:feb 3.0 in
   let filled =
-    Points.mapn [ a; b ] (fun values ->
+    Points.mapn
+      [ pt a; pt b ]
+      (fun values ->
         Some
           (List.fold_left
              (fun acc -> function Some v -> acc +. v | None -> acc +. 1.0)
@@ -610,8 +618,8 @@ let test_point_sum_n_way () =
   let y = Points.const ~period:period_all 3.0 in
   let z = Points.const ~period:period_all 4.0 in
   let cache = make_cache () in
-  check_some_float "n-way sum" 9.0 (query_point cache (Points.sum [ x; y; z ]) ~date);
-  check_some_float "n-way mul" 24.0 (query_point cache (Points.mul [ x; y; z ]) ~date)
+  check_some_float "n-way sum" 9.0 (query_point cache (Points.sum [ pt x; pt y; pt z ]) ~date);
+  check_some_float "n-way mul" 24.0 (query_point cache (Points.mul [ pt x; pt y; pt z ]) ~date)
 
 let test_point_sum_empty_raises () =
   Alcotest.check_raises "empty point sum raises" (Invalid_argument "Points.sum: empty list")
@@ -627,6 +635,28 @@ let test_point_accum_uses_span_changes () =
   let cache = make_cache () in
   check_some_float "initial balance" 100.0 (query_point cache balance ~date:(Period.start period));
   check_some_float "ending balance" 110.0 (query_point cache balance ~date:(Period.end_ period))
+
+let test_phantom_tags_allow_typed_relationships () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let revenue : [ `Revenue ] Spans.t = single_span_series ~period ~split:Split.daily 100.0 in
+  let cost_of_revenue : [ `Cost_of_revenue ] Spans.t =
+    single_span_series ~period ~split:Split.daily (-30.0)
+  in
+  let gross_profit (revenue : [ `Revenue ] Spans.t) (cost_of_revenue : [ `Cost_of_revenue ] Spans.t)
+      : [ `Gross_profit ] Spans.t =
+    Spans.sum ~label:"Gross profit" ~agg [ sp revenue; sp cost_of_revenue ]
+  in
+  let cash (cash_flow : [ `Cash_flow ] Spans.t) : [ `Cash ] Points.t =
+    Points.accum ~label:"Cash" ~init:10.0 cash_flow
+  in
+  let gross_profit = gross_profit revenue cost_of_revenue in
+  let cash_flow : [ `Cash_flow ] Spans.t = Spans.map Fun.id gross_profit in
+  let ending_cash = cash cash_flow in
+  let cache = make_cache () in
+  check_some_float "gross profit" 70.0 (query_span cache gross_profit ~period);
+  check_some_float "cash from tagged span" 80.0
+    (query_point cache ending_cash ~date:(Period.end_ period))
 
 let test_label_accessors () =
   let open Series in
@@ -982,11 +1012,12 @@ let tests =
       ("point const/map/map2", test_point_const_map_map2);
       ("point of_list", test_point_of_list);
       ("point convenience constructors", test_point_convenience_constructors);
-      ("point sum identity and mul missingness", test_point_convenience_identity);
+      ("point sum/mul use identity for missing sides", test_point_convenience_identity);
       ("point mapn fill", test_point_mapn_fill);
       ("point sum/mul n-way", test_point_sum_n_way);
       ("point sum/mul empty list raises", test_point_sum_empty_raises);
       ("point accum uses span changes", test_point_accum_uses_span_changes);
+      ("phantom tags allow typed relationships", test_phantom_tags_allow_typed_relationships);
       ("label accessors", test_label_accessors);
       ("unfold no deps single step", test_unfold_no_deps_single_step);
       ("unfold multi step", test_unfold_multi_step);

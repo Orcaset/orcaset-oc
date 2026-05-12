@@ -34,61 +34,75 @@ module rec Spans : sig
       interpolation strategy ({!split}), and lazily-evaluated {!Formula.t}. Produced with {!cell}.
   *)
 
-  type t
+  type +'tag t
+  (** Span series carrying a phantom semantic tag. The tag is compile-time metadata only; it is not
+      available for runtime matching. *)
 
-  val neg : ?label:string -> t -> t
-  val scale : ?label:string -> float -> t -> t
+  type packed
+  (** Existentially packed span series for APIs that need heterogeneous input tags. *)
 
-  val sum : ?label:string -> agg:Agg.t -> t list -> t
+  val pack : 'tag t -> packed
+  (** [pack series] hides [series]' phantom tag for heterogeneous collections. *)
+
+  val neg : ?label:string -> 'in_tag t -> 'out_tag t
+  val scale : ?label:string -> float -> 'in_tag t -> 'out_tag t
+
+  val sum : ?label:string -> agg:Agg.t -> packed list -> 'out_tag t
   (** [sum ?label ~agg series] sums present aligned inputs; missing inputs are ignored, and rows
       with no present inputs are [None]. *)
 
-  val sub : ?label:string -> agg:Agg.t -> t -> t -> t
+  val sub : ?label:string -> agg:Agg.t -> 'a_tag t -> 'b_tag t -> 'out_tag t
   (** [sub ?label ~agg a b] subtracts [b] from [a]; a missing side is treated as [0.0] only when the
       other side is present. *)
 
-  val mul : ?label:string -> agg:Agg.t -> t list -> t
+  val mul : ?label:string -> agg:Agg.t -> packed list -> 'out_tag t
   (** [mul ?label ~agg series] multiplies aligned inputs; any missing input makes the row [None]. *)
 
-  val div : ?label:string -> agg:Agg.t -> t -> t -> t
+  val div : ?label:string -> agg:Agg.t -> 'a_tag t -> 'b_tag t -> 'out_tag t
   (** [div ?label ~agg a b] divides [a] by [b]; either missing side makes the row [None]. *)
 
-  val const : ?label:string -> split:split -> agg:Agg.t -> period:Period.t -> float -> t
+  val const : ?label:string -> split:split -> agg:Agg.t -> period:Period.t -> float -> 'tag t
   (** [const ?label ~split ~agg ~period value] is a span series containing one value over [period].
   *)
 
-  val of_list : ?label:string -> split:split -> agg:Agg.t -> (Period.t * float) list -> t
+  val of_list : ?label:string -> split:split -> agg:Agg.t -> (Period.t * float) list -> 'tag t
   (** [of_list ?label ~split ~agg cells] is a span series that yields [cells] in list order. No
       ordering or overlap validation is performed. *)
 
-  val map : ?label:string -> (float -> float) -> t -> t
+  val map : ?label:string -> (float -> float) -> 'in_tag t -> 'out_tag t
   (** [map ?label f series] applies [f] to each value in [series]. *)
 
   val map2 :
-    ?label:string -> agg:Agg.t -> t -> t -> (float option -> float option -> float option) -> t
+    ?label:string ->
+    agg:Agg.t ->
+    'a_tag t ->
+    'b_tag t ->
+    (float option -> float option -> float option) ->
+    'out_tag t
 
   (** [map2 ?label ~agg a b f] aligns [a] and [b], then applies [f] to each aligned pair. Missing
       sides are passed to [f] as [None]. *)
 
-  val mapn : ?label:string -> agg:Agg.t -> t list -> (float option list -> float option) -> t
+  val mapn :
+    ?label:string -> agg:Agg.t -> packed list -> (float option list -> float option) -> 'out_tag t
   (** [mapn ?label ~agg series f] aligns [series] at common boundaries, then applies [f] to each
       aligned row of values (one entry per input series, in input order). Missing entries are passed
       as [None]. *)
 
-  val extend : agg:Agg.t -> t -> t -> t
+  val extend : agg:Agg.t -> 'tag t -> 'tag t -> 'tag t
   (** [extend ~agg a b] yields all spans from [a], then continues with [b]. If [a] ends inside a
       span from [b], that first overlapping span from [b] is clipped to start at [a]'s end. Takes
       the first series' label. *)
 
-  val clipped : after:Date.t -> until:Date.t -> t -> t
+  val clipped : after:Date.t -> until:Date.t -> 'tag t -> 'tag t
   (** [clipped ~after ~until series] exposes only the portion of [series] from [after] [until].
       Partially overlapping spans are clipped with their existing split strategy. Raises
       [Invalid_argument] if [until] is before [after]. *)
 
-  val after : Date.t -> t -> t
+  val after : Date.t -> 'tag t -> 'tag t
   (** [after date series] exposes the portion of [series] from [date] inclusive onward. *)
 
-  val until : Date.t -> t -> t
+  val until : Date.t -> 'tag t -> 'tag t
   (** [until date series] exposes the portion of [series] before [date]. *)
 
   val unfold :
@@ -98,7 +112,7 @@ module rec Spans : sig
     init:'state ->
     cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
     unit ->
-    t
+    'tag t
   (** [unfold ?label ~agg ~deps ~init ~cells ()] builds a span series by repeatedly calling [cells].
   *)
 
@@ -107,8 +121,8 @@ module rec Spans : sig
     agg:Agg.t ->
     deps:(unit -> 'readers Deps.t) ->
     cells:('readers -> Period.t -> (unfold_cell * Period.t) option) ->
-    t ->
-    t
+    'tag t ->
+    'tag t
   (** [unfold_from ?label ~deps ~cells base] yields all spans from [base], then continues by calling
       [cells] with the final period emitted by [base]. Each continuation step returns the emitted
       cell and the next period passed to [cells]. If [base] emits no spans, [cells] is never called.
@@ -117,11 +131,11 @@ module rec Spans : sig
   val unfold_rec :
     ?label:string ->
     agg:Agg.t ->
-    deps:(t -> 'readers Deps.t) ->
+    deps:('tag t -> 'readers Deps.t) ->
     init:'state ->
     cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
     unit ->
-    t
+    'tag t
   (** [unfold_rec ?label ~deps ~init ~cells ()] is like {!unfold}, but [deps] receives the series
       being constructed. Use it for self-recursive span series. *)
 
@@ -130,60 +144,72 @@ module rec Spans : sig
       [period] with splitting strategy [split]. Dependency readers appearing in [formula] become
       queries resolved when that step's evaluated span cell is forced (never earlier). *)
 
-  val label : t -> string option
+  val label : 'tag t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)
 
-  val agg : t -> Agg.t
+  val agg : 'tag t -> Agg.t
   (** [agg series] returns the series' span aggregation function. *)
 
-  val with_agg : agg:Agg.t -> t -> t
+  val with_agg : agg:Agg.t -> 'tag t -> 'tag t
   (** [with_agg ~agg series] returns [series] with a replacement aggregation function. *)
 end
 
 and Points : sig
-  type t
+  type +'tag t
+  (** Point series carrying a phantom semantic tag. The tag is compile-time metadata only. *)
 
-  val neg : ?label:string -> t -> t
-  val scale : ?label:string -> float -> t -> t
+  type packed
+  (** Existentially packed point series for APIs that need heterogeneous input tags. *)
 
-  val sum : ?label:string -> t list -> t
+  val pack : 'tag t -> packed
+  (** [pack series] hides [series]' phantom tag for heterogeneous collections. *)
+
+  val neg : ?label:string -> 'in_tag t -> 'out_tag t
+  val scale : ?label:string -> float -> 'in_tag t -> 'out_tag t
+
+  val sum : ?label:string -> packed list -> 'out_tag t
   (** [sum ?label series] sums present inputs; missing inputs are ignored, and dates with no present
       inputs are [None]. *)
 
-  val sub : ?label:string -> t -> t -> t
+  val sub : ?label:string -> 'a_tag t -> 'b_tag t -> 'out_tag t
   (** [sub ?label a b] subtracts [b] from [a]; a missing side is treated as [0.0] only when the
       other side is present. *)
 
-  val mul : ?label:string -> t list -> t
+  val mul : ?label:string -> packed list -> 'out_tag t
   (** [mul ?label series] multiplies inputs; any missing input makes the date [None]. *)
 
-  val div : ?label:string -> t -> t -> t
+  val div : ?label:string -> 'a_tag t -> 'b_tag t -> 'out_tag t
   (** [div ?label a b] divides [a] by [b]; either missing side makes the date [None]. *)
 
-  val const : ?label:string -> period:Period.t -> float -> t
+  val const : ?label:string -> period:Period.t -> float -> 'tag t
   (** [const ?label ~period value] is a point series with [value] at dates contained by [period]. *)
 
-  val of_list : ?label:string -> (Date.t * float) list -> t
+  val of_list : ?label:string -> (Date.t * float) list -> 'tag t
   (** [of_list ?label values] is a sparse point series with exact values at the listed dates. No
       ordering or duplicate-date validation is performed. *)
 
-  val map : ?label:string -> (float -> float) -> t -> t
+  val map : ?label:string -> (float -> float) -> 'in_tag t -> 'out_tag t
   (** [map ?label f series] applies [f] to each value in [series]. *)
 
-  val map2 : ?label:string -> t -> t -> (float option -> float option -> float option) -> t
+  val map2 :
+    ?label:string ->
+    'a_tag t ->
+    'b_tag t ->
+    (float option -> float option -> float option) ->
+    'out_tag t
 
   (** [map2 ?label a b f] applies [f] to the values of [a] and [b] on each queried date. Missing
       sides are passed to [f] as [None]. *)
 
-  val mapn : ?label:string -> t list -> (float option list -> float option) -> t
+  val mapn : ?label:string -> packed list -> (float option list -> float option) -> 'out_tag t
   (** [mapn ?label series f] applies [f] on each queried date to the list of values from [series]
       (in input order). Missing entries are passed as [None]. *)
 
-  val accum : ?label:string -> init:float -> Spans.t -> t
+  val accum : ?label:string -> init:float -> 'change_tag Spans.t -> 'out_tag t
   (** [accum ?label ~init changes] is a point series whose value starts at [init] and changes by the
       cumulative span values in [changes]. *)
 
-  val label : t -> string option
+  val label : 'tag t -> string option
   (** [label series] returns the optional human-readable label attached to [series]. *)
 end
 
@@ -211,10 +237,10 @@ and Deps : sig
   val none : unit t
   (** Empty dependency set. Use when an [unfold]'s [cells] function needs no readers. *)
 
-  val span_dep : Spans.t -> span_reader t
+  val span_dep : 'tag Spans.t -> span_reader t
   (** Declare a span dependency; the produced value is the [span_reader] bound to it. *)
 
-  val point_dep : Points.t -> point_reader t
+  val point_dep : 'tag Points.t -> point_reader t
   (** Declare a point dependency; the produced value is the [point_reader] bound to it. *)
 
   val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
@@ -229,8 +255,8 @@ and Formula : sig
   type 'a t
 
   type packed_query =
-    | Span_query_item of { series : Spans.t; period : Period.t }
-    | Point_query_item of { series : Points.t; date : Date.t }
+    | Span_query_item : { series : 'tag Spans.t; period : Period.t } -> packed_query
+    | Point_query_item : { series : 'tag Points.t; date : Date.t } -> packed_query
         (** An inspectable cell-level dependency query recorded by a formula. *)
 
   val pure : 'a -> 'a t
@@ -247,17 +273,20 @@ and Formula : sig
   (** [queries formula] returns the cell-level span and point queries needed by [formula]. *)
 end
 
-type _ series =
-  | Point_series : Points.t -> [ `Point ] series
-  | Span_series : Spans.t -> [ `Span ] series
+type span_kind
+type point_kind
 
-val label : 'a series -> string option
+type (_, _) series =
+  | Point_series : 'tag Points.t -> (point_kind, 'tag) series
+  | Span_series : 'tag Spans.t -> (span_kind, 'tag) series
+
+val label : ('kind, 'tag) series -> string option
 (** [label series] returns the optional human-readable label attached to [series]. *)
 
-type packed_series = Series : 'a series -> packed_series
+type packed_series = Series : ('kind, 'tag) series -> packed_series
 type dependency = { series : packed_series; dependencies : dependency list; is_back_edge : bool }
 
-val dependencies : 'a series -> dependency list
+val dependencies : ('kind, 'tag) series -> dependency list
 (** [dependencies series] returns the direct dependencies of [series] as a nested list. Back-edges
     into the current traversal path are marked with [is_back_edge] and have no further nested
     dependencies. *)
@@ -273,14 +302,14 @@ val make_cache : unit -> series_cache
 (** [make_cache ()] creates a fresh memoization cache for queries. A cache should be reused across
     related queries to benefit from memoization; it is not safe to share across threads. *)
 
-val query_span_samples : series_cache -> Spans.t -> period:Period.t -> Agg.sample option list
+val query_span_samples : series_cache -> 'tag Spans.t -> period:Period.t -> Agg.sample option list
 (** [query_span_samples cache s ~period] collects defined clipped samples from [s]. Missing query
     coverage and undefined cell values are represented by [None]. *)
 
-val query_span : series_cache -> Spans.t -> period:Period.t -> float option
+val query_span : series_cache -> 'tag Spans.t -> period:Period.t -> float option
 (** [query_span cache s ~period] aggregates [s]'s resolved samples over [period] using {!Spans.agg}.
 *)
 
-val query_point : series_cache -> Points.t -> date:Date.t -> float option
+val query_point : series_cache -> 'tag Points.t -> date:Date.t -> float option
 (** [query_point cache s ~date] returns [s]'s value at [date], or [None] if the series has no value
     there. *)

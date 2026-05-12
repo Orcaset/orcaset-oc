@@ -141,24 +141,22 @@ let rec split_span date span =
 and split_span_option date = function None -> (None, None) | Some span -> split_span date span
 
 let clip_span bounds span =
-  if Date.equal (Period.start bounds) (Period.end_ bounds) then None
+  let q_start, q_end = Period.to_tuple bounds in
+  let f_start, f_end = Period.to_tuple (span_period span) in
+  if Date.(f_end <= q_start) || Date.(f_start >= q_end) then None
   else
-    let q_start, q_end = Period.to_tuple bounds in
-    let s_start, s_end = Period.to_tuple (span_period span) in
-    if Date.(s_end <= q_start) || Date.(s_start >= q_end) then None
-    else
-      let span =
-        if Date.(s_start < q_start) then
-          match split_span q_start span with _, Some right -> right | _, None -> span
-        else span
-      in
-      let span =
-        let f_end = Period.end_ (span_period span) in
-        if Date.(f_end > q_end) then
-          match split_span q_end span with Some left, _ -> left | None, _ -> span
-        else span
-      in
-      Some span
+    let span =
+      if Date.(f_start < q_start) then
+        match split_span q_start span with _, Some right -> right | _, None -> span
+      else span
+    in
+    let span =
+      let f_end = Period.end_ (span_period span) in
+      if Date.(f_end > q_end) then
+        match split_span q_end span with Some left, _ -> left | None, _ -> span
+      else span
+    in
+    Some span
 
 let rec align_span_seqs (seqs : span Seq.t list) : span option list Seq.t =
  fun () ->

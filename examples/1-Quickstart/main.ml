@@ -7,10 +7,11 @@ let qtr_offset = Offset.make ~quarters:1 ~month_end:true ()
 let qtr_lookback = Offset.make ~quarters:(-1) ~month_end:true ()
 let initial_period = Period.make initial_period_start (Date.shift qtr_offset initial_period_start)
 let sum_agg = Series.Agg.sum
+let sp = Series.Spans.pack
 
 (* ----- Model ----- *)
 
-let revenue =
+let revenue : [ `Revenue ] Series.Spans.t =
   Series.Spans.unfold_rec ~label:"Revenue" ~agg:sum_agg
     ~deps:(fun self -> Series.Deps.span_dep self)
     ~init:initial_period
@@ -25,8 +26,15 @@ let revenue =
       Some (Series.Spans.cell ~period ~split:Split.daily formula, Period.next qtr_offset period))
     ()
 
-let expenses = Series.Spans.scale ~label:"Expenses" (-0.50) revenue
-let profit = Series.Spans.sum ~label:"Profit" ~agg:sum_agg [ revenue; expenses ]
+let make_expenses (revenue : [ `Revenue ] Series.Spans.t) : [ `Expenses ] Series.Spans.t =
+  Series.Spans.scale ~label:"Expenses" (-0.50) revenue
+
+let make_profit (revenue : [ `Revenue ] Series.Spans.t) (expenses : [ `Expenses ] Series.Spans.t) :
+    [ `Profit ] Series.Spans.t =
+  Series.Spans.sum ~label:"Profit" ~agg:sum_agg [ sp revenue; sp expenses ]
+
+let expenses = make_expenses revenue
+let profit = make_profit revenue expenses
 
 (* ----- Output ----- *)
 
@@ -39,7 +47,7 @@ let () =
     |> Seq.take output_periods |> List.of_seq
   in
   (* Create a statement and evaluate it over the periods *)
-  let stmt = Stmt.span_total profit (Stmt.span_lines [ revenue; expenses ]) in
+  let stmt = Stmt.span_total profit [ Stmt.span_line revenue; Stmt.span_line expenses ] in
   let resolved = Stmt.eval_periods periods stmt in
   (* Print the statement using a fixed-width formatter *)
   Printf.printf "\n%s\n\n" (Stmt.fixed_width resolved)

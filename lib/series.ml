@@ -78,8 +78,8 @@ end
 module rec Spans : sig
   type unfold_cell
 
-  type t =
-    | Const of {
+  type +'tag t =
+    | Const : {
         id : series_id;
         label : string option;
         split : split;
@@ -87,25 +87,35 @@ module rec Spans : sig
         period : Period.t;
         value : float;
       }
-    | Map of { id : series_id; label : string option; agg : Agg.t; dep : t; f : float -> float }
-    | Map2 of {
+        -> 'tag t
+    | Map : {
         id : series_id;
         label : string option;
         agg : Agg.t;
-        a : t;
-        b : t;
+        dep : 'in_tag t;
+        f : float -> float;
+      }
+        -> 'out_tag t
+    | Map2 : {
+        id : series_id;
+        label : string option;
+        agg : Agg.t;
+        a : 'a_tag t;
+        b : 'b_tag t;
         f : float option -> float option -> float option;
       }
-    | MapN of {
+        -> 'out_tag t
+    | MapN : {
         id : series_id;
         label : string option;
         agg : Agg.t;
-        deps : t list;
+        deps : packed list;
         f : float option list -> float option;
       }
-    | Extend of { id : series_id; agg : Agg.t; a : t; b : t }
-    | Clipped of { id : series_id; after : Date.t; until : Date.t; base : t }
-    | With_agg of { id : series_id; agg : Agg.t; base : t }
+        -> 'out_tag t
+    | Extend : { id : series_id; agg : Agg.t; a : 'tag t; b : 'tag t } -> 'tag t
+    | Clipped : { id : series_id; after : Date.t; until : Date.t; base : 'tag t } -> 'tag t
+    | With_agg : { id : series_id; agg : Agg.t; base : 'tag t } -> 'tag t
     | Unfold : {
         id : series_id;
         label : string option;
@@ -114,35 +124,45 @@ module rec Spans : sig
         init : 'state;
         cells : 'readers -> 'state -> (unfold_cell * 'state) option;
       }
-        -> t
+        -> 'tag t
     | Unfold_from : {
         id : series_id;
         label : string option;
         agg : Agg.t;
-        base : t;
+        base : 'tag t;
         deps : unit -> 'readers Deps.t;
         cells : 'readers -> Period.t -> (unfold_cell * Period.t) option;
       }
-        -> t
+        -> 'tag t
 
-  val neg : ?label:string -> t -> t
-  val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> agg:Agg.t -> t list -> t
-  val sub : ?label:string -> agg:Agg.t -> t -> t -> t
-  val mul : ?label:string -> agg:Agg.t -> t list -> t
-  val div : ?label:string -> agg:Agg.t -> t -> t -> t
-  val const : ?label:string -> split:split -> agg:Agg.t -> period:Period.t -> float -> t
-  val of_list : ?label:string -> split:split -> agg:Agg.t -> (Period.t * float) list -> t
-  val map : ?label:string -> (float -> float) -> t -> t
+  and packed = Pack : 'tag t -> packed
+
+  val pack : 'tag t -> packed
+  val neg : ?label:string -> 'in_tag t -> 'out_tag t
+  val scale : ?label:string -> float -> 'in_tag t -> 'out_tag t
+  val sum : ?label:string -> agg:Agg.t -> packed list -> 'out_tag t
+  val sub : ?label:string -> agg:Agg.t -> 'a_tag t -> 'b_tag t -> 'out_tag t
+  val mul : ?label:string -> agg:Agg.t -> packed list -> 'out_tag t
+  val div : ?label:string -> agg:Agg.t -> 'a_tag t -> 'b_tag t -> 'out_tag t
+  val const : ?label:string -> split:split -> agg:Agg.t -> period:Period.t -> float -> 'tag t
+  val of_list : ?label:string -> split:split -> agg:Agg.t -> (Period.t * float) list -> 'tag t
+  val map : ?label:string -> (float -> float) -> 'in_tag t -> 'out_tag t
 
   val map2 :
-    ?label:string -> agg:Agg.t -> t -> t -> (float option -> float option -> float option) -> t
+    ?label:string ->
+    agg:Agg.t ->
+    'a_tag t ->
+    'b_tag t ->
+    (float option -> float option -> float option) ->
+    'out_tag t
 
-  val mapn : ?label:string -> agg:Agg.t -> t list -> (float option list -> float option) -> t
-  val extend : agg:Agg.t -> t -> t -> t
-  val clipped : after:Date.t -> until:Date.t -> t -> t
-  val after : Date.t -> t -> t
-  val until : Date.t -> t -> t
+  val mapn :
+    ?label:string -> agg:Agg.t -> packed list -> (float option list -> float option) -> 'out_tag t
+
+  val extend : agg:Agg.t -> 'tag t -> 'tag t -> 'tag t
+  val clipped : after:Date.t -> until:Date.t -> 'tag t -> 'tag t
+  val after : Date.t -> 'tag t -> 'tag t
+  val until : Date.t -> 'tag t -> 'tag t
 
   val unfold :
     ?label:string ->
@@ -151,37 +171,37 @@ module rec Spans : sig
     init:'state ->
     cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
     unit ->
-    t
+    'tag t
 
   val unfold_from :
     ?label:string ->
     agg:Agg.t ->
     deps:(unit -> 'readers Deps.t) ->
     cells:('readers -> Period.t -> (unfold_cell * Period.t) option) ->
-    t ->
-    t
+    'tag t ->
+    'tag t
 
   val unfold_rec :
     ?label:string ->
     agg:Agg.t ->
-    deps:(t -> 'readers Deps.t) ->
+    deps:('tag t -> 'readers Deps.t) ->
     init:'state ->
     cells:('readers -> 'state -> (unfold_cell * 'state) option) ->
     unit ->
-    t
+    'tag t
 
   val cell : period:Period.t -> split:split -> float option Formula.t -> unfold_cell
-  val id : t -> series_id
-  val label : t -> string option
-  val agg : t -> Agg.t
-  val with_agg : agg:Agg.t -> t -> t
+  val id : 'tag t -> series_id
+  val label : 'tag t -> string option
+  val agg : 'tag t -> Agg.t
+  val with_agg : agg:Agg.t -> 'tag t -> 'tag t
   val unpack_unfold_cell : unfold_cell -> Period.t * split * float option Formula.t
 end = struct
   type unfold_cell =
     | Cell of { period : Period.t; split : split; formula : float option Formula.t }
 
-  type t =
-    | Const of {
+  type +'tag t =
+    | Const : {
         id : series_id;
         label : string option;
         split : split;
@@ -189,25 +209,35 @@ end = struct
         period : Period.t;
         value : float;
       }
-    | Map of { id : series_id; label : string option; agg : Agg.t; dep : t; f : float -> float }
-    | Map2 of {
+        -> 'tag t
+    | Map : {
         id : series_id;
         label : string option;
         agg : Agg.t;
-        a : t;
-        b : t;
+        dep : 'in_tag t;
+        f : float -> float;
+      }
+        -> 'out_tag t
+    | Map2 : {
+        id : series_id;
+        label : string option;
+        agg : Agg.t;
+        a : 'a_tag t;
+        b : 'b_tag t;
         f : float option -> float option -> float option;
       }
-    | MapN of {
+        -> 'out_tag t
+    | MapN : {
         id : series_id;
         label : string option;
         agg : Agg.t;
-        deps : t list;
+        deps : packed list;
         f : float option list -> float option;
       }
-    | Extend of { id : series_id; agg : Agg.t; a : t; b : t }
-    | Clipped of { id : series_id; after : Date.t; until : Date.t; base : t }
-    | With_agg of { id : series_id; agg : Agg.t; base : t }
+        -> 'out_tag t
+    | Extend : { id : series_id; agg : Agg.t; a : 'tag t; b : 'tag t } -> 'tag t
+    | Clipped : { id : series_id; after : Date.t; until : Date.t; base : 'tag t } -> 'tag t
+    | With_agg : { id : series_id; agg : Agg.t; base : 'tag t } -> 'tag t
     | Unfold : {
         id : series_id;
         label : string option;
@@ -216,17 +246,20 @@ end = struct
         init : 'state;
         cells : 'readers -> 'state -> (unfold_cell * 'state) option;
       }
-        -> t
+        -> 'tag t
     | Unfold_from : {
         id : series_id;
         label : string option;
         agg : Agg.t;
-        base : t;
+        base : 'tag t;
         deps : unit -> 'readers Deps.t;
         cells : 'readers -> Period.t -> (unfold_cell * Period.t) option;
       }
-        -> t
+        -> 'tag t
 
+  and packed = Pack : 'tag t -> packed
+
+  let pack series = Pack series
   let cell ~period ~split formula = Cell { period; split; formula }
   let unpack_unfold_cell (Cell { period; split; formula }) = (period, split, formula)
 
@@ -304,7 +337,7 @@ end = struct
 
   let sum ?label ~agg = function
     | [] -> invalid_arg "Spans.sum: empty list"
-    | [ x ] -> Map { id = new_id (); label; agg; dep = x; f = Fun.id }
+    | [ Pack x ] -> Map { id = new_id (); label; agg; dep = x; f = Fun.id }
     | deps ->
         mapn ?label ~agg deps (fun values ->
             match List.filter_map Fun.id values with
@@ -313,7 +346,7 @@ end = struct
 
   let mul ?label ~agg = function
     | [] -> invalid_arg "Spans.mul: empty list"
-    | [ x ] -> Map { id = new_id (); label; agg; dep = x; f = Fun.id }
+    | [ Pack x ] -> Map { id = new_id (); label; agg; dep = x; f = Fun.id }
     | deps ->
         mapn ?label ~agg deps (fun values ->
             if List.for_all Option.is_some values then
@@ -332,59 +365,100 @@ end = struct
 end
 
 and Points : sig
-  type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : float }
-    | List of { id : series_id; label : string option; values : (Date.t * float) list }
-    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
-    | Map2 of {
+  type +'tag t =
+    | Const : { id : series_id; label : string option; period : Period.t; value : float } -> 'tag t
+    | List : { id : series_id; label : string option; values : (Date.t * float) list } -> 'tag t
+    | Map : {
         id : series_id;
         label : string option;
-        a : t;
-        b : t;
+        dep : 'in_tag t;
+        f : float -> float;
+      }
+        -> 'out_tag t
+    | Map2 : {
+        id : series_id;
+        label : string option;
+        a : 'a_tag t;
+        b : 'b_tag t;
         f : float option -> float option -> float option;
       }
-    | MapN of {
+        -> 'out_tag t
+    | MapN : {
         id : series_id;
         label : string option;
-        deps : t list;
+        deps : packed list;
         f : float option list -> float option;
       }
-    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
+        -> 'out_tag t
+    | Accum : {
+        id : series_id;
+        label : string option;
+        init : float;
+        changes : 'change_tag Spans.t;
+      }
+        -> 'out_tag t
 
-  val neg : ?label:string -> t -> t
-  val scale : ?label:string -> float -> t -> t
-  val sum : ?label:string -> t list -> t
-  val sub : ?label:string -> t -> t -> t
-  val mul : ?label:string -> t list -> t
-  val div : ?label:string -> t -> t -> t
-  val const : ?label:string -> period:Period.t -> float -> t
-  val of_list : ?label:string -> (Date.t * float) list -> t
-  val map : ?label:string -> (float -> float) -> t -> t
-  val map2 : ?label:string -> t -> t -> (float option -> float option -> float option) -> t
-  val mapn : ?label:string -> t list -> (float option list -> float option) -> t
-  val accum : ?label:string -> init:float -> Spans.t -> t
-  val id : t -> series_id
-  val label : t -> string option
+  and packed = Pack : 'tag t -> packed
+
+  val pack : 'tag t -> packed
+  val neg : ?label:string -> 'in_tag t -> 'out_tag t
+  val scale : ?label:string -> float -> 'in_tag t -> 'out_tag t
+  val sum : ?label:string -> packed list -> 'out_tag t
+  val sub : ?label:string -> 'a_tag t -> 'b_tag t -> 'out_tag t
+  val mul : ?label:string -> packed list -> 'out_tag t
+  val div : ?label:string -> 'a_tag t -> 'b_tag t -> 'out_tag t
+  val const : ?label:string -> period:Period.t -> float -> 'tag t
+  val of_list : ?label:string -> (Date.t * float) list -> 'tag t
+  val map : ?label:string -> (float -> float) -> 'in_tag t -> 'out_tag t
+
+  val map2 :
+    ?label:string ->
+    'a_tag t ->
+    'b_tag t ->
+    (float option -> float option -> float option) ->
+    'out_tag t
+
+  val mapn : ?label:string -> packed list -> (float option list -> float option) -> 'out_tag t
+  val accum : ?label:string -> init:float -> 'change_tag Spans.t -> 'out_tag t
+  val id : 'tag t -> series_id
+  val label : 'tag t -> string option
 end = struct
-  type t =
-    | Const of { id : series_id; label : string option; period : Period.t; value : float }
-    | List of { id : series_id; label : string option; values : (Date.t * float) list }
-    | Map of { id : series_id; label : string option; dep : t; f : float -> float }
-    | Map2 of {
+  type +'tag t =
+    | Const : { id : series_id; label : string option; period : Period.t; value : float } -> 'tag t
+    | List : { id : series_id; label : string option; values : (Date.t * float) list } -> 'tag t
+    | Map : {
         id : series_id;
         label : string option;
-        a : t;
-        b : t;
+        dep : 'in_tag t;
+        f : float -> float;
+      }
+        -> 'out_tag t
+    | Map2 : {
+        id : series_id;
+        label : string option;
+        a : 'a_tag t;
+        b : 'b_tag t;
         f : float option -> float option -> float option;
       }
-    | MapN of {
+        -> 'out_tag t
+    | MapN : {
         id : series_id;
         label : string option;
-        deps : t list;
+        deps : packed list;
         f : float option list -> float option;
       }
-    | Accum of { id : series_id; label : string option; init : float; changes : Spans.t }
+        -> 'out_tag t
+    | Accum : {
+        id : series_id;
+        label : string option;
+        init : float;
+        changes : 'change_tag Spans.t;
+      }
+        -> 'out_tag t
 
+  and packed = Pack : 'tag t -> packed
+
+  let pack series = Pack series
   let const ?label ~period value = Const { id = new_id (); label; period; value }
   let of_list ?label values = List { id = new_id (); label; values }
   let accum ?label ~init changes = Accum { id = new_id (); label; init; changes }
@@ -411,9 +485,12 @@ end = struct
   let map2 ?label a b f = Map2 { id = new_id (); label; a; b; f }
   let mapn ?label deps f = MapN { id = new_id (); label; deps; f }
 
+  let effective_label override series =
+    match override with Some _ -> override | None -> label series
+
   let sum ?label = function
     | [] -> invalid_arg "Points.sum: empty list"
-    | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
+    | [ Pack x ] -> Map { id = new_id (); label = effective_label label x; dep = x; f = Fun.id }
     | deps ->
         mapn ?label deps (fun values ->
             match List.filter_map Fun.id values with
@@ -422,7 +499,7 @@ end = struct
 
   let mul ?label = function
     | [] -> invalid_arg "Points.mul: empty list"
-    | [ x ] -> ( match label with None -> x | Some _ -> map ?label Fun.id x)
+    | [ Pack x ] -> Map { id = new_id (); label = effective_label label x; dep = x; f = Fun.id }
     | deps ->
         mapn ?label deps (fun values ->
             if List.for_all Option.is_some values then
@@ -445,19 +522,25 @@ and Deps : sig
   type _ t
 
   val none : unit t
-  val span_dep : Spans.t -> span_reader t
-  val point_dep : Points.t -> point_reader t
+  val span_dep : 'tag Spans.t -> span_reader t
+  val point_dep : 'tag Points.t -> point_reader t
   val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
   val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
 
-  type packed_dep = Span_item of Spans.t | Point_item of Points.t
+  type packed_dep =
+    | Span_item : 'tag Spans.t -> packed_dep
+    | Point_item : 'tag Points.t -> packed_dep
 
   val dependencies : 'a t -> packed_dep list
   val run : 'a t -> 'a
 end = struct
   type span_reader = period:Period.t -> float option Formula.t
   type point_reader = date:Date.t -> float option Formula.t
-  type _ dep = Span_dep : Spans.t -> span_reader dep | Point_dep : Points.t -> point_reader dep
+
+  type _ dep =
+    | Span_dep : 'tag Spans.t -> span_reader dep
+    | Point_dep : 'tag Points.t -> point_reader dep
+
   type _ t = Pure : 'a -> 'a t | Ap : 'x dep * ('x -> 'a) t -> 'a t
 
   let none = Pure ()
@@ -475,7 +558,9 @@ end = struct
   let ( let+ ) x f = map f x
   let ( and+ ) a b = ap (map (fun x y -> (x, y)) a) b
 
-  type packed_dep = Span_item of Spans.t | Point_item of Points.t
+  type packed_dep =
+    | Span_item : 'tag Spans.t -> packed_dep
+    | Point_item : 'tag Points.t -> packed_dep
 
   let rec dependencies : type a. a t -> packed_dep list = function
     | Pure _ -> []
@@ -499,8 +584,8 @@ and Formula : sig
   type 'a t
 
   type packed_query =
-    | Span_query_item of { series : Spans.t; period : Period.t }
-    | Point_query_item of { series : Points.t; date : Date.t }
+    | Span_query_item : { series : 'tag Spans.t; period : Period.t } -> packed_query
+    | Point_query_item : { series : 'tag Points.t; date : Date.t } -> packed_query
 
   val pure : 'a -> 'a t
   val map : ('a -> 'b) -> 'a t -> 'b t
@@ -508,18 +593,23 @@ and Formula : sig
   val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
   val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
   val queries : 'a t -> packed_query list
-  val span_query : Spans.t -> period:Period.t -> float option t
-  val point_query : Points.t -> date:Date.t -> float option t
+  val span_query : 'tag Spans.t -> period:Period.t -> float option t
+  val point_query : 'tag Points.t -> date:Date.t -> float option t
+
+  type span_query_values = {
+    query_span_values : 'tag. 'tag Spans.t -> Period.t -> Agg.sample option list * float;
+  }
+
+  type point_query_value = {
+    query_point_value : 'tag. 'tag Points.t -> Date.t -> float option * float;
+  }
 
   val eval_with_delta :
-    query_span_values:(Spans.t -> Period.t -> Agg.sample option list * float) ->
-    query_point_value:(Points.t -> Date.t -> float option * float) ->
-    'a t ->
-    'a * float
+    query_span_values:span_query_values -> query_point_value:point_query_value -> 'a t -> 'a * float
 end = struct
   type _ query =
-    | Span_query : { series : Spans.t; period : Period.t } -> float option query
-    | Point_query : { series : Points.t; date : Date.t } -> float option query
+    | Span_query : { series : 'tag Spans.t; period : Period.t } -> float option query
+    | Point_query : { series : 'tag Points.t; date : Date.t } -> float option query
 
   type 'a t =
     | Pure : 'a -> 'a t
@@ -528,8 +618,16 @@ end = struct
     | Query : 'a query -> 'a t
 
   type packed_query =
-    | Span_query_item of { series : Spans.t; period : Period.t }
-    | Point_query_item of { series : Points.t; date : Date.t }
+    | Span_query_item : { series : 'tag Spans.t; period : Period.t } -> packed_query
+    | Point_query_item : { series : 'tag Points.t; date : Date.t } -> packed_query
+
+  type span_query_values = {
+    query_span_values : 'tag. 'tag Spans.t -> Period.t -> Agg.sample option list * float;
+  }
+
+  type point_query_value = {
+    query_point_value : 'tag. 'tag Points.t -> Date.t -> float option * float;
+  }
 
   let pure x = Pure x
   let map f x = Map (f, x)
@@ -546,10 +644,8 @@ end = struct
     | Query (Span_query { series; period }) -> [ Span_query_item { series; period } ]
     | Query (Point_query { series; date }) -> [ Point_query_item { series; date } ]
 
-  let eval_with_delta (type a)
-      ~(query_span_values : Spans.t -> Period.t -> Agg.sample option list * float)
-      ~(query_point_value : Points.t -> Date.t -> float option * float) (formula : a t) : a * float
-      =
+  let eval_with_delta (type a) ~(query_span_values : span_query_values)
+      ~(query_point_value : point_query_value) (formula : a t) : a * float =
     let rec go : type a. a t -> a * float = function
       | Pure x -> (x, 0.0)
       | Map (f, x) ->
@@ -560,10 +656,10 @@ end = struct
           let b_value, b_delta = go b in
           (f a_value b_value, max a_delta b_delta)
       | Query (Span_query { series; period }) ->
-          let samples, delta = query_span_values series period in
+          let samples, delta = query_span_values.query_span_values series period in
           (Agg.reduce (Spans.agg series) samples, delta)
       | Query (Point_query { series; date }) ->
-          let value, delta = query_point_value series date in
+          let value, delta = query_point_value.query_point_value series date in
           (value, delta)
     in
     go formula
@@ -571,15 +667,18 @@ end
 
 (* ----- Existentially-packed series ----- *)
 
-type _ series =
-  | Point_series : Points.t -> [ `Point ] series
-  | Span_series : Spans.t -> [ `Span ] series
+type span_kind
+type point_kind
 
-let label : type a. a series -> string option = function
+type (_, _) series =
+  | Point_series : 'tag Points.t -> (point_kind, 'tag) series
+  | Span_series : 'tag Spans.t -> (span_kind, 'tag) series
+
+let label : type kind tag. (kind, tag) series -> string option = function
   | Point_series series -> Points.label series
   | Span_series series -> Spans.label series
 
-type packed_series = Series : 'a series -> packed_series
+type packed_series = Series : ('kind, 'tag) series -> packed_series
 type dependency = { series : packed_series; dependencies : dependency list; is_back_edge : bool }
 
 (* ----- Series cache ----- *)
@@ -813,7 +912,8 @@ let clipped_span_seq ~after ~until seq =
     in
     go seq
 
-let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq.t =
+let rec seq_for_span_series : type tag. series_cache -> tag Spans.t -> span Seq.t =
+ fun cache series ->
   match series with
   | Const { period; value; split; _ } ->
       Seq.return (f_value period value (cell_split_strategy split))
@@ -837,7 +937,7 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
       in
       Seq.memoize seq
   | MapN { deps; f; _ } ->
-      let dep_seqs = List.map (seq_for_span_series cache) deps in
+      let dep_seqs = List.map (fun (Spans.Pack dep) -> seq_for_span_series cache dep) deps in
       let aligned = align_span_seqs dep_seqs in
       let seq =
         Seq.map
@@ -864,7 +964,8 @@ let rec seq_for_span_series (cache : series_cache) (series : Spans.t) : span Seq
         ~register_formula:(register_unfold_formula cache)
       |> Seq.memoize
 
-and query_span_series cache (series : Spans.t) period : span option list =
+and query_span_series : type tag. series_cache -> tag Spans.t -> Period.t -> span option list =
+ fun cache series period ->
   match series with
   | Clipped { after; until; _ }
     when Date.(until <= after)
@@ -891,7 +992,8 @@ and query_span_series cache (series : Spans.t) period : span option list =
           SpanCellCache.replace cells period spans;
           spans)
 
-and get_accum_entry cache point_series_id changes : accum_cache_entry =
+and get_accum_entry : type tag. series_cache -> series_id -> tag Spans.t -> accum_cache_entry =
+ fun cache point_series_id changes ->
   match Hashtbl.find_opt cache.accum point_series_id with
   | Some entry -> entry
   | None ->
@@ -899,7 +1001,8 @@ and get_accum_entry cache point_series_id changes : accum_cache_entry =
       Hashtbl.add cache.accum point_series_id entry;
       entry
 
-and query_accum cache point_series_id init changes date : point =
+and query_accum : type tag. series_cache -> series_id -> float -> tag Spans.t -> Date.t -> point =
+ fun cache point_series_id init changes date ->
   let entry = get_accum_entry cache point_series_id changes in
   let nearest = DateMap.find_last_opt (fun k -> Date.(k <= date)) entry.checkpoints in
   match nearest with
@@ -915,7 +1018,8 @@ and query_accum cache point_series_id init changes date : point =
       entry.checkpoints <- DateMap.add date { point = new_point; tail = new_tail } entry.checkpoints;
       new_point
 
-and query_point_series cache series date : point option =
+and query_point_series : type tag. series_cache -> tag Points.t -> Date.t -> point option =
+ fun cache series date ->
   let series_id = Points.id series in
   let cached_value =
     match Hashtbl.find_opt cache.point series_id with
@@ -941,7 +1045,9 @@ and query_point_series cache series date : point option =
             let oa, ob = (query_point_series cache a date, query_point_series cache b date) in
             Some (p_derived date [ oa; ob ] (function [ va; vb ] -> f va vb | _ -> assert false))
         | MapN { deps; f; _ } ->
-            let child_opts = List.map (fun dep -> query_point_series cache dep date) deps in
+            let child_opts =
+              List.map (fun (Points.Pack dep) -> query_point_series cache dep date) deps
+            in
             Some (p_derived date child_opts f)
         | Accum { init; changes; _ } -> Some (query_accum cache series_id init changes date)
       in
@@ -1145,16 +1251,26 @@ and prime_point_options cache touched = function
 and resolved_formula_value cache formula =
   fst
     (Formula.eval_with_delta
-       ~query_span_values:(fun series period ->
-         let samples = query_span_series cache series period |> current_span_option_samples cache in
-         (samples, 0.0))
-       ~query_point_value:(fun series date ->
-         let value =
-           match query_point_series cache series date with
-           | Some point -> current_point_value cache point
-           | None -> None
-         in
-         (value, 0.0))
+       ~query_span_values:
+         {
+           Formula.query_span_values =
+             (fun series period ->
+               let samples =
+                 query_span_series cache series period |> current_span_option_samples cache
+               in
+               (samples, 0.0));
+         }
+       ~query_point_value:
+         {
+           Formula.query_point_value =
+             (fun series date ->
+               let value =
+                 match query_point_series cache series date with
+                 | Some point -> current_point_value cache point
+                 | None -> None
+               in
+               (value, 0.0));
+         }
        formula)
 
 let value_delta previous value =
@@ -1235,14 +1351,31 @@ and eval_point_value cache touched iteration = function
 
 and eval_formula cache touched iteration formula =
   Formula.eval_with_delta
-    ~query_span_values:(eval_span_query cache touched iteration)
-    ~query_point_value:(eval_point_query cache touched iteration)
+    ~query_span_values:
+      {
+        Formula.query_span_values =
+          (fun series period -> eval_span_query cache touched iteration series period);
+      }
+    ~query_point_value:
+      {
+        Formula.query_point_value =
+          (fun series date -> eval_point_query cache touched iteration series date);
+      }
     formula
 
-and eval_span_query cache touched iteration series period =
+and eval_span_query : type tag.
+    series_cache ->
+    cell_key list ref ->
+    int ->
+    tag Spans.t ->
+    Period.t ->
+    Agg.sample option list * float =
+ fun cache touched iteration series period ->
   query_span_series cache series period |> eval_span_option_samples cache touched iteration
 
-and eval_point_query cache touched iteration series date =
+and eval_point_query : type tag.
+    series_cache -> cell_key list ref -> int -> tag Points.t -> Date.t -> float option * float =
+ fun cache touched iteration series date ->
   match query_point_series cache series date with
   | Some point ->
       let value, delta = eval_point cache touched iteration point in
@@ -1355,25 +1488,25 @@ module Series_id_set = Set.Make (struct
   let compare (Id a) (Id b) = Int.compare a b
 end)
 
-let series_id : type a. a series -> series_id = function
+let series_id : type kind tag. (kind, tag) series -> series_id = function
   | Point_series series -> Points.id series
   | Span_series series -> Spans.id series
 
-let series_dependencies : type a. a series -> packed_series list = function
+let series_dependencies : type kind tag. (kind, tag) series -> packed_series list = function
   | Point_series series -> (
       match series with
       | Const _ -> []
       | List _ -> []
       | Map { dep; _ } -> [ Series (Point_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Point_series a); Series (Point_series b) ]
-      | MapN { deps; _ } -> List.map (fun d -> Series (Point_series d)) deps
+      | MapN { deps; _ } -> List.map (fun (Points.Pack dep) -> Series (Point_series dep)) deps
       | Accum { changes; _ } -> [ Series (Span_series changes) ])
   | Span_series series -> (
       match series with
       | Const _ -> []
       | Map { dep; _ } -> [ Series (Span_series dep) ]
       | Map2 { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
-      | MapN { deps; _ } -> List.map (fun d -> Series (Span_series d)) deps
+      | MapN { deps; _ } -> List.map (fun (Spans.Pack dep) -> Series (Span_series dep)) deps
       | Extend { a; b; _ } -> [ Series (Span_series a); Series (Span_series b) ]
       | Clipped { base; _ } -> [ Series (Span_series base) ]
       | With_agg { base; _ } -> [ Series (Span_series base) ]
@@ -1404,5 +1537,5 @@ let rec build_dependencies active_path (Series series) =
   in
   series_dependencies series |> List.map add_dependency
 
-let dependencies : type a. a series -> dependency list =
+let dependencies : type kind tag. (kind, tag) series -> dependency list =
  fun series -> build_dependencies (Series_id_set.singleton (series_id series)) (Series series)

@@ -82,7 +82,7 @@ val split_span : Date.t -> span -> span option * span option
 
 val clip_span : Period.t -> span -> span option
 (** [clip_span period span] clips [span] to the overlap with [period]. Returns [None] when there is
-    no overlap or the periods dates are equal. *)
+    no overlap. *)
 
 val align_span_seq : span Seq.t -> span Seq.t -> (span option * span option) Seq.t
 (** [align_span_seq a b] returns a sequence of span option tuples with aligned span periods. Any
