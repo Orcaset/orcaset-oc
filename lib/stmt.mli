@@ -22,6 +22,11 @@ val span_line : 'tag Series.Spans.t -> stmt
 val span_lines : 'tag Series.Spans.t list -> stmt list
 (** [span_lines series] converts each span series in [series] to a line statement. *)
 
+val span_family_lines :
+  ?label:('key -> string) -> ('key, 'tag Series.Spans.t) Series.Family.t -> stmt
+(** [span_family_lines family] expands [family] into one span line per key active in any evaluated
+    period. *)
+
 val span_total : 'tag Series.Spans.t -> stmt list -> stmt
 (** [span_total total children] creates a total statement with a span total and statement children.
 *)

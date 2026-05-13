@@ -20,20 +20,23 @@ let sum_agg = Series.Agg.sum
 let sp = Series.Spans.pack
 let pt = Series.Points.pack
 
+let rec seq_take n seq () =
+  if n <= 0 then Seq.Nil
+  else match seq () with Seq.Nil -> Seq.Nil | Seq.Cons (x, rest) -> Seq.Cons (x, seq_take (n - 1) rest)
+
 (* ----- Model ----- *)
 
 (* Income Statement *)
 let revenue : [ `Revenue ] Series.Spans.t =
   Series.Spans.unfold_rec ~label:"Revenue" ~agg:sum_agg
-    ~deps:(fun self -> Series.Deps.span_dep self)
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
-    ~cells:(fun read_revenue period ->
+    ~cells:(fun ~self period ->
       let formula =
         if Date.equal (Period.start period) start_date then
           Series.Formula.pure (Some initial_revenue)
         else
           let open Series.Formula in
-          let+ prior_revenue = read_revenue ~period:(Period.prev eomonth_lookback period) in
+          let+ prior_revenue = span_query self ~period:(Period.prev eomonth_lookback period) in
           Option.map
             (fun prior_revenue ->
               let yf = Yf.act_360 (Period.start period) (Period.end_ period) in
@@ -56,9 +59,8 @@ let gross_profit = make_gross_profit revenue cost_of_revenue
 
 let opex : [ `Operating_expenses ] Series.Spans.t =
   Series.Spans.unfold ~label:"Operating expenses" ~agg:sum_agg
-    ~deps:(fun () -> Series.Deps.none)
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
-    ~cells:(fun () period ->
+    ~cells:(fun period ->
       let next_period = Period.next eomonth_offset period in
       Some
         ( Series.Spans.cell ~period ~split:Split.daily (Series.Formula.pure (Some monthly_opex)),
@@ -82,12 +84,11 @@ and lazy_ppe_net : [ `Ppe_net ] Series.Points.t Lazy.t =
 and make_depreciation (ppe_net : [ `Ppe_net ] Series.Points.t Lazy.t) :
     [ `Depreciation ] Series.Spans.t =
   Series.Spans.unfold ~label:"Depreciation" ~agg:sum_agg
-    ~deps:(fun () -> Series.Deps.point_dep (Lazy.force ppe_net))
     ~init:(Period.make start_date (Date.shift eomonth_offset start_date))
-    ~cells:(fun read_ppe_net period ->
+    ~cells:(fun period ->
       let formula =
         let open Series.Formula in
-        let+ ppe_net = read_ppe_net ~date:(Period.start period) in
+        let+ ppe_net = point_query (Lazy.force ppe_net) ~date:(Period.start period) in
         Option.map (fun ppe_net -> -.ppe_net *. monthly_depreciation_rate) ppe_net
       in
       let next_period = Period.next eomonth_offset period in
@@ -223,7 +224,7 @@ let () =
   let num_periods = 6 in
   let query_offset = Offset.make ~months:1 ~month_end:true () in
   let periods =
-    Period.make_seq ~start:start_date ~offset:query_offset |> Seq.take num_periods |> List.of_seq
+    Period.make_seq ~start:start_date ~offset:query_offset |> seq_take num_periods |> List.of_seq
   in
   let resolved = Stmt.eval_periods periods total_stmt in
   Printf.printf "\n%s\n\n" (Stmt.fixed_width resolved)

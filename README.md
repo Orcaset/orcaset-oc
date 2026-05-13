@@ -5,7 +5,7 @@ Orcaset is a financial modeling framework designed to correctly and efficiently 
 Orcaset uses strong typing and runtime safety checks to prevent users and agents from accidentally creating malformed models. Strong protections give end-users confidence that large-scale modifications do not cause hidden errors.
 
 * **Build and Update with Confidence** - Strong typing prevents invalid models and helps agents navigate deep formula dependencies. Confidently modify models without breaking them.
-* **Transparent and Deterministic** - Calculations are open and transparent. Build and inspect dependency trees to audit model calculations. No black boxes.
+* **Transparent and Deterministic** - Calculations are open and transparent. Materialize and inspect query-specific traces to audit model calculations. No black boxes.
 * **Efficient Construction** - Faster and cheaper than spreadsheet automation. Re-use components across models and scenarios. Save tokens by writing formulas once per line item, not once per cell.
 
 ## Installation
@@ -29,17 +29,19 @@ Create a simple model with revenue, expenses, and income matching the following 
 * **Income**: Sum of revenue and expenses
 
 ```ocaml
+(* Imports and assumptions *)
 open Orcaset
 
+let sp = Series.Spans.pack
 let start_period = Period.make (Date.make 2025 12 31) (Date.make 2026 3 31)
 let offset = Offset.make ~months:3 ~month_end:true ()
-let sp = Series.Spans.pack
 
 let revenue =
   Series.Spans.unfold ~label:"Revenue" ~agg:Series.Agg.sum
-    ~deps:(fun () -> Series.Deps.none)
+    (* Initial unfold state *)
     ~init:(start_period, 1_000.0)
-    ~cells:(fun () (period, value) ->
+    (* Unfold step function returning Some (cell, next state) *)
+    ~cells:(fun (period, value) ->
       let next_period = Period.next offset period in
       let next_value = value *. 1.05 in
       Some
@@ -47,11 +49,13 @@ let revenue =
           (next_period, next_value) ))
     ()
 
+(* Scale revenue by a scalar expense margin assumption *)
 let expenses = Series.Spans.scale ~label:"Expenses" (-0.30) revenue
+(* Add revenue and expenses to calculate income *)
 let income = Series.Spans.sum ~label:"Income" ~agg:Series.Agg.sum [ sp revenue; sp expenses ]
 ```
 
-These sixteen lines of code create a model that is deterministic, tracks all dependencies, and can be queried for values over *any* span of time.
+This snipped creates a model that is deterministic, traceable, and can be queried for values over *any* span of time in only a dozen or so lines of code.
 
 ### Enforcing line item relationships with types
 
@@ -89,7 +93,7 @@ Typing series in this manner makes models more composable and reusable. It allow
 While you can query granular results for specific series, it's often helpful to view many line items over many periods in a statement format. Orcaset's `Stmt` module allows users to create and query over different statement views.
 
 ```ocaml
-let stmt = Stmt.span_total income (Stmt.span_lines [ revenue; expenses ])
+let stmt = Stmt.span_total income [ Stmt.span_line revenue; Stmt.span_line expenses ]
 
 let query_periods =
   Period.make_seq ~start:(Period.start start_period) ~offset |> Seq.take 4 |> List.of_seq
@@ -106,9 +110,9 @@ let () =
 Income          700.00      735.00      771.75      810.34 *)
 ```
 
-This example prints out the table to the console using a fixed-width table format, but you can create your own formatters to save outputs to JSON, CSV, markdown, or any other format.
+This example prints out the table to the console using a fixed-width table format, but you can create formatters to save outputs to JSON, CSV, markdown, or any other format.
 
-As mentioned previously, orcaset automatically interpolates partial periods meaning you can query over partial periods. You can also easily aggregate over multiple periods without changing the model (e.g. annual view of quarterly detail).
+As mentioned previously, orcaset automatically interpolates partial periods meaning you can query over date ranges without worrying about period boundary alignment. You can also easily aggregate over multiple periods without changing the model (e.g. annual view of quarterly detail).
 
 ```ocaml
 let partial_period = Period.make (Date.make 2026 1 20) (Date.make 2026 3 13)
@@ -130,14 +134,17 @@ Income          404.44     3017.09 *)
 
 ## Tracing dependencies
 
-All calculations are fully traceable. You can inspect dependencies at both the line level and the individual number level.
+All calculations are fully traceable. You can inspect the materialized cell graph for a specific query.
 
 ```ocaml
-(* Get the dependency graph starting from `income` *)
-let dependencies = Series.dependencies (Series.Span_series income)
+let trace =
+  Series.trace_span (Series.make_cache ()) income
+    ~period:(Period.make (Date.make 2025 12 31) (Date.make 2026 12 31))
+
+let edges = Series.Trace.edges trace
 ```
 
-Rendering the graph to a image produces the chart below.
+Rendering the trace graph to an image produces the chart below.
 
 ![Orcaset Example Line-Level Dependency Graph](./images/readme-series-dependencies.png)
 

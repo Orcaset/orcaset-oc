@@ -16,15 +16,17 @@ The full model is defined in around 20 lines of code and can be queried for valu
 let sum_agg = Series.Agg.sum
 let sp = Series.Spans.pack
 
+let rec seq_take n seq () =
+  if n <= 0 then Seq.Nil
+  else match seq () with Seq.Nil -> Seq.Nil | Seq.Cons (x, rest) -> Seq.Cons (x, seq_take (n - 1) rest)
+
 let revenue =
   Series.Spans.unfold_rec ~label:"Revenue" ~agg:sum_agg
-    (* Declare revenue as a dependency of itself. *)
-    ~deps:(fun self -> Series.Deps.span_dep self)
     (* Revenue unfolds over periods. Set the initial period. *)
     ~init:initial_period
     (* The step function returns a (revenue accrual, next period) tuple. 
-       Dependency readers from `deps` are passed to the step function at execution. *)
-    ~cells:(fun read_revenue period ->
+       Formulas can query other series, including this series through `self`. *)
+    ~cells:(fun ~self period ->
       let formula =
         (* If the current period is the start period, return the initial value. *)
         if Period.equal period initial_period then Series.Formula.pure (Some 1_000.0)
@@ -32,7 +34,7 @@ let revenue =
         else
           let open Series.Formula in
           let+ prior_revenue =
-            read_revenue ~period:(Period.prev qtr_lookback period)
+            span_query self ~period:(Period.prev qtr_lookback period)
           in
           Option.map (fun prior_revenue -> prior_revenue *. 1.03) prior_revenue
       in
@@ -56,7 +58,7 @@ let () =
   let output_periods = 8 in
   let periods =
     Period.make_seq ~start:initial_period_start ~offset:qtr_offset
-    |> Seq.take output_periods |> List.of_seq
+    |> seq_take output_periods |> List.of_seq
   in
   (* Create a statement and evaluate it over the periods *)
   let stmt = Stmt.span_total profit [ Stmt.span_line revenue; Stmt.span_line expenses ] in

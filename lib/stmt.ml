@@ -9,6 +9,11 @@ type stmt =
   | Group of stmt list
   | Total of { total : Series.packed_series; children : stmt list }
   | Line of Series.packed_series
+  | Span_family_lines : {
+      family : ('key, 'tag Series.Spans.t) Series.Family.t;
+      label : 'key -> string;
+    }
+      -> stmt
 
 type resolved =
   | RGroup of resolved list
@@ -22,6 +27,10 @@ let point_series series = Series.Series (Series.Point_series series)
 let group children = Group children
 let span_line series = Line (span_series series)
 let span_lines series = List.map span_line series
+let span_family_lines ?label family =
+  let label = Option.value ~default:(Series.Family.key_to_string family) label in
+  Span_family_lines { family; label }
+
 let span_total total children = Total { total = span_series total; children }
 let point_line series = Line (point_series series)
 let point_lines series = List.map point_line series
@@ -42,6 +51,9 @@ let eval_series_periods cache periods (Series.Series series) =
   in
   (Series.label series, Some values)
 
+let eval_span_values cache periods spans =
+  Span_values (List.map (fun period -> (period, Series.query_span cache spans ~period)) periods)
+
 let eval_series_dates cache dates (Series.Series series) =
   let values =
     match series with
@@ -54,6 +66,17 @@ let eval_series_dates cache dates (Series.Series series) =
 
 let eval_periods periods stmt =
   let cache = Series.make_cache () in
+  let family_members (type key tag)
+      (family : (key, tag Series.Spans.t) Series.Family.t) =
+    let add acc (key, series) =
+      if List.exists (fun (existing, _) -> Series.Family.key_equal family existing key) acc then acc
+      else (key, series) :: acc
+    in
+    periods
+    |> List.concat_map (Series.Family.members family)
+    |> List.fold_left add []
+    |> List.sort (fun (a, _) (b, _) -> Series.Family.key_compare family a b)
+  in
   let rec go = function
     | Group children -> RGroup (List.map go children)
     | Total { total; children } ->
@@ -62,6 +85,11 @@ let eval_periods periods stmt =
     | Line series ->
         let label, values = eval_series_periods cache periods series in
         RLine { label; values }
+    | Span_family_lines { family; label } ->
+        family_members family
+        |> List.map (fun (key, series) ->
+               RLine { label = Some (label key); values = Some (eval_span_values cache periods series) })
+        |> fun lines -> RGroup lines
   in
   go stmt
 
@@ -75,6 +103,7 @@ let eval_dates dates stmt =
     | Line series ->
         let label, values = eval_series_dates cache dates series in
         RLine { label; values }
+    | Span_family_lines _ -> RGroup []
   in
   go stmt
 

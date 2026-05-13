@@ -7,6 +7,16 @@ let check_period name expected actual = Alcotest.(check period) name expected ac
 let check_int = Alcotest.(check int)
 let check_bool = Alcotest.(check bool)
 
+let seq_take n seq =
+  let rec aux n seq () =
+    if n <= 0 then Seq.Nil
+    else
+      match seq () with
+      | Seq.Nil -> Seq.Nil
+      | Seq.Cons (x, rest) -> Seq.Cons (x, aux (n - 1) rest)
+  in
+  aux n seq
+
 let test_make_and_accessors () =
   let start_date = Date.make 2025 1 1 in
   let end_date = Date.make 2025 2 1 in
@@ -105,7 +115,7 @@ let test_shift () =
 
 let test_make_seq_produces_contiguous_periods () =
   let offset = Offset.make ~months:1 ~month_end:true () in
-  let periods = Period.make_seq ~start:(Date.make 2025 1 31) ~offset |> Seq.take 3 |> List.of_seq in
+  let periods = Period.make_seq ~start:(Date.make 2025 1 31) ~offset |> seq_take 3 |> List.of_seq in
   match periods with
   | [ p1; p2; p3 ] ->
       check_period "p1" (Period.make (Date.make 2025 1 31) (Date.make 2025 2 28)) p1;
@@ -178,7 +188,7 @@ let test_seq_to_dates_overlapping_periods () =
 
 let test_seq_to_dates_from_make_seq () =
   let offset = Offset.make ~months:1 ~month_end:true () in
-  let periods = Period.make_seq ~start:(Date.make 2025 1 31) ~offset |> Seq.take 3 in
+  let periods = Period.make_seq ~start:(Date.make 2025 1 31) ~offset |> seq_take 3 in
   let dates = Period.seq_to_dates periods |> List.of_seq in
   check_date_list "from make_seq"
     [ Date.make 2025 1 31; Date.make 2025 2 28; Date.make 2025 3 31; Date.make 2025 4 30 ]
