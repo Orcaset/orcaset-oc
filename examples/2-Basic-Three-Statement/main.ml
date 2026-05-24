@@ -139,14 +139,19 @@ let make_operating_cf (net_income : [ `Net_income ] Series.Spans.t)
 
 let depreciation_add_back = make_depreciation_add_back depreciation
 let operating_cf = make_operating_cf net_income depreciation_add_back
-let investing_cf : [ `Capital_expenditures ] Series.Spans.t = capex
+
+let make_investing_cf (capex : [ `Capital_expenditures ] Series.Spans.t) :
+    [ `Investing_cash_flow ] Series.Spans.t =
+  Series.Spans.sum ~label:"Investing cash flow" ~agg:sum_agg [ sp capex ]
+
+let investing_cf = make_investing_cf capex
 
 let cf_financing : [ `Cash_flow_from_financing ] Series.Spans.t =
   Series.Spans.const ~label:"Cash flow from financing" ~split:Split.daily ~agg:sum_agg
     ~period:Period.unbounded 0.0
 
 let make_total_cf (operating_cf : [ `Operating_cash_flow ] Series.Spans.t)
-    (investing_cf : [ `Capital_expenditures ] Series.Spans.t)
+    (investing_cf : [ `Investing_cash_flow ] Series.Spans.t)
     (cf_financing : [ `Cash_flow_from_financing ] Series.Spans.t) :
     [ `Total_cash_flow ] Series.Spans.t =
   Series.Spans.sum ~label:"Total cash flow" ~agg:sum_agg
@@ -205,7 +210,7 @@ let cash_flow_stmt =
     [
       Stmt.span_total operating_cf
         [ Stmt.span_line net_income; Stmt.span_line depreciation_add_back ];
-      Stmt.span_line investing_cf;
+      Stmt.span_total investing_cf [ Stmt.span_line capex ];
       Stmt.span_line cf_financing;
     ]
 
