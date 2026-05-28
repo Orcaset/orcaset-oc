@@ -20,10 +20,6 @@ let sum_agg = Series.Agg.sum
 let sp = Series.Spans.pack
 let pt = Series.Points.pack
 
-let rec seq_take n seq () =
-  if n <= 0 then Seq.Nil
-  else match seq () with Seq.Nil -> Seq.Nil | Seq.Cons (x, rest) -> Seq.Cons (x, seq_take (n - 1) rest)
-
 (* ----- Model ----- *)
 
 (* Income Statement *)
@@ -229,7 +225,7 @@ let () =
   let num_periods = 6 in
   let query_offset = Offset.make ~months:1 ~month_end:true () in
   let periods =
-    Period.make_seq ~start:start_date ~offset:query_offset |> seq_take num_periods |> List.of_seq
+    Period.make_seq ~start:start_date ~offset:query_offset |> Seq.take num_periods |> List.of_seq
   in
   let resolved = Stmt.eval_periods periods total_stmt in
   Printf.printf "\n%s\n\n" (Stmt.fixed_width resolved)

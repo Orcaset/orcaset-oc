@@ -110,7 +110,7 @@ let () =
 Income          700.00      735.00      771.75      810.34 *)
 ```
 
-This example prints out the table to the console using a fixed-width table format, but you can create formatters to save outputs to JSON, CSV, markdown, or any other format.
+This example prints out the table to the console using a fixed-width table format. Orcaset also has built-in formatters for CSV and markdown tables, and it's easy to create custom formatters to any other structure.
 
 As mentioned previously, orcaset automatically interpolates partial periods meaning you can query over date ranges without worrying about period boundary alignment. You can also easily aggregate over multiple periods without changing the model (e.g. annual view of quarterly detail).
 

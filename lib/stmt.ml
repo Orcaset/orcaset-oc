@@ -250,6 +250,20 @@ let markdown_header dates =
   String.concat "\n"
     [ "| " ^ String.concat " | " headers ^ " |"; "| " ^ String.concat " | " separators ^ " |" ]
 
+let csv_escape value =
+  if String.exists (function ',' | '"' | '\n' | '\r' -> true | _ -> false) value then
+    "\"" ^ (value |> String.split_on_char '"' |> String.concat "\"\"") ^ "\""
+  else value
+
+let csv_render_row dates = function
+  | Markdown_blank -> String.concat "," (List.init (List.length dates + 1) (fun _ -> ""))
+  | Markdown_data { label; cells; _ } ->
+      let label = resolved_label label |> csv_escape in
+      let values = List.map (fun date -> fixed_width_cell cells date |> csv_escape) dates in
+      String.concat "," (label :: values)
+
+let csv_header dates = String.concat "," ("" :: List.map (fun date -> Date.to_string date) dates)
+
 let fixed_width_render_row ~label_width ~value_width dates = function
   | Blank -> ""
   | Rule ->
@@ -286,3 +300,9 @@ let markdown resolved =
   let dates = markdown_dates rows in
   let rendered_rows = List.map (markdown_render_row dates) rows in
   markdown_header dates :: rendered_rows |> String.concat "\n"
+
+let csv resolved =
+  let rows = markdown_rows resolved in
+  let dates = markdown_dates rows in
+  let rendered_rows = List.map (csv_render_row dates) rows in
+  csv_header dates :: rendered_rows |> String.concat "\n"
