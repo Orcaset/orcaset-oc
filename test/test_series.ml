@@ -5,6 +5,8 @@ let p s e = Period.make s e
 let agg = Series.Agg.sum
 let days n = Offset.make ~days:n ()
 let months n = Offset.make ~months:n ()
+let sp = Series.Spans.pack
+let pt = Series.Points.pack
 let option_float = Alcotest.option (Alcotest.float 1e-9)
 let check_some_float name expected actual = Alcotest.check option_float name (Some expected) actual
 let check_none_float name actual = Alcotest.check option_float name None actual
@@ -17,8 +19,7 @@ let span_values cache series ~period =
    value [value_of i] for cell [i]. Useful for tests. *)
 let monthly_series ~start ~n value_of =
   Series.Spans.unfold ~agg ~init:0
-    ~deps:(fun () -> Series.Deps.none)
-    ~cells:(fun () i ->
+    ~cells:(fun i ->
       if i >= n then None
       else
         let period = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
@@ -110,7 +111,7 @@ let test_span_convenience_constructors () =
   let check name expected series =
     check_some_float name expected (query_span cache series ~period)
   in
-  let total = Spans.sum ~label:"Total" ~agg [ a; b ] in
+  let total = Spans.sum ~label:"Total" ~agg [ sp a; sp b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Spans.label total);
   let mapped = Spans.map ~label:"Doubled" (fun value -> value *. 2.0) a in
   Alcotest.(check (option string)) "map label" (Some "Doubled") (Spans.label mapped);
@@ -119,7 +120,7 @@ let test_span_convenience_constructors () =
   check "scale" 30.0 (Spans.scale 3.0 a);
   check "sum" 12.0 total;
   check "sub" 8.0 (Spans.sub ~agg a b);
-  check "mul" 20.0 (Spans.mul ~agg [ a; b ]);
+  check "mul" 20.0 (Spans.mul ~agg [ sp a; sp b ]);
   check "div" 5.0 (Spans.div ~agg a b)
 
 let test_span_convenience_identity () =
@@ -130,10 +131,10 @@ let test_span_convenience_identity () =
   let a = single_span_series ~period:jan ~split:Split.daily 10.0 in
   let b = single_span_series ~period:feb ~split:Split.daily 3.0 in
   let cache = make_cache () in
-  let summed = Spans.sum ~agg [ a; b ] in
+  let summed = Spans.sum ~agg [ sp a; sp b ] in
   let total = query_span cache summed ~period:query_period in
   check_some_float "sum uses 0 as additive identity for missing sides" 13.0 total;
-  let multiplied = Spans.mul ~agg [ a; b ] in
+  let multiplied = Spans.mul ~agg [ sp a; sp b ] in
   (* mul over disjoint periods is undefined because each aligned row has a missing side. *)
   let total = query_span cache multiplied ~period:query_period in
   check_none_float "mul requires every input" total
@@ -146,7 +147,9 @@ let test_span_mapn_fill () =
   let a = single_span_series ~period:jan ~split:Split.daily 10.0 in
   let b = single_span_series ~period:feb ~split:Split.daily 3.0 in
   let filled =
-    Spans.mapn ~agg [ a; b ] (fun values ->
+    Spans.mapn ~agg
+      [ sp a; sp b ]
+      (fun values ->
         Some
           (List.fold_left
              (fun acc -> function Some v -> acc +. v | None -> acc +. 1.0)
@@ -164,7 +167,9 @@ let test_span_mapn_splits_parents_before_mapping () =
   let b = single_span_series ~period:full_period ~split:Split.const 2.0 in
   let c = single_span_series ~period:full_period ~split:Split.const 3.0 in
   let mapped =
-    Spans.mapn ~agg [ a; b; c ] (fun values ->
+    Spans.mapn ~agg
+      [ sp a; sp b; sp c ]
+      (fun values ->
         Some
           (List.fold_left
              (fun acc -> function Some value -> acc *. value | None -> acc)
@@ -184,7 +189,7 @@ let test_span_sum_n_way_mismatched_periods () =
   let a = Spans.of_list ~split:Split.daily ~agg [ (jan, 10.0); (feb, 20.0) ] in
   let b = Spans.of_list ~split:Split.daily ~agg [ (feb, 200.0); (mar, 300.0) ] in
   let c = Spans.of_list ~split:Split.daily ~agg [ (jan, 1.0); (mar, 2.0) ] in
-  let total = Spans.sum ~agg [ a; b; c ] in
+  let total = Spans.sum ~agg [ sp a; sp b; sp c ] in
   let cache = make_cache () in
   let cells = span_values cache total ~period:query_period in
   match cells with
@@ -205,7 +210,7 @@ let test_span_mul_n_way_requires_all_inputs () =
   let a = Spans.of_list ~split:Split.daily ~agg [ (jan, 2.0); (feb, 3.0) ] in
   let b = Spans.of_list ~split:Split.daily ~agg [ (feb, 4.0); (mar, 5.0) ] in
   let c = Spans.of_list ~split:Split.daily ~agg [ (jan, 10.0); (mar, 11.0) ] in
-  let total = Spans.mul ~agg [ a; b; c ] in
+  let total = Spans.mul ~agg [ sp a; sp b; sp c ] in
   let cache = make_cache () in
   let cells = span_values cache total ~period:query_period in
   match cells with
@@ -341,8 +346,7 @@ let test_span_clipped_outside_queries_do_not_force_base () =
   let forced = ref false in
   let base =
     Spans.unfold ~agg ~init:()
-      ~deps:(fun () -> Deps.none)
-      ~cells:(fun () () ->
+      ~cells:(fun () ->
         forced := true;
         Alcotest.fail "base sequence should not be forced")
       ()
@@ -356,16 +360,19 @@ let test_span_clipped_outside_queries_do_not_force_base () =
   | _ -> Alcotest.fail "expected outside queries to be gaps");
   Alcotest.(check bool) "base not forced" false !forced
 
-let test_span_clipped_label_and_dependencies () =
+let test_span_clipped_label_and_trace () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
   let base = Spans.const ~label:"Revenue" ~split:Split.daily ~agg ~period 31.0 in
   let clipped = Spans.clipped ~after:(d 2026 1 15) ~until:(d 2026 2 1) base in
   Alcotest.(check (option string)) "label" (Some "Revenue") (Spans.label clipped);
-  match dependencies (Span_series clipped) with
-  | [ { series = Series (Span_series dep); dependencies = []; is_back_edge = false } ] ->
-      Alcotest.(check bool) "base dependency" true (dep == base)
-  | _ -> Alcotest.fail "expected clipped series to depend on its base"
+  let trace = trace_span (make_cache ()) clipped ~period in
+  let has_slice_edge =
+    Trace.edges trace
+    |> List.exists (fun edge ->
+           match edge.Trace.query with Trace.Span_cell_value -> true | _ -> false)
+  in
+  Alcotest.(check bool) "slice traces to parent cell" true has_slice_edge
 
 let test_unfold_from_replays_base_and_continues () =
   let open Series in
@@ -376,8 +383,7 @@ let test_unfold_from_replays_base_and_continues () =
   let seen = ref [] in
   let series =
     Spans.unfold_from ~agg
-      ~deps:(fun () -> Deps.none)
-      ~cells:(fun () previous ->
+      ~cells:(fun previous ->
         seen := previous :: !seen;
         let period = Period.next (months 1) previous in
         if Date.(Period.start period >= d 2026 5 1) then None
@@ -407,8 +413,7 @@ let test_unfold_from_empty_base_does_not_call_cells () =
   let called = ref false in
   let series =
     Spans.unfold_from ~agg
-      ~deps:(fun () -> Deps.none)
-      ~cells:(fun () _ ->
+      ~cells:(fun _ ->
         called := true;
         Alcotest.fail "cells should not be called for an empty base")
       empty
@@ -418,27 +423,26 @@ let test_unfold_from_empty_base_does_not_call_cells () =
   check_none_float "empty result" total;
   Alcotest.(check bool) "cells not called" false !called
 
-let test_unfold_from_dependencies () =
+let test_unfold_from_formula_trace () =
   let open Series in
   let period = p (d 2026 1 1) (d 2026 2 1) in
   let base = single_span_series ~period ~split:Split.daily 1.0 in
-  let points = Points.of_list [ (d 2026 2 1, 2.0) ] in
+  let points = Points.of_list [ (d 2026 3 1, 2.0) ] in
   let series =
-    Spans.unfold_from ~agg ~deps:(fun () -> Deps.point_dep points) ~cells:(fun _ _ -> None) base
+    Spans.unfold_from ~agg
+      ~cells:(fun previous ->
+        let next = Period.next (months 1) previous in
+        let formula = Formula.point_query points ~date:(Period.end_ next) in
+        Some (Spans.cell ~period:next ~split:Split.daily formula, next))
+      base
   in
-  let deps = dependencies (Span_series series) in
-  Alcotest.(check int) "base plus explicit dep" 2 (List.length deps);
-  let span_deps, point_deps =
-    List.fold_left
-      (fun (span_count, point_count) dep ->
-        let (Series s) = dep.series in
-        match s with
-        | Span_series _ -> (span_count + 1, point_count)
-        | Point_series _ -> (span_count, point_count + 1))
-      (0, 0) deps
+  let trace = trace_span (make_cache ()) series ~period:(p (d 2026 2 1) (d 2026 3 1)) in
+  let has_point_query =
+    Trace.edges trace
+    |> List.exists (fun edge ->
+           match edge.Trace.query with Trace.Point_query _ -> true | _ -> false)
   in
-  Alcotest.(check int) "span deps" 1 span_deps;
-  Alcotest.(check int) "point deps" 1 point_deps
+  Alcotest.(check bool) "formula trace includes point query" true has_point_query
 
 let agg_sample period value = Some { Series.Agg.period; value }
 
@@ -561,7 +565,7 @@ let test_point_convenience_constructors () =
   let check name expected series =
     check_some_float name expected (query_point cache series ~date)
   in
-  let total = Points.sum ~label:"Total" [ a; b ] in
+  let total = Points.sum ~label:"Total" [ pt a; pt b ] in
   Alcotest.(check (option string)) "label" (Some "Total") (Points.label total);
   let mapped = Points.map ~label:"Doubled" (fun value -> value *. 2.0) a in
   Alcotest.(check (option string)) "map label" (Some "Doubled") (Points.label mapped);
@@ -570,7 +574,7 @@ let test_point_convenience_constructors () =
   check "scale" 30.0 (Points.scale 3.0 a);
   check "sum" 12.0 total;
   check "sub" 8.0 (Points.sub a b);
-  check "mul" 20.0 (Points.mul [ a; b ]);
+  check "mul" 20.0 (Points.mul [ pt a; pt b ]);
   check "div" 5.0 (Points.div a b)
 
 let test_point_convenience_identity () =
@@ -580,9 +584,9 @@ let test_point_convenience_identity () =
   let a = Points.const ~period:jan 10.0 in
   let b = Points.const ~period:feb 3.0 in
   let cache = make_cache () in
-  let summed = Points.sum [ a; b ] in
+  let summed = Points.sum [ pt a; pt b ] in
   check_some_float "jan sum additive identity" 10.0 (query_point cache summed ~date:(d 2026 1 15));
-  let multiplied = Points.mul [ a; b ] in
+  let multiplied = Points.mul [ pt a; pt b ] in
   check_none_float "feb mul requires every input" (query_point cache multiplied ~date:(d 2026 2 15))
 
 let test_point_mapn_fill () =
@@ -592,7 +596,9 @@ let test_point_mapn_fill () =
   let a = Points.const ~period:jan 10.0 in
   let b = Points.const ~period:feb 3.0 in
   let filled =
-    Points.mapn [ a; b ] (fun values ->
+    Points.mapn
+      [ pt a; pt b ]
+      (fun values ->
         Some
           (List.fold_left
              (fun acc -> function Some v -> acc +. v | None -> acc +. 1.0)
@@ -610,8 +616,8 @@ let test_point_sum_n_way () =
   let y = Points.const ~period:period_all 3.0 in
   let z = Points.const ~period:period_all 4.0 in
   let cache = make_cache () in
-  check_some_float "n-way sum" 9.0 (query_point cache (Points.sum [ x; y; z ]) ~date);
-  check_some_float "n-way mul" 24.0 (query_point cache (Points.mul [ x; y; z ]) ~date)
+  check_some_float "n-way sum" 9.0 (query_point cache (Points.sum [ pt x; pt y; pt z ]) ~date);
+  check_some_float "n-way mul" 24.0 (query_point cache (Points.mul [ pt x; pt y; pt z ]) ~date)
 
 let test_point_sum_empty_raises () =
   Alcotest.check_raises "empty point sum raises" (Invalid_argument "Points.sum: empty list")
@@ -627,6 +633,76 @@ let test_point_accum_uses_span_changes () =
   let cache = make_cache () in
   check_some_float "initial balance" 100.0 (query_point cache balance ~date:(Period.start period));
   check_some_float "ending balance" 110.0 (query_point cache balance ~date:(Period.end_ period))
+
+let test_point_query_trace () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let date = d 2026 1 15 in
+  let base = Points.const ~label:"Base point" ~period 10.0 in
+  let mapped = Points.map ~label:"Mapped point" (fun value -> value *. 2.0) base in
+  let trace = trace_point (make_cache ()) mapped ~date in
+  match Trace.edges trace with
+  | [ edge ] -> (
+      match edge.Trace.query with
+      | Trace.Point_query { date = traced_date; label = Some "Base point" } ->
+          Alcotest.(check bool) "traced date" true (Date.equal date traced_date)
+      | _ -> Alcotest.fail "expected a point query edge")
+  | _ -> Alcotest.fail "expected one point trace edge"
+
+let test_trace_cell_metadata () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let date = d 2026 1 15 in
+  let base = Points.const ~label:"Base point" ~period 10.0 in
+  let mapped = Points.map ~label:"Mapped point" (fun value -> value *. 2.0) base in
+  let trace = trace_point (make_cache ()) mapped ~date in
+  (match Trace.roots trace with
+  | [ Trace.Point_cell { date = root_date; series_label; _ } ] ->
+      Alcotest.(check bool) "root date" true (Date.equal date root_date);
+      Alcotest.(check (option string)) "root series label" (Some "Mapped point") series_label
+  | _ -> Alcotest.fail "expected one point root with metadata");
+  match Trace.edges trace with
+  | [ { from = Trace.Point_cell from_info; to_ = Trace.Point_cell to_info; _ } ] ->
+      Alcotest.(check (option string))
+        "edge from series label" (Some "Mapped point") from_info.series_label;
+      Alcotest.(check (option string))
+        "edge to series label" (Some "Base point") to_info.series_label;
+      Alcotest.(check bool) "edge to date" true (Date.equal date to_info.date)
+  | _ -> Alcotest.fail "expected one point trace edge with cell metadata"
+
+let test_trace_span_cell_metadata () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let base = Spans.const ~label:"Base span" ~split:Split.daily ~agg ~period 100.0 in
+  let scaled = Spans.scale ~label:"Scaled span" 2.0 base in
+  let trace = trace_span (make_cache ()) scaled ~period in
+  match Trace.roots trace with
+  | [ Trace.Span_cell { period = root_period; series_label; _ } ] ->
+      Alcotest.(check bool) "root period" true (Period.equal period root_period);
+      Alcotest.(check (option string)) "root series label" (Some "Scaled span") series_label
+  | _ -> Alcotest.fail "expected one span root with metadata"
+
+let test_phantom_tags_allow_typed_relationships () =
+  let open Series in
+  let period = p (d 2026 1 1) (d 2026 2 1) in
+  let revenue : [ `Revenue ] Spans.t = single_span_series ~period ~split:Split.daily 100.0 in
+  let cost_of_revenue : [ `Cost_of_revenue ] Spans.t =
+    single_span_series ~period ~split:Split.daily (-30.0)
+  in
+  let gross_profit (revenue : [ `Revenue ] Spans.t) (cost_of_revenue : [ `Cost_of_revenue ] Spans.t)
+      : [ `Gross_profit ] Spans.t =
+    Spans.sum ~label:"Gross profit" ~agg [ sp revenue; sp cost_of_revenue ]
+  in
+  let cash (cash_flow : [ `Cash_flow ] Spans.t) : [ `Cash ] Points.t =
+    Points.accum ~label:"Cash" ~init:10.0 cash_flow
+  in
+  let gross_profit = gross_profit revenue cost_of_revenue in
+  let cash_flow : [ `Cash_flow ] Spans.t = Spans.map Fun.id gross_profit in
+  let ending_cash = cash cash_flow in
+  let cache = make_cache () in
+  check_some_float "gross profit" 70.0 (query_span cache gross_profit ~period);
+  check_some_float "cash from tagged span" 80.0
+    (query_point cache ending_cash ~date:(Period.end_ period))
 
 let test_label_accessors () =
   let open Series in
@@ -644,8 +720,7 @@ let test_unfold_no_deps_single_step () =
   let open Series in
   let series =
     Spans.unfold ~label:"Single step" ~agg ~init:0
-      ~deps:(fun () -> Deps.none)
-      ~cells:(fun () n ->
+      ~cells:(fun n ->
         if n >= 1 then None
         else
           let period = p (d 2026 1 1) (d 2026 2 1) in
@@ -663,8 +738,7 @@ let test_unfold_multi_step () =
   let start = d 2026 1 1 in
   let series =
     Spans.unfold ~agg ~init:0
-      ~deps:(fun () -> Deps.none)
-      ~cells:(fun () n ->
+      ~cells:(fun n ->
         if n >= 3 then None
         else
           let period =
@@ -684,14 +758,13 @@ let test_unfold_with_span_dep () =
   let base = monthly_series ~start ~n:3 (fun i -> 10.0 *. Float.of_int (i + 1)) in
   let doubled =
     Spans.unfold ~agg ~init:0
-      ~deps:(fun () -> Deps.span_dep base)
-      ~cells:(fun read_base n ->
+      ~cells:(fun n ->
         if n >= 3 then None
         else
           let period = p (Date.shift (months n) start) (Date.shift (months (n + 1)) start) in
           let formula =
             let open Formula in
-            let+ v = read_base ~period in
+            let+ v = span_query base ~period in
             Option.map (fun v -> 2.0 *. v) v
           in
           Some (Spans.cell ~period ~split:Split.daily formula, n + 1))
@@ -708,11 +781,10 @@ let test_unfold_missing_span_dep_propagates_none () =
   let base = Spans.const ~split:Split.daily ~agg ~period:jan 10.0 in
   let derived =
     Spans.unfold ~agg ~init:false
-      ~deps:(fun () -> Deps.span_dep base)
-      ~cells:(fun read_base emitted ->
+      ~cells:(fun emitted ->
         if emitted then None
         else
-          let formula = read_base ~period:feb in
+          let formula = Formula.span_query base ~period:feb in
           Some (Spans.cell ~period:feb ~split:Split.daily formula, true))
       ()
   in
@@ -744,9 +816,8 @@ let test_formula_tracks_cell_queries () =
   let tracked_queries = ref [] in
   let tracked =
     Spans.unfold ~agg ~init:()
-      ~deps:(fun () -> Deps.span_dep base)
-      ~cells:(fun read_base () ->
-        let formula = read_base ~period in
+      ~cells:(fun () ->
+        let formula = Formula.span_query base ~period in
         tracked_queries := Formula.queries formula;
         Some (Spans.cell ~period ~split:Split.daily formula, ()))
       ()
@@ -771,11 +842,10 @@ let test_formula_span_dep_uses_series_agg () =
   in
   let derived =
     Spans.unfold ~agg:Agg.sum ~init:false
-      ~deps:(fun () -> Deps.span_dep base)
-      ~cells:(fun read_base emitted ->
+      ~cells:(fun emitted ->
         if emitted then None
         else
-          let formula = read_base ~period:query_period in
+          let formula = Formula.span_query base ~period:query_period in
           Some (Spans.cell ~period:query_period ~split:Split.daily formula, true))
       ()
   in
@@ -784,31 +854,31 @@ let test_formula_span_dep_uses_series_agg () =
     (((100.0 *. 31.0) +. (200.0 *. 28.0)) /. 59.0)
     (query_span cache derived ~period:query_period)
 
-(* Dependency extraction: an Unfold's deps show up in [dependencies]. *)
-let test_unfold_dependencies () =
+let test_unfold_query_trace () =
   let open Series in
   let start = d 2026 1 1 in
   let base_a = monthly_series ~start ~n:1 (fun _ -> 1.0) in
   let base_b = monthly_series ~start ~n:1 (fun _ -> 2.0) in
+  let period = p start (Date.shift (months 1) start) in
   let u =
-    Spans.unfold ~agg ~init:()
-      ~deps:(fun () ->
-        let open Deps in
-        let+ a = span_dep base_a and+ b = span_dep base_b in
-        (~a, ~b))
-      ~cells:(fun (~a:_, ~b:_) () -> None)
+    Spans.unfold ~agg ~init:false
+      ~cells:(fun emitted ->
+        if emitted then None
+        else
+          let formula =
+            let open Formula in
+            let+ a = span_query base_a ~period and+ b = span_query base_b ~period in
+            match (a, b) with Some a, Some b -> Some (a +. b) | _ -> None
+          in
+          Some (Spans.cell ~period ~split:Split.daily formula, true))
       ()
   in
-  let deps = dependencies (Span_series u) in
-  Alcotest.(check int) "two top-level deps" 2 (List.length deps);
-  let all_span =
-    List.for_all
-      (fun d ->
-        let (Series s) = d.series in
-        match s with Span_series _ -> true | Point_series _ -> false)
-      deps
+  let trace = trace_span (make_cache ()) u ~period in
+  let span_edges =
+    Trace.edges trace
+    |> List.filter (fun edge -> match edge.Trace.query with Trace.Span_query _ -> true | _ -> false)
   in
-  Alcotest.(check bool) "both are span deps" true all_span
+  Alcotest.(check int) "two query edges" 2 (List.length span_edges)
 
 (* An Unfold that reads its own prior-period value (recursive). *)
 let test_unfold_self_recursive () =
@@ -816,8 +886,7 @@ let test_unfold_self_recursive () =
   let start = d 2026 1 1 in
   let rev =
     Spans.unfold_rec ~agg ~init:0
-      ~deps:(fun self -> Deps.span_dep self)
-      ~cells:(fun prev i ->
+      ~cells:(fun ~self i ->
         if i >= 4 then None
         else
           let period = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
@@ -826,7 +895,8 @@ let test_unfold_self_recursive () =
             else
               let open Formula in
               let+ previous =
-                prev ~period:(p (Date.shift (months (i - 1)) start) (Date.shift (months i) start))
+                span_query self
+                  ~period:(p (Date.shift (months (i - 1)) start) (Date.shift (months i) start))
               in
               Option.map (fun previous -> previous *. 1.10) previous
           in
@@ -843,8 +913,7 @@ let test_unfold_self_future_reference () =
   let start = d 2026 1 1 in
   let rev =
     Spans.unfold_rec ~agg ~init:0
-      ~deps:(fun self -> Deps.span_dep self)
-      ~cells:(fun read_self i ->
+      ~cells:(fun ~self i ->
         if i >= 3 then None
         else
           let period = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
@@ -853,7 +922,7 @@ let test_unfold_self_future_reference () =
             else
               let open Formula in
               let+ future =
-                read_self
+                span_query self
                   ~period:
                     (p (Date.shift (months (i + 1)) start) (Date.shift (months (i + 2)) start))
               in
@@ -866,17 +935,45 @@ let test_unfold_self_future_reference () =
   let first_month = query_span cache rev ~period:(p start (Date.shift (months 1) start)) in
   check_some_float "future-derived first month" 25.0 first_month
 
+let test_unfold_self_before_and_after_reference () =
+  let open Series in
+  let start = d 2026 1 1 in
+  let month i = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
+  let series =
+    Spans.unfold_rec ~agg ~init:0
+      ~cells:(fun ~self i ->
+        if i >= 3 then None
+        else
+          let period = month i in
+          let formula =
+            match i with
+            | 0 -> Formula.pure (Some 100.0)
+            | 1 ->
+                let open Formula in
+                let+ previous = span_query self ~period:(month 0)
+                and+ future = span_query self ~period:(month 2) in
+                (match (previous, future) with
+                | Some previous, Some future -> Some (previous +. future)
+                | _ -> None)
+            | _ -> Formula.pure (Some 300.0)
+          in
+          Some (Spans.cell ~period ~split:Split.daily formula, i + 1))
+      ()
+  in
+  let cache = make_cache () in
+  check_some_float "feb depends on jan and mar" 400.0 (query_span cache series ~period:(month 1));
+  check_some_float "full quarter" 800.0 (query_span cache series ~period:(p start (Date.shift (months 3) start)))
+
 let test_unfold_self_current_converges () =
   let open Series in
   let start = d 2026 1 1 in
   let rev =
     Spans.unfold_rec ~agg ~init:()
-      ~deps:(fun self -> Deps.span_dep self)
-      ~cells:(fun read_self () ->
+      ~cells:(fun ~self () ->
         let period = p start (Date.shift (months 1) start) in
         let formula =
           let open Formula in
-          let+ current = read_self ~period in
+          let+ current = span_query self ~period in
           Option.map (fun current -> 100.0 +. (0.5 *. current)) current
         in
         Some (Spans.cell ~period ~split:Split.daily formula, ()))
@@ -891,12 +988,11 @@ let test_unfold_self_current_diverges () =
   let start = d 2026 1 1 in
   let rev =
     Spans.unfold_rec ~agg ~init:()
-      ~deps:(fun self -> Deps.span_dep self)
-      ~cells:(fun read_self () ->
+      ~cells:(fun ~self () ->
         let period = p start (Date.shift (months 1) start) in
         let formula =
           let open Formula in
-          let+ current = read_self ~period in
+          let+ current = span_query self ~period in
           Option.map (fun current -> current +. 1.0) current
         in
         Some (Spans.cell ~period ~split:Split.daily formula, ()))
@@ -919,13 +1015,12 @@ let test_point_span_feedback_converges () =
   let rec interest_lazy =
     lazy
       (Spans.unfold ~agg ~init:false
-         ~deps:(fun () -> Deps.point_dep (Lazy.force balance_lazy))
-         ~cells:(fun read_balance emitted ->
+         ~cells:(fun emitted ->
            if emitted then None
            else
              let formula =
                let open Formula in
-               let+ ending_balance = read_balance ~date:end_ in
+               let+ ending_balance = point_query (Lazy.force balance_lazy) ~date:end_ in
                Option.map (fun ending_balance -> ending_balance *. 0.10) ending_balance
              in
              Some (Spans.cell ~period ~split:Split.daily formula, true))
@@ -939,6 +1034,93 @@ let test_point_span_feedback_converges () =
     "feedback ending balance"
     (Some (100.0 /. 0.9))
     ending_balance
+
+let test_dynamic_depreciation_family () =
+  let open Series in
+  let start = d 2026 1 1 in
+  let month i = p (Date.shift (months i) start) (Date.shift (months (i + 1)) start) in
+  let capex =
+    Spans.of_list ~label:"Capex" ~split:Split.daily ~agg
+      [ (month 0, 120.0); (month 1, 240.0); (month 2, 360.0) ]
+  in
+  let key =
+    {
+      equal = Period.equal;
+      hash = Period.hash;
+      compare =
+        (fun a b ->
+          let start_cmp = Date.compare (Period.start a) (Period.start b) in
+          if start_cmp <> 0 then start_cmp else Date.compare (Period.end_ a) (Period.end_ b));
+      to_string = Period.to_string;
+    }
+  in
+  let depreciation_by_cohort =
+    Family.make ~id:"depr" ~key
+      ~active_keys:(fun query_period ->
+        [ month 0; month 1; month 2 ]
+        |> List.filter (fun cohort ->
+               let cohort_start = Period.start cohort in
+               let schedule_end = Date.shift (months 3) cohort_start in
+               Date.(Period.start query_period < schedule_end && Period.end_ query_period > cohort_start)))
+      ~member:(fun cohort ->
+        Spans.unfold ~label:("Depr " ^ Period.to_string cohort) ~agg ~init:0
+          ~cells:(fun i ->
+            if i >= 3 then None
+            else
+              let period =
+                p (Date.shift (months i) (Period.start cohort))
+                  (Date.shift (months (i + 1)) (Period.start cohort))
+              in
+              let formula =
+                let open Formula in
+                let+ amount = span_query capex ~period:cohort in
+                Option.map (fun amount -> -.amount /. 3.0) amount
+              in
+              Some (Spans.cell ~period ~split:Split.daily formula, i + 1))
+          ())
+  in
+  let depreciation = Spans.sum_family ~label:"Depreciation" ~agg depreciation_by_cohort in
+  let cache = make_cache () in
+  check_some_float "jan depreciation" (-40.0) (query_span cache depreciation ~period:(month 0));
+  check_some_float "feb depreciation" (-120.0) (query_span cache depreciation ~period:(month 1));
+  check_some_float "mar depreciation" (-240.0) (query_span cache depreciation ~period:(month 2));
+  let members = Family.members depreciation_by_cohort (month 2) in
+  Alcotest.(check int) "three active cohorts in mar" 3 (List.length members);
+  let trace = trace_span (make_cache ()) depreciation ~period:(month 2) in
+  let cohort_edges =
+    Trace.edges trace
+    |> List.filter (fun edge -> match edge.Trace.query with Trace.Span_query _ -> true | _ -> false)
+  in
+  Alcotest.(check bool) "family sum traces cohort queries" true (List.length cohort_edges >= 3)
+
+let test_stmt_span_family_lines () =
+  let open Series in
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let key =
+    {
+      equal = String.equal;
+      hash = Hashtbl.hash;
+      compare = String.compare;
+      to_string = Fun.id;
+    }
+  in
+  let family =
+    Family.make ~id:"stmt-family" ~key
+      ~active_keys:(fun period -> if Period.equal period jan then [ "A" ] else [ "A"; "B" ])
+      ~member:(function
+        | "A" -> Spans.of_list ~label:"A" ~split:Split.daily ~agg [ (jan, 1.0); (feb, 2.0) ]
+        | "B" -> Spans.of_list ~label:"B" ~split:Split.daily ~agg [ (feb, 3.0) ]
+        | _ -> Alcotest.fail "unexpected key")
+  in
+  match Stmt.eval_periods [ jan; feb ] (Stmt.span_family_lines family) with
+  | Stmt.RGroup
+      [
+        Stmt.RLine { label = Some "A"; values = Some (Stmt.Span_values [ (_, Some 1.0); (_, Some 2.0) ]) };
+        Stmt.RLine { label = Some "B"; values = Some (Stmt.Span_values [ (_, None); (_, Some 3.0) ]) };
+      ] ->
+      ()
+  | _ -> Alcotest.fail "expected deduped family statement lines"
 
 let tests =
   List.map
@@ -970,10 +1152,10 @@ let tests =
       ("span clipped reversed bounds raise", test_span_clipped_reversed_bounds_raise);
       ( "span clipped outside queries do not force base",
         test_span_clipped_outside_queries_do_not_force_base );
-      ("span clipped label and dependencies", test_span_clipped_label_and_dependencies);
+      ("span clipped label and trace", test_span_clipped_label_and_trace);
       ("unfold_from replays base and continues", test_unfold_from_replays_base_and_continues);
       ("unfold_from empty base does not call cells", test_unfold_from_empty_base_does_not_call_cells);
-      ("unfold_from dependencies", test_unfold_from_dependencies);
+      ("unfold_from formula trace", test_unfold_from_formula_trace);
       ("aggregation helpers", test_agg_helpers);
       ("span aggregation defaults and samples", test_span_aggregation_defaults_and_samples);
       ("span query missing period returns none", test_span_query_missing_period_returns_none);
@@ -982,11 +1164,15 @@ let tests =
       ("point const/map/map2", test_point_const_map_map2);
       ("point of_list", test_point_of_list);
       ("point convenience constructors", test_point_convenience_constructors);
-      ("point sum identity and mul missingness", test_point_convenience_identity);
+      ("point sum/mul use identity for missing sides", test_point_convenience_identity);
       ("point mapn fill", test_point_mapn_fill);
       ("point sum/mul n-way", test_point_sum_n_way);
       ("point sum/mul empty list raises", test_point_sum_empty_raises);
       ("point accum uses span changes", test_point_accum_uses_span_changes);
+      ("point query trace", test_point_query_trace);
+      ("trace cell metadata", test_trace_cell_metadata);
+      ("trace span cell metadata", test_trace_span_cell_metadata);
+      ("phantom tags allow typed relationships", test_phantom_tags_allow_typed_relationships);
       ("label accessors", test_label_accessors);
       ("unfold no deps single step", test_unfold_no_deps_single_step);
       ("unfold multi step", test_unfold_multi_step);
@@ -995,10 +1181,13 @@ let tests =
       ("repeated clip of split span", test_repeated_clip_of_split_span);
       ("formula tracks cell queries", test_formula_tracks_cell_queries);
       ("formula span dependency uses series aggregation", test_formula_span_dep_uses_series_agg);
-      ("unfold dependencies extraction", test_unfold_dependencies);
+      ("unfold query trace", test_unfold_query_trace);
       ("unfold self-recursive", test_unfold_self_recursive);
       ("unfold self future reference", test_unfold_self_future_reference);
+      ("unfold self before and after reference", test_unfold_self_before_and_after_reference);
       ("unfold self current converges", test_unfold_self_current_converges);
       ("unfold self current diverges", test_unfold_self_current_diverges);
       ("point/span feedback converges", test_point_span_feedback_converges);
+      ("dynamic depreciation family", test_dynamic_depreciation_family);
+      ("stmt span family lines", test_stmt_span_family_lines);
     ]

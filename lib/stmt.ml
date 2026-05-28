@@ -9,6 +9,11 @@ type stmt =
   | Group of stmt list
   | Total of { total : Series.packed_series; children : stmt list }
   | Line of Series.packed_series
+  | Span_family_lines : {
+      family : ('key, 'tag Series.Spans.t) Series.Family.t;
+      label : 'key -> string;
+    }
+      -> stmt
 
 type resolved =
   | RGroup of resolved list
@@ -21,10 +26,15 @@ let span_series series = Series.Series (Series.Span_series series)
 let point_series series = Series.Series (Series.Point_series series)
 let group children = Group children
 let span_line series = Line (span_series series)
-let span_lines = List.map span_line
+let span_lines series = List.map span_line series
+
+let span_family_lines ?label family =
+  let label = Option.value ~default:(Series.Family.key_to_string family) label in
+  Span_family_lines { family; label }
+
 let span_total total children = Total { total = span_series total; children }
 let point_line series = Line (point_series series)
-let point_lines = List.map point_line
+let point_lines series = List.map point_line series
 let point_total total children = Total { total = point_series total; children }
 
 (* ----- Evaluators ----- *)
@@ -42,6 +52,9 @@ let eval_series_periods cache periods (Series.Series series) =
   in
   (Series.label series, Some values)
 
+let eval_span_values cache periods spans =
+  Span_values (List.map (fun period -> (period, Series.query_span cache spans ~period)) periods)
+
 let eval_series_dates cache dates (Series.Series series) =
   let values =
     match series with
@@ -54,6 +67,16 @@ let eval_series_dates cache dates (Series.Series series) =
 
 let eval_periods periods stmt =
   let cache = Series.make_cache () in
+  let family_members (type key tag) (family : (key, tag Series.Spans.t) Series.Family.t) =
+    let add acc (key, series) =
+      if List.exists (fun (existing, _) -> Series.Family.key_equal family existing key) acc then acc
+      else (key, series) :: acc
+    in
+    periods
+    |> List.concat_map (Series.Family.members family)
+    |> List.fold_left add []
+    |> List.sort (fun (a, _) (b, _) -> Series.Family.key_compare family a b)
+  in
   let rec go = function
     | Group children -> RGroup (List.map go children)
     | Total { total; children } ->
@@ -62,6 +85,12 @@ let eval_periods periods stmt =
     | Line series ->
         let label, values = eval_series_periods cache periods series in
         RLine { label; values }
+    | Span_family_lines { family; label } ->
+        family_members family
+        |> List.map (fun (key, series) ->
+            RLine
+              { label = Some (label key); values = Some (eval_span_values cache periods series) })
+        |> fun lines -> RGroup lines
   in
   go stmt
 
@@ -75,6 +104,7 @@ let eval_dates dates stmt =
     | Line series ->
         let label, values = eval_series_dates cache dates series in
         RLine { label; values }
+    | Span_family_lines _ -> RGroup []
   in
   go stmt
 
@@ -84,6 +114,15 @@ type fixed_width_row =
   | Blank
   | Rule
   | Data of { depth : int; label : string option; cells : (Date.t * string option) list }
+
+type markdown_row =
+  | Markdown_blank
+  | Markdown_data of {
+      depth : int;
+      label : string option;
+      cells : (Date.t * string option) list;
+      is_total : bool;
+    }
 
 let fixed_width_indent = 2
 let fixed_width_separator = "  "
@@ -113,6 +152,21 @@ let fixed_width_rows resolved =
   in
   go 0 resolved
 
+let markdown_rows resolved =
+  let rec go depth = function
+    | RLine { label; values } ->
+        [ Markdown_data { depth; label; cells = fixed_width_cells values; is_total = false } ]
+    | RTotal { label; values; children } ->
+        List.concat_map (go (depth + 1)) children
+        @ [
+            Markdown_data { depth; label; cells = fixed_width_cells values; is_total = true };
+            Markdown_blank;
+          ]
+    | RGroup children ->
+        (Markdown_blank :: List.concat_map (go depth) children) @ [ Markdown_blank ]
+  in
+  go 0 resolved
+
 let fixed_width_dates rows =
   let add_cell dates (date, _) =
     if List.exists (Date.equal date) dates then dates else date :: dates
@@ -120,6 +174,16 @@ let fixed_width_dates rows =
   let add_row dates = function
     | Blank | Rule -> dates
     | Data { cells; _ } -> List.fold_left add_cell dates cells
+  in
+  List.fold_left add_row [] rows |> List.sort Date.compare
+
+let markdown_dates rows =
+  let add_cell dates (date, _) =
+    if List.exists (Date.equal date) dates then dates else date :: dates
+  in
+  let add_row dates = function
+    | Markdown_blank -> dates
+    | Markdown_data { cells; _ } -> List.fold_left add_cell dates cells
   in
   List.fold_left add_row [] rows |> List.sort Date.compare
 
@@ -159,6 +223,47 @@ let fixed_width_cell cells date =
   | Some (_, Some value) -> value
   | Some (_, None) | None -> ""
 
+let markdown_escape value =
+  value |> String.split_on_char '\\' |> String.concat "\\\\" |> String.split_on_char '|'
+  |> String.concat "\\|"
+
+let markdown_indent depth =
+  String.concat "" (List.init (depth * fixed_width_indent) (fun _ -> "&nbsp;"))
+
+let markdown_label depth label = markdown_indent depth ^ (resolved_label label |> markdown_escape)
+let markdown_cell cells date = fixed_width_cell cells date |> markdown_escape
+let markdown_bold value = if value = "" then "" else "**" ^ value ^ "**"
+
+let markdown_render_row dates = function
+  | Markdown_blank ->
+      "| " ^ String.concat " | " (List.init (List.length dates + 1) (fun _ -> "")) ^ " |"
+  | Markdown_data { depth; label; cells; is_total } ->
+      let label = markdown_label depth label in
+      let values = List.map (markdown_cell cells) dates in
+      let values = if is_total then List.map markdown_bold values else values in
+      let label = if is_total then markdown_bold label else label in
+      "| " ^ String.concat " | " (label :: values) ^ " |"
+
+let markdown_header dates =
+  let headers = "" :: List.map Date.to_string dates in
+  let separators = List.map (fun _ -> "---") headers in
+  String.concat "\n"
+    [ "| " ^ String.concat " | " headers ^ " |"; "| " ^ String.concat " | " separators ^ " |" ]
+
+let csv_escape value =
+  if String.exists (function ',' | '"' | '\n' | '\r' -> true | _ -> false) value then
+    "\"" ^ (value |> String.split_on_char '"' |> String.concat "\"\"") ^ "\""
+  else value
+
+let csv_render_row dates = function
+  | Markdown_blank -> String.concat "," (List.init (List.length dates + 1) (fun _ -> ""))
+  | Markdown_data { label; cells; _ } ->
+      let label = resolved_label label |> csv_escape in
+      let values = List.map (fun date -> fixed_width_cell cells date |> csv_escape) dates in
+      String.concat "," (label :: values)
+
+let csv_header dates = String.concat "," ("" :: List.map (fun date -> Date.to_string date) dates)
+
 let fixed_width_render_row ~label_width ~value_width dates = function
   | Blank -> ""
   | Rule ->
@@ -189,3 +294,15 @@ let fixed_width resolved =
   (if dates = [] then rendered_rows
    else fixed_width_header ~label_width ~value_width dates :: rendered_rows)
   |> String.concat "\n"
+
+let markdown resolved =
+  let rows = markdown_rows resolved in
+  let dates = markdown_dates rows in
+  let rendered_rows = List.map (markdown_render_row dates) rows in
+  markdown_header dates :: rendered_rows |> String.concat "\n"
+
+let csv resolved =
+  let rows = markdown_rows resolved in
+  let dates = markdown_dates rows in
+  let rendered_rows = List.map (csv_render_row dates) rows in
+  csv_header dates :: rendered_rows |> String.concat "\n"

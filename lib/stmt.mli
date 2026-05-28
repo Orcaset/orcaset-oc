@@ -16,23 +16,28 @@ type resolved =
 val group : stmt list -> stmt
 (** [group children] groups [children] into a single statement. *)
 
-val span_line : Series.Spans.t -> stmt
+val span_line : 'tag Series.Spans.t -> stmt
 (** [span_line series] creates a line statement with a span series. *)
 
-val span_lines : Series.Spans.t list -> stmt list
+val span_lines : 'tag Series.Spans.t list -> stmt list
 (** [span_lines series] converts each span series in [series] to a line statement. *)
 
-val span_total : Series.Spans.t -> stmt list -> stmt
+val span_family_lines :
+  ?label:('key -> string) -> ('key, 'tag Series.Spans.t) Series.Family.t -> stmt
+(** [span_family_lines family] expands [family] into one span line per key active in any evaluated
+    period. *)
+
+val span_total : 'tag Series.Spans.t -> stmt list -> stmt
 (** [span_total total children] creates a total statement with a span total and statement children.
 *)
 
-val point_line : Series.Points.t -> stmt
+val point_line : 'tag Series.Points.t -> stmt
 (** [point_line series] creates a line statement with a point series. *)
 
-val point_lines : Series.Points.t list -> stmt list
+val point_lines : 'tag Series.Points.t list -> stmt list
 (** [point_lines series] converts each point series in [series] to a line statement. *)
 
-val point_total : Series.Points.t -> stmt list -> stmt
+val point_total : 'tag Series.Points.t -> stmt list -> stmt
 (** [point_total total children] creates a total statement with a point total and statement
     children. *)
 
@@ -56,3 +61,13 @@ val fixed_width : resolved -> string
 (** [fixed_width resolved] renders [resolved] as a fixed-width table. Dates are rendered as
     ["YYYY-MM-DD"] column headers; span values use period end dates and point values use their point
     dates. *)
+
+val markdown : resolved -> string
+(** [markdown resolved] renders [resolved] as a Markdown table. Dates are rendered as ["YYYY-MM-DD"]
+    column headers; span values use period end dates and point values use their point dates. Total
+    rows are rendered in bold. *)
+
+val csv : resolved -> string
+(** [csv resolved] renders [resolved] as CSV. Dates are rendered as ["YYYY-MM-DD"] column headers;
+    span values use period end dates and point values use their point dates. Gap rows are preserved.
+*)
