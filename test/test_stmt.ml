@@ -170,6 +170,72 @@ let test_fixed_width_renders_missing_values_as_blanks () =
   let expected = String.concat "\n" [ row "" "2026-02-01"; row "Revenue" "" ] in
   Alcotest.(check string) "fixed width missing" expected (Stmt.fixed_width resolved)
 
+let test_markdown_renders_totals_and_indented_children () =
+  let jan = p (d 2026 1 1) (d 2026 2 1) in
+  let feb = p (d 2026 2 1) (d 2026 3 1) in
+  let resolved =
+    Stmt.RTotal
+      {
+        children =
+          [
+            Stmt.RLine
+              {
+                label = Some "Revenue";
+                values = Some (Stmt.Span_values [ (jan, Some 100.0); (feb, Some 110.0) ]);
+              };
+            Stmt.RLine
+              {
+                label = Some "Costs";
+                values = Some (Stmt.Span_values [ (jan, Some (-30.0)); (feb, Some (-30.0)) ]);
+              };
+          ];
+        label = Some "Gross Profit";
+        values = Some (Stmt.Span_values [ (jan, Some 70.0); (feb, Some 80.0) ]);
+      }
+  in
+  let expected =
+    String.concat "\n"
+      [
+        "|  | 2026-02-01 | 2026-03-01 |";
+        "| --- | --- | --- |";
+        "| &nbsp;&nbsp;Revenue | 100.00 | 110.00 |";
+        "| &nbsp;&nbsp;Costs | -30.00 | -30.00 |";
+        "| **Gross Profit** | **70.00** | **80.00** |";
+        "|  |  |  |";
+      ]
+  in
+  Alcotest.(check string) "markdown total" expected (Stmt.markdown resolved)
+
+let test_markdown_renders_group_spacing_unknown_labels_and_missing_values () =
+  let jan = d 2026 1 1 in
+  let feb = d 2026 2 1 in
+  let period = p jan feb in
+  let resolved =
+    Stmt.RGroup
+      [
+        Stmt.RLine
+          {
+            label = None;
+            values = Some (Stmt.Point_values [ (jan, Some 1000.0); (feb, Some 1100.0) ]);
+          };
+        Stmt.RLine { label = Some ""; values = Some (Stmt.Span_values [ (period, Some 50.0) ]) };
+        Stmt.RLine { label = Some "No | values"; values = None };
+      ]
+  in
+  let expected =
+    String.concat "\n"
+      [
+        "|  | 2026-01-01 | 2026-02-01 |";
+        "| --- | --- | --- |";
+        "|  |  |  |";
+        "| Unknown | 1000.00 | 1100.00 |";
+        "| Unknown |  | 50.00 |";
+        "| No \\| values |  |  |";
+        "|  |  |  |";
+      ]
+  in
+  Alcotest.(check string) "markdown group" expected (Stmt.markdown resolved)
+
 let tests =
   List.map
     (fun (name, f) -> Alcotest.test_case name `Quick f)
@@ -186,4 +252,8 @@ let tests =
         test_fixed_width_renders_point_stub_unknown_labels_and_group_spacing );
       ( "fixed_width renders missing values as blanks",
         test_fixed_width_renders_missing_values_as_blanks );
+      ( "markdown renders totals and indented children",
+        test_markdown_renders_totals_and_indented_children );
+      ( "markdown renders group spacing unknown labels and missing values",
+        test_markdown_renders_group_spacing_unknown_labels_and_missing_values );
     ]

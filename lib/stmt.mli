@@ -61,3 +61,8 @@ val fixed_width : resolved -> string
 (** [fixed_width resolved] renders [resolved] as a fixed-width table. Dates are rendered as
     ["YYYY-MM-DD"] column headers; span values use period end dates and point values use their point
     dates. *)
+
+val markdown : resolved -> string
+(** [markdown resolved] renders [resolved] as a Markdown table. Dates are rendered as ["YYYY-MM-DD"]
+    column headers; span values use period end dates and point values use their point dates. Total
+    rows are rendered in bold. *)
