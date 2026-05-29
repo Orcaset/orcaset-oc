@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orcaset OCaml"
+  short_description: "Build financial models with Orcaset"
+  default_prompt: "Use $orcaset-ocaml to build a financial model with Orcaset."

@@ -1,5 +1,7 @@
 # Orcaset - Financial Models for Computers
 
+> *This library is still experimental and the API is subject to change.*
+
 Orcaset is a financial modeling framework designed to correctly and efficiently orchestrate analysis at any scale. 
 
 Orcaset uses strong typing and runtime safety checks to prevent users and agents from accidentally creating malformed models. Strong protections give end-users confidence that large-scale modifications do not cause hidden errors.
@@ -14,6 +16,12 @@ Add to an `opam` switch.
 
 ```sh
 opam pin add orcaset https://github.com/Orcaset/orcaset-oc.git
+```
+
+Add the `orcaset-ocaml` skill to your coding agent by pasting in the following instructions:
+
+```txt
+Install the skill from https://github.com/Orcaset/orcaset-oc/tree/main/skill/orcaset-ocaml
 ```
 
 ## Orcaset at a glance
